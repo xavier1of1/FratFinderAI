@@ -1,0 +1,6 @@
+﻿BEGIN;
+
+ALTER TABLE chapters
+  ADD COLUMN IF NOT EXISTS field_states JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+COMMIT;

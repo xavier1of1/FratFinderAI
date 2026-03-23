@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fratfinder/contracts/field-job-payload.schema.json",
+  "type": "object",
+  "required": ["chapterSlug", "fieldName", "sourceSlug", "payload"],
+  "properties": {
+    "chapterSlug": { "type": "string", "minLength": 1 },
+    "fieldName": { "type": "string", "minLength": 1 },
+    "sourceSlug": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,22 @@
+{
+  "name": "frat-finder-ai",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.3",
+  "scripts": {
+    "dev:web": "pnpm --filter @fratfinder/web dev",
+    "build:web": "pnpm --filter @fratfinder/web build",
+    "lint": "pnpm --filter @fratfinder/contracts lint && pnpm --filter @fratfinder/web lint",
+    "typecheck": "pnpm --filter @fratfinder/contracts typecheck && pnpm --filter @fratfinder/web typecheck",
+    "test:contracts": "pnpm --filter @fratfinder/contracts test",
+    "test:web": "pnpm --filter @fratfinder/web test",
+    "test:crawler": "pytest services/crawler/src/fratfinder_crawler/tests",
+    "test:integration": "pytest tests/integration -m integration",
+    "test": "pnpm test:contracts && pnpm test:web && pnpm test:crawler",
+    "db:up": "docker compose -f infra/docker/docker-compose.yml up -d postgres adminer",
+    "db:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "db:migrate": "powershell -ExecutionPolicy Bypass -File infra/docker/apply-migrations.ps1",
+    "db:seed": "powershell -ExecutionPolicy Bypass -File infra/docker/apply-seed.ps1",
+    "db:smoke": "docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/tests/schema_smoke.sql"
+  }
+}

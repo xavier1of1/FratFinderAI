@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fratfinder/contracts/canonical-chapter.schema.json",
+  "type": "object",
+  "required": ["fraternitySlug", "sourceSlug", "slug", "name", "country", "chapterStatus", "missingOptionalFields"],
+  "properties": {
+    "fraternitySlug": { "type": "string", "minLength": 1 },
+    "sourceSlug": { "type": "string", "minLength": 1 },
+    "externalId": { "type": ["string", "null"] },
+    "slug": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "universityName": { "type": ["string", "null"] },
+    "city": { "type": ["string", "null"] },
+    "state": { "type": ["string", "null"] },
+    "country": { "type": "string", "minLength": 1 },
+    "websiteUrl": { "type": ["string", "null"], "format": "uri" },
+    "chapterStatus": { "enum": ["active", "inactive", "unknown"] },
+    "missingOptionalFields": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "fieldStates": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

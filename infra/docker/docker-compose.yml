@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: fratfinder-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-fratfinder}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-fratfinder}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer:4
+    container_name: fratfinder-adminer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+    container_name: fratfinder-web
+    env_file:
+      - ../../.env
+    environment:
+      PORT: ${WEB_PORT:-3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    profiles: ["app"]
+
+  crawler:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.crawler
+    container_name: fratfinder-crawler
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["app"]
+
+volumes:
+  postgres-data:

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fratfinder/contracts/chapter-provenance.schema.json",
+  "type": "object",
+  "required": ["sourceSlug", "sourceUrl", "fieldName", "confidence"],
+  "properties": {
+    "sourceSlug": { "type": "string", "minLength": 1 },
+    "sourceUrl": { "type": "string", "format": "uri" },
+    "fieldName": { "type": "string", "minLength": 1 },
+    "fieldValue": { "type": ["string", "null"] },
+    "sourceSnippet": { "type": ["string", "null"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": false
+}

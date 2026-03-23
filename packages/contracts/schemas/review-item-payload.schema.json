@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fratfinder/contracts/review-item-payload.schema.json",
+  "type": "object",
+  "required": ["itemType", "reason", "payload"],
+  "properties": {
+    "itemType": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "sourceSlug": { "type": ["string", "null"] },
+    "chapterSlug": { "type": ["string", "null"] },
+    "extractionNotes": { "type": "string" },
+    "payload": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}
