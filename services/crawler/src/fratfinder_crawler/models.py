@@ -162,6 +162,7 @@ class FieldJob:
     id: str
     chapter_id: str
     chapter_slug: str
+    chapter_name: str
     field_name: str
     payload: dict[str, Any]
     attempts: int
@@ -171,6 +172,9 @@ class FieldJob:
     website_url: str | None
     instagram_url: str | None
     contact_email: str | None
+    fraternity_slug: str | None = None
+    source_id: str | None = None
+    source_slug: str | None = None
     university_name: str | None = None
     crawl_run_id: int | None = None
     field_states: dict[str, str] = field(default_factory=dict)

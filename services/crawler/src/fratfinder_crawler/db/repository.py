@@ -333,7 +333,7 @@ class CrawlerRepository:
                     "chapterSlug": chapter_slug,
                     "fieldName": field_name,
                     "sourceSlug": source_slug,
-                    "payload": {},
+                    "payload": {"sourceSlug": source_slug, "chapterSlug": chapter_slug},
                 }
                 self._contracts.validate_field_job(payload)
                 cursor.execute(
@@ -345,7 +345,7 @@ class CrawlerRepository:
                     DO NOTHING
                     RETURNING id
                     """,
-                    (chapter_id, crawl_run_id, field_name, Jsonb({})),
+                    (chapter_id, crawl_run_id, field_name, Jsonb(payload["payload"])),
                 )
                 if cursor.fetchone() is not None:
                     created += 1
@@ -378,7 +378,16 @@ class CrawlerRepository:
                       AND fj.scheduled_at <= NOW()
                       AND fj.attempts < fj.max_attempts
 {source_filter}
-                    ORDER BY fj.scheduled_at ASC, fj.id ASC
+                    ORDER BY
+                        fj.scheduled_at ASC,
+                        CASE fj.field_name
+                            WHEN 'find_website' THEN 0
+                            WHEN 'verify_website' THEN 1
+                            WHEN 'find_email' THEN 2
+                            WHEN 'find_instagram' THEN 3
+                            ELSE 4
+                        END ASC,
+                        fj.id ASC
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 ),
@@ -409,6 +418,10 @@ class CrawlerRepository:
                     cj.chapter_id,
                     cj.crawl_run_id,
                     c.slug AS chapter_slug,
+                    c.name AS chapter_name,
+                    f.slug AS fraternity_slug,
+                    s.id AS source_id,
+                    s.slug AS source_slug,
                     cj.field_name,
                     cj.payload,
                     cj.attempts,
@@ -422,6 +435,7 @@ class CrawlerRepository:
                     s.base_url AS source_base_url
                 FROM claimed_job cj
                 JOIN chapters c ON c.id = cj.chapter_id
+                JOIN fraternities f ON f.id = c.fraternity_id
                 LEFT JOIN crawl_runs cr ON cr.id = cj.crawl_run_id
                 LEFT JOIN sources s ON s.id = cr.source_id
                 """,
@@ -435,6 +449,7 @@ class CrawlerRepository:
                 id=str(row["id"]),
                 chapter_id=str(row["chapter_id"]),
                 chapter_slug=row["chapter_slug"],
+                chapter_name=row["chapter_name"],
                 field_name=row["field_name"],
                 payload=row["payload"] or {},
                 attempts=int(row["attempts"]),
@@ -444,6 +459,9 @@ class CrawlerRepository:
                 website_url=row["website_url"],
                 instagram_url=row["instagram_url"],
                 contact_email=row["contact_email"],
+                fraternity_slug=row["fraternity_slug"],
+                source_id=str(row["source_id"]) if row["source_id"] is not None else None,
+                source_slug=row["source_slug"],
                 university_name=row["university_name"],
                 crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
                 field_states=row["field_states"] or {},
@@ -481,8 +499,10 @@ class CrawlerRepository:
         chapter_updates: dict[str, str],
         completed_payload: dict[str, Any],
         field_state_updates: dict[str, str] | None = None,
+        provenance_records: list[ProvenanceRecord] | None = None,
     ) -> None:
         field_state_updates = field_state_updates or {}
+        provenance_records = provenance_records or []
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
             if chapter_updates or field_state_updates:
@@ -505,6 +525,46 @@ class CrawlerRepository:
                         "contact_email": chapter_updates.get("contact_email"),
                         "university_name": chapter_updates.get("university_name"),
                         "field_states": Jsonb(field_state_updates),
+                    },
+                )
+
+            for record in provenance_records:
+                payload = asdict(record)
+                self._contracts.validate_provenance(
+                    {
+                        "sourceSlug": payload["source_slug"],
+                        "sourceUrl": payload["source_url"],
+                        "fieldName": payload["field_name"],
+                        "fieldValue": payload["field_value"],
+                        "sourceSnippet": payload["source_snippet"],
+                        "confidence": payload["confidence"],
+                    }
+                )
+                if job.source_id is None or job.crawl_run_id is None:
+                    continue
+                cursor.execute(
+                    """
+                    INSERT INTO chapter_provenance (
+                        chapter_id,
+                        source_id,
+                        crawl_run_id,
+                        field_name,
+                        field_value,
+                        source_url,
+                        source_snippet,
+                        confidence
+                    )
+                    VALUES (%(chapter_id)s, %(source_id)s, %(crawl_run_id)s, %(field_name)s, %(field_value)s, %(source_url)s, %(source_snippet)s, %(confidence)s)
+                    """,
+                    {
+                        "chapter_id": job.chapter_id,
+                        "source_id": job.source_id,
+                        "crawl_run_id": job.crawl_run_id,
+                        "field_name": record.field_name,
+                        "field_value": record.field_value,
+                        "source_url": record.source_url,
+                        "source_snippet": record.source_snippet,
+                        "confidence": record.confidence,
                     },
                 )
 

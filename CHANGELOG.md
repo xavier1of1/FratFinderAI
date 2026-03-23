@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-03-23
+
+### Added
+- Added a simple U.S. state-tile chapter map to the chapters dashboard, with one marker per loaded chapter and live counts that respond to the current table filters.
+- Added per-column chapter filters for name, fraternity, university, state, status, website, Instagram, and email directly in the chapters overview table.
+
+### Changed
+- The chapters page now loads up to 500 rows for the operator view instead of truncating at 200, which fixes silent omission of loaded chapter data in the dashboard.
+- Refactored the chapters dashboard into a small client component so filtering stays instant without moving crawl or database logic into the frontend.
+
+## [0.7.0] - 2026-03-22
+
+### Added
+- Added a new crawler `search/` package with a provider abstraction, a DuckDuckGo HTML client for local development, and optional Brave API support for search-backed enrichment.
+- Added crawler tests covering search-client parsing plus search-driven website, email, and Instagram enrichment behavior.
+
+### Changed
+- Field-job enrichment now falls back to bounded public web search when provenance and chapter-page evidence do not contain chapter website, email, or Instagram data.
+- Search-driven field jobs now preserve provenance for discovered values, use chapter/fraternity/school-aware query generation, and keep low-confidence matches in review instead of writing them directly.
+- Search-backed enrichment can be configured through `CRAWLER_SEARCH_*` environment variables documented in the README and `.env.example`.
+- The local search default is now `bing_html`, and DuckDuckGo HTML now falls back to Bing on anomaly pages and request-level failures instead of stalling jobs on repeated timeout/requeue loops.
+- Search enrichment now applies stricter fraternity/school/chapter relevance checks before fetching or writing search-derived candidates, which keeps low-quality Bing/Reddit/Stack Overflow matches from polluting chapter contact fields.
+- Website enrichment now follows relevant university directory pages and prefers linked chapter sites over directory listing URLs when both appear credible.
+- Search query generation now de-emphasizes generic Greek-letter chapter names and adds school/domain-focused variants so fraternity web search is less likely to be poisoned by unrelated `sigma` slang results.
+- Search provider selection now supports an `auto` mode that prefers Brave Search API when a key is configured and otherwise falls back to Bing HTML, keeping local enrichment runnable while improving production search quality.
+
 ## [0.6.0] - 2026-03-22
 
 ### Added
@@ -15,6 +41,8 @@ All notable changes to this project will be documented in this file.
 - Shared contracts now accept chapter `fieldStates` and review-item `extractionNotes`, keeping crawler and dashboard schemas aligned.
 - Local Docker Postgres now defaults to port `5433` in the example configuration to avoid silently colliding with an existing host Postgres on `5432`.
 - Adaptive source analysis now treats explicit single chapter-card pages as valid directory inputs, which keeps one-record local demo crawls from being routed to review by mistake.
+- Field-job enrichment now deobfuscates emails, scans chapter website HTML for `mailto:` and Instagram links, and prioritizes website discovery before downstream contact/social jobs.
+- `find_website` no longer falls back to the fraternity base URL, preventing bad chapter website writes when a source lacks chapter-specific contact evidence.
 ## [0.5.0] - 2026-03-22
 
 ### Added

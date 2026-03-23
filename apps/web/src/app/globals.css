@@ -194,3 +194,99 @@ th {
     font-size: 1.45rem;
   }
 }
+
+
+.chaptersStack {
+  display: grid;
+  gap: 1rem;
+}
+
+.chaptersHeaderRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.mapNote {
+  margin: 0.25rem 0 0;
+}
+
+.mapLegend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.stateGridMap {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.stateTile {
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 0.45rem;
+}
+
+.stateTile.hasChapters {
+  background: linear-gradient(135deg, #f8fbf8, #edf7f1);
+  border-color: var(--info-border);
+}
+
+.stateTileHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 0.35rem;
+}
+
+.stateMarkers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.22rem;
+  align-content: flex-start;
+}
+
+.markerDot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--primary);
+  display: inline-block;
+}
+
+.filterRow th {
+  padding-top: 0.35rem;
+  padding-bottom: 0.75rem;
+}
+
+.filterInput,
+.filterSelect {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  background: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+}
+
+.filterInput::placeholder {
+  color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .stateGridMap {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}

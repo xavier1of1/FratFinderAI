@@ -9,6 +9,7 @@ from fratfinder_crawler.db.repository import CrawlerRepository
 from fratfinder_crawler.field_jobs import FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
+from fratfinder_crawler.search import SearchClient
 from fratfinder_crawler.models import CrawlMetrics
 from fratfinder_crawler.orchestration import CrawlOrchestrator
 
@@ -72,6 +73,8 @@ class CrawlService:
                 worker_id=self._settings.crawler_field_job_worker_id,
                 base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
                 source_slug=source_slug,
+                search_client=SearchClient(self._settings),
+                max_search_pages=self._settings.crawler_search_max_pages_per_job,
             )
             result = engine.process(limit=limit)
 

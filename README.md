@@ -110,6 +110,21 @@ Process missing-field jobs for one source only:
 python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --limit 25
 ```
 
+### Search-Backed Enrichment
+
+When chapter website, email, or Instagram data is not present on the national source page, field jobs can now fall back to public web search.
+
+Relevant env settings:
+
+- `CRAWLER_SEARCH_ENABLED=true` enables search-backed enrichment for missing fields.
+- `CRAWLER_SEARCH_PROVIDER=auto` is now the recommended default: it prefers Brave Search API when `CRAWLER_SEARCH_BRAVE_API_KEY` is set and otherwise falls back to Bing HTML.
+- `CRAWLER_SEARCH_PROVIDER=bing_html` remains available for explicit local-only testing when you want to bypass Brave.
+- `CRAWLER_SEARCH_PROVIDER=duckduckgo_html` remains available and now auto-falls back to Bing when DuckDuckGo returns anomaly pages or transport-level failures.
+- `CRAWLER_SEARCH_PROVIDER=brave_api` can be used explicitly if you want Brave only; when Brave errors, the crawler falls back to Bing instead of stalling jobs.
+- `CRAWLER_SEARCH_MAX_RESULTS` and `CRAWLER_SEARCH_MAX_PAGES_PER_JOB` bound how aggressively each job searches and fetches candidate pages.
+
+The crawler only writes high-confidence matches directly. Lower-confidence search candidates are routed into review instead of silently mutating chapter records.
+
 Check crawler probes:
 
 ```bash
