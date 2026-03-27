@@ -17,7 +17,8 @@ const navItems = [
   { href: "/chapters", label: "Chapters" },
   { href: "/runs", label: "Crawl Runs" },
   { href: "/review-items", label: "Review Queue" },
-  { href: "/benchmarks", label: "Benchmarks" }
+  { href: "/benchmarks", label: "Benchmarks" },
+  { href: "/fraternity-intake", label: "Fraternity Intake" }
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

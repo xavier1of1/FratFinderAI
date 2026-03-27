@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -24,6 +24,10 @@ _API_HINT_PATTERNS = (
 
 def detect_embedded_data(html: str, source_url: str | None = None) -> EmbeddedDataResult:
     soup = BeautifulSoup(html, "html.parser")
+
+    google_maps_api_url = _detect_google_maps_kml_url(soup)
+    if google_maps_api_url:
+        return EmbeddedDataResult(found=True, data_type="api_hint", raw_data=None, api_url=google_maps_api_url)
 
     json_ld_payloads = _extract_json_ld_payloads(soup)
     if json_ld_payloads:
@@ -50,6 +54,22 @@ def detect_embedded_data(html: str, source_url: str | None = None) -> EmbeddedDa
             return EmbeddedDataResult(found=True, data_type="script_json", raw_data=[], api_url=None)
 
     return EmbeddedDataResult(found=False, data_type=None, raw_data=None, api_url=None)
+
+
+def _detect_google_maps_kml_url(soup: BeautifulSoup) -> str | None:
+    for iframe in soup.select("iframe[src]"):
+        src = iframe.get("src")
+        if not src:
+            continue
+        lowered = src.lower()
+        if "google.com/maps/d/" not in lowered and "maps.google.com/maps/d/" not in lowered:
+            continue
+        parsed = urlparse(src)
+        mid = parse_qs(parsed.query).get("mid", [None])[0]
+        if not mid:
+            continue
+        return f"https://www.google.com/maps/d/kml?mid={mid}&forcekml=1"
+    return None
 
 
 def _extract_json_ld_payloads(soup: BeautifulSoup) -> list[dict]:

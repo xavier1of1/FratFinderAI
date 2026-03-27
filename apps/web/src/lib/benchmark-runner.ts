@@ -112,10 +112,38 @@ async function runFieldJobCycle(config: BenchmarkRunConfig): Promise<ProcessFiel
     let stdout = "";
     let stderr = "";
     let didTimeout = false;
+    let settled = false;
+
+    const settle = (callback: (value: ProcessFieldJobResult | Error) => void, value: ProcessFieldJobResult | Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      callback(value);
+    };
+
+    const forceKillChild = () => {
+      if (child.killed) {
+        return;
+      }
+      if (process.platform === "win32" && child.pid) {
+        spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+          stdio: "ignore"
+        }).unref();
+        return;
+      }
+      child.kill("SIGKILL");
+    };
 
     const timeout = setTimeout(() => {
       didTimeout = true;
-      child.kill();
+      forceKillChild();
+      settle(
+        (value) => reject(value as Error),
+        new Error(`Benchmark cycle timed out after ${timeoutMs}ms`)
+      );
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -127,26 +155,42 @@ async function runFieldJobCycle(config: BenchmarkRunConfig): Promise<ProcessFiel
     });
 
     child.on("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
+      settle(
+        (value) => reject(value as Error),
+        error
+      );
     });
 
     child.on("close", (code) => {
-      clearTimeout(timeout);
+      if (settled) {
+        return;
+      }
       if (didTimeout) {
-        reject(new Error(`Benchmark cycle timed out after ${timeoutMs}ms`));
+        settle(
+          (value) => reject(value as Error),
+          new Error(`Benchmark cycle timed out after ${timeoutMs}ms`)
+        );
         return;
       }
 
       if (code !== 0) {
-        reject(new Error(`process-field-jobs exited with code ${code}: ${stderr || stdout}`));
+        settle(
+          (value) => reject(value as Error),
+          new Error(`process-field-jobs exited with code ${code}: ${stderr || stdout}`)
+        );
         return;
       }
 
       try {
-        resolve(parseProcessFieldJobsOutput(`${stdout}\n${stderr}`));
+        settle(
+          (value) => resolve(value as ProcessFieldJobResult),
+          parseProcessFieldJobsOutput(`${stdout}\n${stderr}`)
+        );
       } catch (error) {
-        reject(error);
+        settle(
+          (value) => reject(value as Error),
+          error instanceof Error ? error : new Error(String(error))
+        );
       }
     });
   });
@@ -178,14 +222,6 @@ function buildSummary(params: {
 }
 
 async function executeBenchmarkRun(runId: string): Promise<void> {
-  await markBenchmarkRunStarted(runId);
-
-  const run = await getBenchmarkRun(runId);
-  if (!run) {
-    throw new Error(`Benchmark run ${runId} not found`);
-  }
-
-  const config = run.config;
   const startedAtMs = Date.now();
   const samples: BenchmarkCycleSample[] = [];
   const totals: BenchmarkTotals = {
@@ -193,15 +229,30 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
     requeued: 0,
     failedTerminal: 0
   };
-
-  const startSnapshot = await getFieldJobStatusSnapshot({
-    fieldName: config.fieldName,
-    sourceSlug: config.sourceSlug
-  });
-
+  let startSnapshot: BenchmarkQueueSnapshot = {
+    queued: 0,
+    running: 0,
+    done: 0,
+    failed: 0,
+    total: 0
+  };
   let endSnapshot = startSnapshot;
 
   try {
+    await markBenchmarkRunStarted(runId);
+
+    const run = await getBenchmarkRun(runId);
+    if (!run) {
+      throw new Error(`Benchmark run ${runId} not found`);
+    }
+
+    const config = run.config;
+    startSnapshot = await getFieldJobStatusSnapshot({
+      fieldName: config.fieldName,
+      sourceSlug: config.sourceSlug
+    });
+    endSnapshot = startSnapshot;
+
     for (let cycle = 1; cycle <= config.cycles; cycle += 1) {
       const cycleStartedAt = new Date().toISOString();
       const cycleStartedAtMs = Date.now();
@@ -248,20 +299,24 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
       samples
     });
   } catch (error) {
-    const summary = buildSummary({
-      startedAtMs,
-      totals,
-      cyclesCompleted: samples.length,
-      startSnapshot,
-      endSnapshot
-    });
+    try {
+      const summary = buildSummary({
+        startedAtMs,
+        totals,
+        cyclesCompleted: samples.length,
+        startSnapshot,
+        endSnapshot
+      });
 
-    await failBenchmarkRun({
-      id: runId,
-      error: error instanceof Error ? error.message : String(error),
-      summary,
-      samples
-    });
+      await failBenchmarkRun({
+        id: runId,
+        error: error instanceof Error ? error.message : String(error),
+        summary,
+        samples
+      });
+    } catch {
+      // Keep the scheduler alive even if DB persistence fails unexpectedly.
+    }
   }
 }
 

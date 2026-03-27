@@ -12,10 +12,11 @@ from fratfinder_crawler.search.client import SearchClient, SearchUnavailableErro
 def test_duckduckgo_html_search_parses_results():
     html = """
     <html><body>
-      <div class="result">
-        <a class="result__a" href="https://example.org/chapter">Sigma Chi at Demo University</a>
-        <a class="result__snippet">Official chapter website</a>
-      </div>
+      <table>
+        <tr>
+          <td><a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fchapter">Sigma Chi at Demo University</a></td>
+        </tr>
+      </table>
     </body></html>
     """
     client = SearchClient(
@@ -72,7 +73,7 @@ def test_duckduckgo_anomaly_falls_back_to_bing_html():
 
     assert len(results) == 1
     assert results[0].provider == "bing_html"
-    assert calls[0].startswith("https://html.duckduckgo.com")
+    assert calls[0].startswith("https://lite.duckduckgo.com")
     assert calls[1].startswith("https://www.bing.com")
 
 
@@ -99,8 +100,49 @@ def test_duckduckgo_request_exception_falls_back_to_bing_html():
 
     assert len(results) == 1
     assert results[0].provider == "bing_html"
-    assert calls[0].startswith("https://html.duckduckgo.com")
+    assert calls[0].startswith("https://lite.duckduckgo.com")
     assert calls[1].startswith("https://www.bing.com")
+
+
+def test_bing_low_signal_results_fall_back_to_duckduckgo():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        if "bing.com" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text=(
+                    "<html><body><ol>"
+                    '<li class="b_algo"><h2><a href="https://www.reddit.com/r/EnglishLearning/comments/example">What does sigma mean</a></h2><div class="b_caption"><p>sigma slang thread</p></div></li>'
+                    "</ol></body></html>"
+                ),
+                raise_for_status=lambda: None,
+            )
+        return SimpleNamespace(
+            status_code=200,
+            text="""
+            <html><body>
+              <table>
+                <tr><td><a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.instagram.com%2Fsigmachiuchicago%2F">UChicago Sigma Chi (@sigmachiuchicago) - Instagram</a></td></tr>
+              </table>
+            </body></html>
+            """,
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        get_requester=requester,
+    )
+
+    results = client.search('"sigma chi" University of Chicago instagram')
+
+    assert len(results) == 1
+    assert results[0].provider == "duckduckgo_html"
+    assert results[0].url == "https://www.instagram.com/sigmachiuchicago/"
+    assert calls[0].startswith("https://www.bing.com")
+    assert calls[1].startswith("https://lite.duckduckgo.com")
 
 
 def test_bing_redirect_url_is_decoded():
@@ -197,3 +239,82 @@ def test_search_client_caches_duplicate_queries():
 
     assert first == second
     assert len(calls) == 1
+
+
+def test_search_client_does_not_cache_empty_results_by_default():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        return SimpleNamespace(
+            status_code=200,
+            text="<html><body><ol></ol></body></html>",
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        get_requester=requester,
+    )
+
+    first = client.search("sigma chi demo university website")
+    second = client.search("sigma chi demo university website")
+
+    assert first == []
+    assert second == []
+    assert len(calls) == 4
+
+
+def test_search_client_can_cache_empty_results_when_enabled():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        return SimpleNamespace(
+            status_code=200,
+            text="<html><body><ol></ol></body></html>",
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="bing_html",
+            CRAWLER_SEARCH_CACHE_EMPTY_RESULTS=True,
+        ),
+        get_requester=requester,
+    )
+
+    first = client.search("sigma chi demo university website")
+    second = client.search("sigma chi demo university website")
+
+    assert first == []
+    assert second == []
+    assert len(calls) == 2
+
+
+def test_search_client_opens_circuit_after_repeated_provider_failures():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        raise requests.ConnectionError("bing unavailable")
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="bing_html",
+            CRAWLER_SEARCH_CIRCUIT_BREAKER_FAILURES=2,
+            CRAWLER_SEARCH_CIRCUIT_BREAKER_COOLDOWN_SECONDS=60,
+        ),
+        get_requester=requester,
+    )
+
+    with pytest.raises(requests.ConnectionError):
+        client.search("sigma chi demo university website")
+    with pytest.raises(requests.ConnectionError):
+        client.search("sigma chi demo university website")
+    with pytest.raises(SearchUnavailableError):
+        client.search("sigma chi demo university website")
+
+    assert len(calls) == 2

@@ -229,6 +229,7 @@ class CrawlOrchestrator:
         llm_calls_used = state.get("llm_calls_used", 0)
         extraction_notes: str | None = None
         page_level_confidence: float | None = None
+        strategy_used = plan.primary_strategy
 
         if plan.primary_strategy == "review":
             review_items.append(
@@ -408,15 +409,40 @@ class CrawlOrchestrator:
 
             extracted = llm_result.records
         else:
-            adapter = self._registry.get(plan.primary_strategy)
-            if adapter is None:
+            attempted_strategies: list[str] = []
+            extracted = []
+            strategy_sequence = [plan.primary_strategy] + [
+                strategy
+                for strategy in plan.fallback_strategies
+                if strategy not in {"review", "llm"}
+            ]
+            for strategy_name in strategy_sequence:
+                adapter = self._registry.get(strategy_name)
+                if adapter is None:
+                    continue
+                attempted_strategies.append(strategy_name)
+                candidate_records = adapter.parse(
+                    state["html"],
+                    source.list_url,
+                    api_url=state["embedded_data"].api_url if state.get("embedded_data") else None,
+                    http_client=self._http,
+                )
+                if candidate_records:
+                    extracted = candidate_records
+                    strategy_used = strategy_name
+                    break
+
+            if not attempted_strategies:
                 review_items.append(
                     ReviewItemCandidate(
                         item_type="unsupported_strategy",
                         reason=f"No adapter registered for strategy={plan.primary_strategy}",
                         source_slug=source.source_slug,
                         chapter_slug=None,
-                        payload={"strategy": plan.primary_strategy},
+                        payload={
+                            "strategy": plan.primary_strategy,
+                            "fallbackStrategies": plan.fallback_strategies,
+                        },
                     )
                 )
                 return {
@@ -429,20 +455,13 @@ class CrawlOrchestrator:
                     "extraction_notes": extraction_notes,
                 }
 
-            extracted = adapter.parse(
-                state["html"],
-                source.list_url,
-                api_url=state["embedded_data"].api_url if state.get("embedded_data") else None,
-                http_client=self._http,
-            )
-
         metrics.records_seen += len(extracted)
         log_event(
             LOGGER,
             "records_extracted",
             run_id=run_id,
             source_slug=source.source_slug,
-            strategy=plan.primary_strategy,
+            strategy=strategy_used,
             records_seen=len(extracted),
             llm_calls_used=llm_calls_used,
             page_level_confidence=page_level_confidence,
@@ -451,9 +470,12 @@ class CrawlOrchestrator:
         final_status = state.get("final_status", "succeeded")
         if not extracted:
             payload = {
-                "strategy": plan.primary_strategy,
+                "strategy": strategy_used,
                 "pageType": state["classification"].page_type,
             }
+            if strategy_used != plan.primary_strategy:
+                payload["initialStrategy"] = plan.primary_strategy
+                payload["fallbackStrategies"] = plan.fallback_strategies
             if extraction_notes:
                 payload["extractionNotes"] = extraction_notes
             if page_level_confidence is not None:
@@ -461,7 +483,7 @@ class CrawlOrchestrator:
             review_items.append(
                 ReviewItemCandidate(
                     item_type="empty_extraction",
-                    reason=f"Strategy {plan.primary_strategy} returned no chapter records",
+                    reason=f"Strategy {strategy_used} returned no chapter records",
                     source_slug=source.source_slug,
                     chapter_slug=None,
                     payload=payload,
@@ -477,13 +499,14 @@ class CrawlOrchestrator:
             "llm_calls_used": llm_calls_used,
             "page_level_confidence": page_level_confidence,
             "extraction_notes": extraction_notes,
+            "strategy_used": strategy_used,
         }
 
     def _validate_records(self, state: CrawlGraphState) -> dict:
         source = state["source"]
         valid_records = []
         review_items = list(state.get("review_items", []))
-        strategy = state.get("extraction_plan").primary_strategy if state.get("extraction_plan") else None
+        strategy = state.get("strategy_used") or (state.get("extraction_plan").primary_strategy if state.get("extraction_plan") else None)
 
         for record in state.get("extracted", []):
             if not record.name or not record.name.strip() or record.source_confidence <= 0.0:
@@ -640,7 +663,8 @@ class CrawlOrchestrator:
         page_analysis_payload = _to_serializable(state.get("page_analysis"))
         classification_payload = _to_serializable(state.get("classification"))
         extraction_metadata = {
-            "strategy_used": state.get("extraction_plan").primary_strategy if state.get("extraction_plan") else None,
+            "strategy_used": state.get("strategy_used")
+            or (state.get("extraction_plan").primary_strategy if state.get("extraction_plan") else None),
             "page_level_confidence": state.get("page_level_confidence"),
             "llm_calls_used": state.get("llm_calls_used", 0),
             "extraction_notes": state.get("extraction_notes"),

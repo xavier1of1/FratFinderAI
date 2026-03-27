@@ -20,6 +20,9 @@ _MAP_HINTS = (
     "locator",
     "leaflet",
     "google.maps",
+    "google.com/maps",
+    "maps.google.com",
+    "maps/d/u/",
     "mapbox",
     "wpsl",
 )
@@ -91,7 +94,10 @@ def _has_map_widget(soup: BeautifulSoup, script_text: str) -> bool:
 
     joined_attrs = " ".join(attr_values)
     lowered_script = script_text.lower()
-    return any(hint in joined_attrs or hint in lowered_script for hint in _MAP_HINTS)
+    if any(hint in joined_attrs or hint in lowered_script for hint in _MAP_HINTS):
+        return True
+    iframe_srcs = [str(node.get("src", "")).lower() for node in soup.select("iframe[src]")]
+    return any("google.com/maps" in src or "maps.google.com" in src for src in iframe_srcs)
 
 
 def _has_pagination(soup: BeautifulSoup) -> bool:

@@ -133,6 +133,24 @@ def test_embedded_data_detector_flags_json_ld_chapter_data():
     assert len(result.raw_data) == 2
 
 
+def test_embedded_data_detector_extracts_google_maps_kml_api_hint():
+    html = """
+    <html>
+      <body>
+        <iframe src="https://www.google.com/maps/d/u/0/embed?mid=1497z-lFQzqOBrDnwB3z0r_qiqNU"></iframe>
+      </body>
+    </html>
+    """
+
+    result = detect_embedded_data(html, "https://example.org/chapters")
+
+    assert result.found is True
+    assert result.data_type == "api_hint"
+    assert result.api_url is not None
+    assert "google.com/maps/d/kml" in result.api_url
+    assert "mid=1497z-lFQzqOBrDnwB3z0r_qiqNU" in result.api_url
+
+
 
 def test_strategy_selector_prefers_known_directory_over_script_json_false_positive():
     page_analysis = PageAnalysis(

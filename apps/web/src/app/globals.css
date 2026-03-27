@@ -628,3 +628,26 @@ form {
     grid-template-columns: 1fr;
   }
 }
+
+.isActiveFilter {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+
+.status.running,
+.status.queued,
+.status.triaged,
+.status.draft {
+  border-color: var(--info-border);
+  background: var(--info-bg);
+  color: var(--primary-strong);
+}
+
+.status.canceled,
+.status.ignored {
+  border-color: var(--border);
+  background: var(--surface-alt);
+  color: var(--muted);
+}
+

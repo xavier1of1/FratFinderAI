@@ -138,3 +138,83 @@ export interface BenchmarkQueueSnapshot {
   failed: number;
   total: number;
 }
+
+export type FraternityCrawlRequestStatus = "draft" | "queued" | "running" | "succeeded" | "failed" | "canceled";
+
+export type FraternityCrawlRequestStage =
+  | "discovery"
+  | "awaiting_confirmation"
+  | "crawl_run"
+  | "enrichment"
+  | "completed"
+  | "failed";
+
+export interface FraternityCrawlRequestConfig {
+  fieldJobWorkers: number;
+  fieldJobLimitPerCycle: number;
+  maxEnrichmentCycles: number;
+  pauseMs: number;
+}
+
+export interface FraternityDiscoveryCandidate {
+  title: string;
+  url: string;
+  snippet: string;
+  provider: string;
+  rank: number;
+  score: number;
+}
+
+export interface FraternityCrawlProgress {
+  discovery?: {
+    sourceUrl: string | null;
+    sourceConfidence: number;
+    confidenceTier: string;
+    candidates: FraternityDiscoveryCandidate[];
+  };
+  crawlRun?: {
+    id: number | null;
+    status: string | null;
+    pagesProcessed: number;
+    recordsSeen: number;
+    recordsUpserted: number;
+    reviewItemsCreated: number;
+    fieldJobsCreated: number;
+  };
+  fields?: {
+    find_website: Record<string, number>;
+    find_email: Record<string, number>;
+    find_instagram: Record<string, number>;
+  };
+  totals?: Record<string, number>;
+}
+
+export interface FraternityCrawlRequestEvent {
+  id: number;
+  requestId: string;
+  eventType: string;
+  message: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface FraternityCrawlRequest {
+  id: string;
+  fraternityName: string;
+  fraternitySlug: string;
+  sourceSlug: string | null;
+  sourceUrl: string | null;
+  sourceConfidence: number | null;
+  status: FraternityCrawlRequestStatus;
+  stage: FraternityCrawlRequestStage;
+  scheduledFor: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  priority: number;
+  config: FraternityCrawlRequestConfig;
+  progress: FraternityCrawlProgress;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  events: FraternityCrawlRequestEvent[];
+}

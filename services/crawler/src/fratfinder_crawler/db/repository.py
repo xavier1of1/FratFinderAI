@@ -74,6 +74,69 @@ class CrawlerRepository:
             for row in rows
         ]
 
+    def upsert_fraternity(self, slug: str, name: str, nic_affiliated: bool = True) -> tuple[str, str]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO fraternities (slug, name, nic_affiliated)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (slug)
+                DO UPDATE SET
+                    name = EXCLUDED.name,
+                    nic_affiliated = EXCLUDED.nic_affiliated,
+                    updated_at = NOW()
+                RETURNING id, slug
+                """,
+                (slug, name, nic_affiliated),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return str(row["id"]), row["slug"]
+
+    def upsert_source(
+        self,
+        *,
+        fraternity_id: str,
+        slug: str,
+        base_url: str,
+        list_path: str | None = None,
+        source_type: str = "unsupported",
+        parser_key: str = "unsupported",
+        active: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[str, str]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO sources (fraternity_id, slug, source_type, parser_key, base_url, list_path, active, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (slug)
+                DO UPDATE SET
+                    fraternity_id = EXCLUDED.fraternity_id,
+                    source_type = EXCLUDED.source_type,
+                    parser_key = EXCLUDED.parser_key,
+                    base_url = EXCLUDED.base_url,
+                    list_path = EXCLUDED.list_path,
+                    active = EXCLUDED.active,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = NOW()
+                RETURNING id, slug
+                """,
+                (
+                    fraternity_id,
+                    slug,
+                    source_type,
+                    parser_key,
+                    base_url,
+                    list_path,
+                    active,
+                    Jsonb(metadata or {}),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return str(row["id"]), row["slug"]
+
     def start_crawl_run(self, source_id: str) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -221,6 +284,100 @@ class CrawlerRepository:
                     "contact_email": chapter.contact_email,
                     "chapter_status": chapter.chapter_status,
                     "field_states": Jsonb(chapter.field_states),
+                },
+            )
+            chapter_id = str(cursor.fetchone()["id"])
+        self._connection.commit()
+        return chapter_id
+
+    def upsert_chapter_discovery(self, source: SourceRecord, chapter: NormalizedChapter) -> str:
+        self._contracts.validate_chapter(
+            {
+                "fraternitySlug": chapter.fraternity_slug,
+                "sourceSlug": chapter.source_slug,
+                "externalId": chapter.external_id,
+                "slug": chapter.slug,
+                "name": chapter.name,
+                "universityName": chapter.university_name,
+                "city": chapter.city,
+                "state": chapter.state,
+                "country": chapter.country,
+                "websiteUrl": chapter.website_url,
+                "chapterStatus": chapter.chapter_status,
+                "missingOptionalFields": chapter.missing_optional_fields,
+                "fieldStates": chapter.field_states,
+            }
+        )
+        field_states = {key: value for key, value in (chapter.field_states or {}).items() if value == "found"}
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO chapters (
+                    fraternity_id,
+                    external_id,
+                    slug,
+                    name,
+                    university_name,
+                    city,
+                    state,
+                    country,
+                    website_url,
+                    instagram_url,
+                    contact_email,
+                    chapter_status,
+                    field_states,
+                    normalized_address,
+                    first_seen_at,
+                    last_seen_at
+                )
+                VALUES (
+                    %(fraternity_id)s,
+                    %(external_id)s,
+                    %(slug)s,
+                    %(name)s,
+                    %(university_name)s,
+                    %(city)s,
+                    %(state)s,
+                    %(country)s,
+                    %(website_url)s,
+                    %(instagram_url)s,
+                    %(contact_email)s,
+                    %(chapter_status)s,
+                    %(field_states)s,
+                    '{}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (fraternity_id, slug)
+                DO UPDATE SET
+                    external_id = COALESCE(chapters.external_id, EXCLUDED.external_id),
+                    name = COALESCE(chapters.name, EXCLUDED.name),
+                    university_name = COALESCE(chapters.university_name, EXCLUDED.university_name),
+                    city = COALESCE(chapters.city, EXCLUDED.city),
+                    state = COALESCE(chapters.state, EXCLUDED.state),
+                    country = COALESCE(chapters.country, EXCLUDED.country),
+                    website_url = COALESCE(chapters.website_url, EXCLUDED.website_url),
+                    instagram_url = COALESCE(chapters.instagram_url, EXCLUDED.instagram_url),
+                    contact_email = COALESCE(chapters.contact_email, EXCLUDED.contact_email),
+                    chapter_status = COALESCE(chapters.chapter_status, EXCLUDED.chapter_status),
+                    field_states = COALESCE(chapters.field_states, '{}'::jsonb) || EXCLUDED.field_states,
+                    last_seen_at = NOW()
+                RETURNING id
+                """,
+                {
+                    "fraternity_id": source.fraternity_id,
+                    "external_id": chapter.external_id,
+                    "slug": chapter.slug,
+                    "name": chapter.name,
+                    "university_name": chapter.university_name,
+                    "city": chapter.city,
+                    "state": chapter.state,
+                    "country": chapter.country,
+                    "website_url": chapter.website_url,
+                    "instagram_url": chapter.instagram_url,
+                    "contact_email": chapter.contact_email,
+                    "chapter_status": chapter.chapter_status,
+                    "field_states": Jsonb(field_states),
                 },
             )
             chapter_id = str(cursor.fetchone()["id"])
@@ -399,6 +556,7 @@ class CrawlerRepository:
 {field_name_filter}
  {email_dependency_filter}
                     ORDER BY
+                        fj.priority DESC,
                         fj.scheduled_at ASC,
                         CASE fj.field_name
                             WHEN 'find_website' THEN 0
@@ -431,6 +589,7 @@ class CrawlerRepository:
                         fj.payload,
                         fj.attempts,
                         fj.max_attempts,
+                        fj.priority,
                         fj.claim_token
                 )
                 SELECT
@@ -446,6 +605,7 @@ class CrawlerRepository:
                     cj.payload,
                     cj.attempts,
                     cj.max_attempts,
+                    cj.priority,
                     cj.claim_token,
                     c.website_url,
                     c.instagram_url,
@@ -474,6 +634,7 @@ class CrawlerRepository:
                 payload=row["payload"] or {},
                 attempts=int(row["attempts"]),
                 max_attempts=int(row["max_attempts"]),
+                priority=int(row["priority"]),
                 claim_token=str(row["claim_token"]),
                 source_base_url=row["source_base_url"],
                 website_url=row["website_url"],
@@ -502,6 +663,22 @@ class CrawlerRepository:
             )
             rows = cursor.fetchall()
         return [row["source_snippet"] for row in rows if row["source_snippet"]]
+
+    def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT 1
+                FROM field_jobs
+                WHERE chapter_id = %s
+                  AND field_name = %s
+                  AND status IN ('queued', 'running')
+                  AND attempts < max_attempts
+                LIMIT 1
+                """,
+                (chapter_id, field_name),
+            )
+            return cursor.fetchone() is not None
 
     def create_field_job_review_item(self, job: FieldJob, candidate: ReviewItemCandidate) -> None:
         source_id: str | None = None
@@ -688,6 +865,9 @@ class CrawlerRepository:
             "school_match": FIELD_JOB_VERIFY_SCHOOL,
         }
         return mapping.get(raw_name.lower(), raw_name.lower())
+
+
+
 
 
 

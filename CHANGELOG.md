@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-03-27
+
+### Added
+- Added Fraternity Intake `Discovery Review` UI controls so operators can inspect ranked source candidates, choose a candidate URL, or paste a manual source override before confirm.
+- Added request detail metadata cards for `Chapters Discovered` and `Field Jobs Created` so intake triage can quickly distinguish valid crawls from zero-yield runs.
+- Added curated source hint support in source discovery for high-ambiguity fraternity names (initially `Phi Gamma Delta` -> `https://phigam.org/about/overview/our-chapters/`).
+- Added discovery tests for travel/PHI noise rejection, host-hint query generation, and curated source fallback behavior.
+
+### Changed
+- Intake confirm now uses a safer source resolution chain: explicit override -> stored source URL -> discovered candidate URL.
+- Intake create flow now auto-queues requests for both `high` and `medium` confidence discoveries (when a source URL exists), reducing unnecessary manual confirmations.
+- Intake runner now fails fast when crawl ingest discovers zero chapters instead of allowing a false `succeeded` request.
+- Embedded-data detection and locator extraction now support Google My Maps KML-based chapter directories, improving chapter ingestion from map-backed national directory pages.
+
+### Fixed
+- Fixed a legacy false-success intake outcome where requests could complete with `recordsSeen = 0` and `fieldJobsCreated = 0`.
+- Fixed a Fraternity Intake runtime error on confidence rendering by normalizing confidence formatting in the UI.
+
+## [0.9.0] - 2026-03-27
+
+### Added
+- Added a new Fraternity Intake workflow with a dedicated dashboard tab (`/fraternity-intake`) for scheduling staged crawl requests from a fraternity name.
+- Added `fraternity_crawl_requests` and `fraternity_crawl_request_events` tables, plus `field_jobs.priority` support, via `0007_fraternity_crawl_requests.sql`.
+- Added crawler CLI source discovery command: `python -m fratfinder_crawler.cli discover-source --fraternity-name "<name>"`.
+- Added web APIs for intake lifecycle management: list/create requests, request detail/confirm/cancel/reschedule, and expedite.
+- Added an in-app staged request runner that executes crawl + bounded enrichment, records timeline events, and updates live progress snapshots.
+
+### Changed
+- Field-job claiming now prioritizes high-priority queued jobs (`priority DESC`) before scheduled time ordering, enabling source-level expedite behavior.
+- Request execution now reconciles stale running states and supports scheduled start times with immediate expedite override.
+
 ## [0.8.0] - 2026-03-23
 
 ### Added
@@ -21,6 +52,8 @@ All notable changes to this project will be documented in this file.
 - Field-job processing now supports concurrent workers, with an explicit worker cap in settings/CLI so large source batches can scale out to multiple `SKIP LOCKED` workers safely.
 - Queue operations now support field-type targeting end-to-end, which lets us run Instagram-only throughput batches without spending slots on website/email jobs.
 - Field-job processing can now target a single job type from the CLI, and Instagram search skips low-signal result hosts plus unnecessary page fetches for direct Instagram hits so focused batches run faster and waste fewer searches.
+- Search reliability now includes a provider circuit breaker (configurable failure threshold/cooldown) plus optional empty-result cache control so workers avoid stale-miss amplification and fail fast during provider/network outages.
+- Search enrichment now emits structured candidate-rejection summaries per no-candidate job, adds a minimum no-candidate backoff guard to prevent zero-cooldown hot loops, broadens Instagram query formats (while preserving handle-based wins), and strengthens trusted school/IFC directory website extraction for safer higher-yield candidate acceptance.
 
 ## [0.7.0] - 2026-03-22
 

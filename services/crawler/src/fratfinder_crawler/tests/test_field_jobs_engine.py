@@ -12,9 +12,15 @@ from fratfinder_crawler.search import SearchResult, SearchUnavailableError
 
 
 class FakeRepository:
-    def __init__(self, jobs: list[FieldJob], snippets_by_chapter: dict[str, list[str]]):
+    def __init__(
+        self,
+        jobs: list[FieldJob],
+        snippets_by_chapter: dict[str, list[str]],
+        pending_field_jobs: set[tuple[str, str]] | None = None,
+    ):
         self.jobs = jobs
         self.snippets_by_chapter = snippets_by_chapter
+        self.pending_field_jobs = pending_field_jobs or set()
         self.completed: list[tuple[str, dict[str, str], dict[str, str], int]] = []
         self.requeued: list[str] = []
         self.requeue_details: list[tuple[str, int, str]] = []
@@ -25,6 +31,8 @@ class FakeRepository:
         self.claimed_field_names: list[str | None] = []
         self.claimed_require_confident_website_for_email: list[bool] = []
         self.claim_order: list[str] = []
+        self.discovery_upserts: list[object] = []
+        self.discovery_field_jobs: list[tuple[str, int, str, str, list[str]]] = []
 
     def claim_next_field_job(self, worker_id: str, source_slug: str | None = None, field_name: str | None = None, require_confident_website_for_email: bool = False) -> FieldJob | None:
         self.claimed_source_slugs.append(source_slug)
@@ -38,6 +46,9 @@ class FakeRepository:
 
     def fetch_provenance_snippets(self, chapter_id: str) -> list[str]:
         return self.snippets_by_chapter.get(chapter_id, [])
+
+    def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
+        return (chapter_id, field_name) in self.pending_field_jobs
 
     def complete_field_job(
         self,
@@ -59,6 +70,34 @@ class FakeRepository:
 
     def create_field_job_review_item(self, job: FieldJob, candidate) -> None:
         self.review_items.append((job.id, candidate))
+
+    def load_sources(self, source_slug: str | None = None):
+        if source_slug is None:
+            return []
+        return [
+            SimpleNamespace(
+                id="source-1",
+                fraternity_id="frat-1",
+                fraternity_slug="sigma-chi",
+                source_slug=source_slug,
+                source_type="html_directory",
+                parser_key="directory_v1",
+                base_url="https://source.example.org",
+                list_path=None,
+                metadata={},
+            )
+        ]
+
+    def upsert_chapter_discovery(self, source, chapter):
+        self.discovery_upserts.append(chapter)
+        return "discovered-chapter-1"
+
+    def insert_provenance(self, chapter_id, source_id, crawl_run_id, records):
+        return None
+
+    def create_field_jobs(self, chapter_id, crawl_run_id, chapter_slug, source_slug, missing_fields):
+        self.discovery_field_jobs.append((chapter_id, crawl_run_id, chapter_slug, source_slug, list(missing_fields)))
+        return len(missing_fields)
 
 
 class FakeSearchClient:
@@ -196,6 +235,33 @@ def test_non_bing_claim_does_not_require_confident_website_for_email():
     engine.process(limit=1)
 
     assert repo.claimed_require_confident_website_for_email == [False]
+
+
+def test_bing_email_waits_for_pending_website_job_without_consuming_attempt():
+    job = _job("find_email", university_name="Demo University")
+    repo = FakeRepository(
+        jobs=[job],
+        snippets_by_chapter={"chapter-1": ["No direct contact information available"]},
+        pending_field_jobs={("chapter-1", "find_website")},
+    )
+    search_client = FakeSearchClient({})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        dependency_wait_seconds=90,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.requeue_preserve_attempt_flags == [True]
+    assert repo.requeue_details[0][1] == 90
+    assert "Waiting for confident website discovery" in repo.requeue_details[0][2]
+    assert search_client.queries == []
+
 
 def test_search_unavailable_preserves_attempts_for_instagram_jobs():
     job = _job("find_instagram", university_name="Demo University")
@@ -1138,7 +1204,7 @@ def test_build_search_queries_prefers_known_campus_domains_when_present():
     assert queries[0].endswith('site:greeklife.example.edu -"sigma aldrich" -sigmaaldrich -millipore -merck')
 
 
-def test_zero_negative_cooldown_requeues_immediately():
+def test_zero_negative_cooldown_still_honors_min_backoff_floor():
     repo = FakeRepository(
         jobs=[_job("find_instagram", university_name="Demo University")],
         snippets_by_chapter={"chapter-1": ["No social information available"]},
@@ -1156,10 +1222,10 @@ def test_zero_negative_cooldown_requeues_immediately():
     result = engine.process(limit=1)
 
     assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
-    assert repo.requeue_details[0][1] == 0
+    assert repo.requeue_details[0][1] == 60
 
 
-def test_bing_only_low_signal_website_job_is_parked_instead_of_terminal_failure():
+def test_bing_only_low_signal_website_job_hits_retry_limit_and_terminal_fails():
     repo = FakeRepository(
         jobs=[_job("find_website", attempts=2, university_name="Demo University")],
         snippets_by_chapter={"chapter-1": ["No direct contact information available"]},
@@ -1176,10 +1242,8 @@ def test_bing_only_low_signal_website_job_is_parked_instead_of_terminal_failure(
 
     result = engine.process(limit=1)
 
-    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
-    assert repo.failed == []
-    assert repo.requeue_preserve_attempt_flags == [True]
-    assert repo.requeue_details[0][1] == 30 * 24 * 60 * 60
+    assert result == {"processed": 0, "requeued": 0, "failed_terminal": 1}
+    assert repo.failed == ["job-find_website-2"]
 
 
 def test_instagram_search_skips_low_signal_hosts_and_avoids_fetching_direct_instagram_pages():
@@ -1260,6 +1324,39 @@ def test_generic_instagram_handle_is_rejected_when_school_anchor_is_missing():
     assert repo.review_items == []
 
 
+def test_instagram_candidate_with_conflicting_org_signal_is_rejected():
+    repo = FakeRepository(
+        jobs=[_job("find_instagram", university_name="University of Virginia")],
+        snippets_by_chapter={"chapter-1": []},
+    )
+    search_client = FakeSearchClient(
+        {
+            'site:instagram.com "University of Virginia" "sigma chi" -"sigma aldrich" -sigmaaldrich -millipore -merck': [
+                SearchResult(
+                    title="Tri Sigma UVA (@trisigmauva)",
+                    url="https://www.instagram.com/trisigmauva/",
+                    snippet="Delta Chi chapter at University of Virginia.",
+                    provider="bing_html",
+                    rank=1,
+                )
+            ]
+        }
+    )
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="duckduckgo_html",
+        instagram_max_queries=1,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.completed == []
+
+
 
 def test_trusted_website_instagram_match_short_circuits_search():
     repo = FakeRepository(
@@ -1311,6 +1408,41 @@ def test_untrusted_website_instagram_hint_does_not_auto_win():
     assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
     assert repo.completed == []
     assert search_client.queries
+
+
+def test_instagram_rejects_institutional_school_account_on_chapter_directory_page():
+    job = replace(
+        _job(
+            "find_instagram",
+            website_url="https://fsaffairs.illinois.edu/organizations/fraternities/DeltaChi/",
+            university_name="University of Illinois",
+            chapter_name="Illinois",
+        ),
+        fraternity_slug="delta-chi",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+    html = """
+    <html><body>
+      <h1>Delta Chi | Fraternity and Sorority Affairs</h1>
+      <p>Delta Chi chapter at University of Illinois.</p>
+      <a href="https://www.instagram.com/illinoisfsa/">Instagram</a>
+    </body></html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        instagram_max_queries=1,
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.completed == []
 
 
 def test_instagram_rejects_wrong_greek_organization_results_like_tri_sigma_uva():
@@ -1514,5 +1646,258 @@ def test_hard_blocklist_rejects_sigma_chemistry_domains():
 
     assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
     assert repo.completed == []
+
+
+def test_greedy_collect_passive_finds_instagram_from_nationals_directory_page():
+    job = replace(
+        _job("find_instagram", university_name="Mississippi State University"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+
+    html = """
+    <html>
+      <body>
+        <h2>MISSISSIPPI STATE CHAPTER</h2>
+        <p>
+          Website: <a href="https://msstatedeltachi.com">Delta Chi Mississippi State</a>
+          Instagram: @msstatedeltachi
+        </p>
+      </body>
+    </html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        greedy_collect_mode="passive",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/msstatedeltachi"}
+
+
+def test_greedy_collect_bfs_ingests_additional_nationals_chapter_records():
+    job = replace(
+        _job("find_instagram", university_name="Mississippi State University"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+
+    html = """
+    <html>
+      <body>
+        <h2>MISSISSIPPI STATE CHAPTER</h2>
+        <p>Website: <a href="https://msstatedeltachi.com">Delta Chi Mississippi State</a> Instagram: @msstatedeltachi</p>
+        <h2>COLORADO STATE CHAPTER</h2>
+        <p>Website: <a href="https://deltachicsu.org">Delta Chi Colorado State</a> Instagram: @deltachicsu</p>
+      </body>
+    </html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        greedy_collect_mode="bfs",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.discovery_upserts
+    assert any(item.university_name == "Colorado State" for item in repo.discovery_upserts)
+
+
+def test_greedy_collect_skips_follow_on_jobs_for_low_signal_one_token_school_names():
+    job = replace(
+        _job("find_instagram", university_name="Mississippi State University"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+    html = """
+    <html>
+      <body>
+        <h2>ALBERTA CHAPTER</h2>
+        <p>Website: <a href="https://www.deltachi.ca">Delta Chi Alberta</a> Instagram: @deltachialberta</p>
+      </body>
+    </html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        greedy_collect_mode="bfs",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.discovery_upserts
+    assert repo.discovery_field_jobs == []
+
+
+def test_greedy_collect_passive_follows_map_config_state_urls_and_parses_elementor_blocks():
+    job = replace(
+        _job("find_instagram", university_name="Mississippi State University"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+
+    directory_html = """
+    <html>
+      <body>
+        <script>
+          var uscanada_config = {
+            'uscanada_1': {'url':'https://deltachi.org/chapter-directory/mississippi/'}
+          };
+        </script>
+      </body>
+    </html>
+    """
+    mississippi_html = """
+    <html>
+      <body>
+        <div class="elementor-widget-heading"><h2>MISSISSIPPI STATE CHAPTER</h2></div>
+        <div class="elementor-widget-heading"><h3>PO Box GK Mississippi State Mississippi State, MS 39762</h3></div>
+        <div class="elementor-widget-container">
+          Website: <a href="http://msstatedeltachi.com/">Delta Chi Mississippi State</a>
+          Facebook: <a href="https://www.facebook.com/deltachi-msu/">Delta Chi Mississippi State</a>
+          Instagram: <a href="https://www.instagram.com/msstatedeltachi">@msstatedeltachi</a>
+        </div>
+      </body>
+    </html>
+    """
+
+    def fake_get(url, timeout, allow_redirects):
+        lowered = url.lower().rstrip("/")
+        if lowered.endswith("chapter-directory"):
+            return SimpleNamespace(status_code=200, text=directory_html)
+        if lowered.endswith("chapter-directory/mississippi"):
+            return SimpleNamespace(status_code=200, text=mississippi_html)
+        return SimpleNamespace(status_code=404, text="")
+
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        greedy_collect_mode="passive",
+        get_requester=fake_get,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/msstatedeltachi"}
+
+
+def test_greedy_collect_rejects_navigation_noise_blocks():
+    job = replace(
+        _job("find_instagram", university_name="Mississippi State University"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+    html = """
+    <html>
+      <body>
+        <h2>CHAPTER DIRECTORY</h2>
+        <p>Directory navigation. Facebook Instagram Twitter Contact</p>
+        <a href="https://deltachi.org/chapter-directory/florida/">Florida</a>
+      </body>
+    </html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        greedy_collect_mode="bfs",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert not repo.discovery_upserts
+
+
+def test_empty_search_results_are_not_cached_by_default():
+    first_query = 'site:instagram.com "Demo University" "sigma chi"'
+    job_one = replace(
+        _job("find_instagram", university_name="Demo University"),
+        chapter_id="chapter-1",
+        chapter_slug="chapter-one",
+    )
+    job_two = replace(
+        _job("find_instagram", university_name="Demo University"),
+        id="job-find_instagram-2",
+        chapter_id="chapter-2",
+        chapter_slug="chapter-two",
+    )
+    repo = FakeRepository(jobs=[job_one, job_two], snippets_by_chapter={"chapter-1": [], "chapter-2": []})
+
+    class OneTimeEmptySearchClient:
+        def __init__(self):
+            self.calls: dict[str, int] = {}
+
+        def search(self, query: str, max_results: int | None = None):
+            self.calls[query] = self.calls.get(query, 0) + 1
+            if query != first_query:
+                return []
+            if self.calls[query] == 1:
+                return []
+            return [
+                SearchResult(
+                    title="Sigma Chi Demo University Instagram",
+                    url="https://www.instagram.com/demosigmachi",
+                    snippet="Official Sigma Chi chapter account at Demo University.",
+                    provider="bing_html",
+                    rank=1,
+                )
+            ]
+
+    search_client = OneTimeEmptySearchClient()
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="duckduckgo_html",
+        instagram_max_queries=1,
+    )
+
+    result = engine.process(limit=2)
+
+    assert search_client.calls[first_query] == 2
+    assert result == {"processed": 1, "requeued": 1, "failed_terminal": 0}
+    assert any(update.get("instagram_url") == "https://www.instagram.com/demosigmachi" for _, update, _, _ in repo.completed)
 
 

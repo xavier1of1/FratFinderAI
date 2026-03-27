@@ -3,6 +3,24 @@
 ## 1) Purpose
 This plan translates the master requirements into an execution sequence Codex can implement in controlled stages. Each stage has scope, outputs, and acceptance gates so progress is measurable and handoff-friendly.
 
+## 1.1) Current Handoff Status (2026-03-27)
+
+Recent completed work that the next developer should assume is already live:
+
+- Fraternity Intake staged workflow exists end-to-end (`/fraternity-intake`) with request lifecycle, timeline events, schedule/expedite controls, and progress snapshots.
+- Intake details now expose discovery candidates plus source override controls for low-confidence requests.
+- Confirm action accepts operator override URLs and also falls back to discovered candidate URLs when available.
+- Intake runner now fails requests that discover zero chapters during crawl stage (prevents false success and wasted enrichment cycles).
+- Map-backed national directory ingestion improved: embedded-data detection can emit Google My Maps KML API hints and locator extraction can parse KML placemarks into chapter records.
+- Discovery quality hardening includes fraternity alias support (for example `Phi Gamma Delta` -> `fiji`) and curated source-hint fallback for high-ambiguity names.
+
+Immediate next work for incoming developer:
+
+1. Expand curated discovery host/source hints from one-off entries into a managed config artifact (with tests and change review process).
+2. Add stronger source trust scoring for intake discovery so travel/medical/irrelevant domains are deprioritized globally, not only by fraternity-specific hints.
+3. Add intake observability metrics (discovery confidence distribution, confirm override rate, zero-record crawl failure rate) to dashboard benchmarks.
+4. Backfill intake request reconciliation tooling for legacy records that may still show outdated statuses from prior runner behavior.
+
 ## 2) Non-Negotiable Architecture Rules
 - Monorepo layout:
   - `apps/web` -> Next.js TypeScript operator dashboard.

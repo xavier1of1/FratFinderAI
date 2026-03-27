@@ -185,6 +185,40 @@ def test_locator_api_adapter_unknown_shape_returns_empty_list():
     assert records == []
 
 
+def test_locator_api_adapter_extracts_from_google_maps_kml_payload():
+    kml_payload = """<?xml version="1.0" encoding="UTF-8"?>
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+      <Document>
+        <Placemark>
+          <name>Case Western Reserve University</name>
+          <description><![CDATA[
+            Alias: Xi Deuteron Chapter<br>
+            Preferred City_ State: Cleveland, OH<br>
+            Website: http://cwrufiji.com/<br>
+            Instagram: cwrufiji<br>
+          ]]></description>
+        </Placemark>
+      </Document>
+    </kml>
+    """
+    http_client = RoutingHttpClient({"https://www.google.com/maps/d/kml?mid=test&forcekml=1": kml_payload})
+
+    records = LocatorApiAdapter().parse(
+        "<html><body><iframe></iframe></body></html>",
+        "https://example.org/chapters",
+        api_url="https://www.google.com/maps/d/kml?mid=test&forcekml=1",
+        http_client=http_client,
+    )
+
+    assert len(records) == 1
+    assert records[0].name == "Xi Deuteron Chapter"
+    assert records[0].university_name == "Case Western Reserve University"
+    assert records[0].city == "Cleveland"
+    assert records[0].state == "OH"
+    assert records[0].website_url == "http://cwrufiji.com/"
+    assert records[0].instagram_url == "https://www.instagram.com/cwrufiji/"
+
+
 
 def test_graph_creates_review_item_when_script_json_strategy_extracts_no_records():
     html = """

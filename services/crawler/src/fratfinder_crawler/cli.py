@@ -25,6 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
     health_parser = subparsers.add_parser("health", help="Run crawler health probes")
     health_parser.add_argument("--probe", choices=["liveness", "readiness"], default="readiness")
 
+    discover_parser = subparsers.add_parser("discover-source", help="Discover likely national source for a fraternity name")
+    discover_parser.add_argument("--fraternity-name", required=True, help="Fraternity display name, e.g. Lambda Chi Alpha")
+
     return parser
 
 
@@ -54,6 +57,11 @@ def main() -> None:
 
     if args.command == "health":
         result = service.liveness() if args.probe == "liveness" else service.readiness()
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "discover-source":
+        result = service.discover_source(fraternity_name=args.fraternity_name)
         print(json.dumps(result, indent=2))
         return
 

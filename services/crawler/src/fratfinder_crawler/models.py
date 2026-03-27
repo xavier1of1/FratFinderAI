@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -178,6 +178,7 @@ class FieldJob:
     university_name: str | None = None
     crawl_run_id: int | None = None
     field_states: dict[str, str] = field(default_factory=dict)
+    priority: int = 0
 
 
 class UnsupportedSourceError(Exception):
@@ -186,3 +187,4 @@ class UnsupportedSourceError(Exception):
 
 class AmbiguousRecordError(Exception):
     pass
+

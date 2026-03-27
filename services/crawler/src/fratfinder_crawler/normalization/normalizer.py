@@ -16,6 +16,9 @@ from fratfinder_crawler.models import (
 
 
 LOW_CONFIDENCE_THRESHOLD = 0.85
+MAX_CHAPTER_NAME_LENGTH = 160
+MAX_UNIVERSITY_NAME_LENGTH = 180
+MAX_CHAPTER_SLUG_LENGTH = 120
 
 
 def _slugify(value: str) -> str:
@@ -71,13 +74,21 @@ def _build_field_jobs(field_states: dict[str, str]) -> list[str]:
 
 
 def normalize_record(source: SourceRecord, record: ExtractedChapter) -> tuple[NormalizedChapter, list[ProvenanceRecord]]:
-    if not record.name.strip():
+    chapter_name = record.name.strip()
+    if not chapter_name:
         raise AmbiguousRecordError("Chapter record is missing a name")
+    if len(chapter_name) > MAX_CHAPTER_NAME_LENGTH:
+        raise AmbiguousRecordError("Chapter record name exceeded max supported length")
+    cleaned_university = _clean(record.university_name)
+    if cleaned_university and len(cleaned_university) > MAX_UNIVERSITY_NAME_LENGTH:
+        raise AmbiguousRecordError("Chapter record university exceeded max supported length")
 
     slug_input = record.external_id or f"{record.name}-{record.university_name or ''}"
     slug = _slugify(slug_input)
     if not slug:
         raise AmbiguousRecordError("Unable to derive deterministic chapter slug")
+    if len(slug) > MAX_CHAPTER_SLUG_LENGTH:
+        raise AmbiguousRecordError("Chapter record slug exceeded max supported length")
 
     field_states = _build_field_states(record)
 
@@ -85,8 +96,8 @@ def normalize_record(source: SourceRecord, record: ExtractedChapter) -> tuple[No
         fraternity_slug=source.fraternity_slug,
         source_slug=source.source_slug,
         slug=slug,
-        name=record.name.strip(),
-        university_name=_clean(record.university_name),
+        name=chapter_name,
+        university_name=cleaned_university,
         city=_clean(record.city),
         state=_clean(record.state),
         website_url=_clean(record.website_url),

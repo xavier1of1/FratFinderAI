@@ -27,6 +27,11 @@ const pageGuide = [
     href: "/benchmarks",
     title: "Benchmarks",
     description: "Launch and compare benchmark runs, track throughput, and spot regressions with cycle-level metrics."
+  },
+  {
+    href: "/fraternity-intake",
+    title: "Fraternity Intake",
+    description: "Submit fraternity crawl requests, confirm discovered sources, and monitor staged progress through enrichment."
   }
 ];
 

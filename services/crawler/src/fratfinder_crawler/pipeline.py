@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fratfinder_crawler.adapters import AdapterRegistry
 from fratfinder_crawler.config import Settings
 from fratfinder_crawler.db.connection import get_connection
+from fratfinder_crawler.discovery import discover_source
 from fratfinder_crawler.db.repository import CrawlerRepository
 from fratfinder_crawler.field_jobs import FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
@@ -157,14 +158,39 @@ class CrawlService:
                 max_search_pages=self._settings.crawler_search_max_pages_per_job,
                 negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
                 dependency_wait_seconds=self._settings.crawler_search_dependency_wait_seconds,
+                min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
                 email_max_queries=self._settings.crawler_search_email_max_queries,
                 instagram_max_queries=self._settings.crawler_search_instagram_max_queries,
                 enable_school_initials=self._settings.crawler_search_enable_school_initials,
                 min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
                 enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
                 instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
+                greedy_collect_mode=self._settings.crawler_greedy_collect,
             )
             return engine.process(limit=limit)
+
+    def discover_source(self, fraternity_name: str) -> dict[str, object]:
+        search_client = SearchClient(self._settings)
+        try:
+            result = discover_source(fraternity_name, search_client)
+            return result.as_dict()
+        except Exception as exc:
+            log_event(
+                LOGGER,
+                "source_discovery_failed",
+                level=logging.WARNING,
+                fraternity_name=fraternity_name,
+                error=str(exc),
+            )
+            fallback_slug = fraternity_name.strip().lower().replace(" ", "-")
+            return {
+                "fraternity_name": fraternity_name,
+                "fraternity_slug": fallback_slug,
+                "selected_url": None,
+                "selected_confidence": 0.0,
+                "confidence_tier": "low",
+                "candidates": [],
+            }
 
     def liveness(self) -> dict[str, object]:
         return {"ok": True, "service": "crawler", "probe": "liveness"}

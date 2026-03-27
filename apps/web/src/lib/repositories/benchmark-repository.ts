@@ -132,6 +132,23 @@ export async function listBenchmarkRuns(limit = 100): Promise<BenchmarkRunListIt
   return rows.map(mapBenchmarkRow);
 }
 
+export async function failStaleBenchmarkRuns(maxAgeMinutes = 10): Promise<number> {
+  const dbPool = getDbPool();
+  const { rowCount } = await dbPool.query(
+    `
+      UPDATE benchmark_runs
+      SET
+        status = 'failed',
+        finished_at = NOW(),
+        last_error = COALESCE(last_error, 'Benchmark run stalled before completion')
+      WHERE status IN ('queued', 'running')
+        AND updated_at < NOW() - ($1::int * INTERVAL '1 minute')
+    `,
+    [Math.max(1, maxAgeMinutes)]
+  );
+  return Number(rowCount ?? 0);
+}
+
 export async function getBenchmarkRun(id: string): Promise<BenchmarkRunListItem | null> {
   const dbPool = getDbPool();
   const { rows } = await dbPool.query<BenchmarkRunRow>(

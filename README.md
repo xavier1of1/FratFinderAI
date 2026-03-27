@@ -110,6 +110,12 @@ Process missing-field jobs for one source only:
 python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25
 ```
 
+Discover a likely national source URL for a fraternity name:
+
+```bash
+python -m fratfinder_crawler.cli discover-source --fraternity-name "Lambda Chi Alpha"
+```
+
 ### Search-Backed Enrichment
 
 When chapter website, email, or Instagram data is not present on the national source page, field jobs can now fall back to public web search.
@@ -121,13 +127,17 @@ Relevant env settings:
 - `CRAWLER_SEARCH_PROVIDER=bing_html` remains available for explicit local-only testing when you want to bypass Brave.
 - `CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS` controls how long Bing-backed jobs cool down after a clean no-result pass so hopeless chapters do not get reprocessed every day.
 - `CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS` controls backoff for dependency-blocked jobs (for example, Bing email jobs waiting on confident website discovery) without consuming retry budget.
+- `CRAWLER_SEARCH_MIN_NO_CANDIDATE_BACKOFF_SECONDS` enforces a minimum retry delay for no-candidate outcomes so zero-day cooldown settings do not hot-loop the same jobs in one batch.
 - `CRAWLER_FIELD_JOB_MAX_WORKERS` controls how many field-job workers can run concurrently in one batch.
 - `CRAWLER_SEARCH_EMAIL_MAX_QUERIES` caps the email query funnel so contact-email jobs stay bounded and do not fan out unnecessarily.
 - `CRAWLER_SEARCH_INSTAGRAM_MAX_QUERIES` caps the Instagram query funnel so Bing-backed Instagram jobs stay bounded by default.
 - `CRAWLER_SEARCH_ENABLE_SCHOOL_INITIALS`, `CRAWLER_SEARCH_MIN_SCHOOL_INITIAL_LENGTH`, `CRAWLER_SEARCH_ENABLE_COMPACT_FRATERNITY`, and `CRAWLER_SEARCH_INSTAGRAM_ENABLE_HANDLE_QUERIES` tune the Instagram-specific handle/query strategy without changing the broader search stack.
+- `GREEDY_COLLECT` controls nationals-site opportunistic ingestion: `none` keeps target-only enrichment, `passive` collects nearby chapter directory evidence with low crawl fanout, and `bfs` performs deeper same-domain traversal on nationals sites to ingest additional chapter contact signals.
 - `CRAWLER_SEARCH_PROVIDER=duckduckgo_html` remains available and now auto-falls back to Bing when DuckDuckGo returns anomaly pages or transport-level failures.
 - `CRAWLER_SEARCH_PROVIDER=brave_api` can be used explicitly if you want Brave only; when Brave errors, the crawler falls back to Bing instead of stalling jobs.
 - `CRAWLER_SEARCH_MAX_RESULTS` and `CRAWLER_SEARCH_MAX_PAGES_PER_JOB` bound how aggressively each job searches and fetches candidate pages.
+- `CRAWLER_SEARCH_CACHE_EMPTY_RESULTS=false` avoids reusing zero-result search responses within the same worker process, which helps prevent stale-miss amplification on transient query/provider noise.
+- `CRAWLER_SEARCH_CIRCUIT_BREAKER_FAILURES` and `CRAWLER_SEARCH_CIRCUIT_BREAKER_COOLDOWN_SECONDS` open a short provider circuit after repeated transport/provider failures so workers fail fast instead of spending full timeout windows on every query.
 
 The crawler only writes high-confidence matches directly. Lower-confidence search candidates are routed into review instead of silently mutating chapter records.
 
@@ -137,8 +147,10 @@ For a cost-first Bing-only run, use a conservative profile:
 - `CRAWLER_SEARCH_MAX_RESULTS=3`
 - `CRAWLER_SEARCH_MAX_PAGES_PER_JOB=1`
 - `CRAWLER_SEARCH_EMAIL_MAX_QUERIES=5`
+- `CRAWLER_SEARCH_CACHE_EMPTY_RESULTS=false`
 - `CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS=30`
 - `CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS=300`
+- `CRAWLER_SEARCH_MIN_NO_CANDIDATE_BACKOFF_SECONDS=60`
 
 In Bing-only mode, the crawler now:
 
@@ -199,6 +211,7 @@ This test requires local Postgres to be reachable and skips itself when the data
   - Crawl Runs: `/runs`
   - Review Queue: `/review-items`
   - Benchmarks: `/benchmarks`
+- Fraternity Intake: `/fraternity-intake`
   - Health: `/api/health`, `/api/health/liveness`, `/api/health/readiness`
 
 ### Dashboard Signals
@@ -206,6 +219,44 @@ This test requires local Postgres to be reachable and skips itself when the data
 - Crawl runs now surface extraction strategy, page-level confidence, and LLM calls used.
 - Chapter rows now include field-state labels so operators can distinguish `found`, `missing`, and `low_confidence` values.
 - Review items now surface extraction notes when the crawler or LLM records them in the review payload.
+
+### Fraternity Intake Workflow (Current)
+
+The intake runner is a staged workflow that creates a request from a fraternity name, discovers a likely national source, and then runs crawl + enrichment.
+
+High-level behavior:
+
+1. Create request (`/fraternity-intake` form)
+- Backend calls `discover-source` and stores ranked candidates in `progress.discovery.candidates`.
+- If discovery confidence is `high` or `medium` and a source URL is present, the request is queued automatically.
+- If discovery confidence is `low`, request stays in `draft/awaiting_confirmation`.
+
+2. Confirm or override source
+- Request details now include a `Discovery Review` section with:
+  - ranked discovery candidates (score, provider, URL, title)
+  - `Use URL` action to populate `Source URL Override`
+  - manual URL override input for operator-provided source
+- Confirm sends the selected/override URL.
+- If no override is provided, confirm falls back to the stored discovered URL/candidate when available.
+
+3. Crawl stage safety gate
+- If crawl ingestion discovers zero chapters (`recordsSeen = 0`), the request is marked `failed` and does not continue into enrichment.
+- This prevents false `succeeded` outcomes when a source URL is wrong or parser strategy cannot extract chapters.
+
+4. Enrichment stage
+- When crawl discovers chapters, field jobs are created and processed in bounded cycles.
+- Request progress tracks per-field queue counts (`find_website`, `find_email`, `find_instagram`) and totals.
+
+Operator notes:
+- `Chapters Discovered` and `Field Jobs Created` are shown in request details for fast triage.
+- `Expedite` prioritizes request/job execution by moving schedule to now and raising queue priority.
+
+### Discovery Notes
+
+- Discovery is deterministic and LLM-optional.
+- Alias-aware discovery is implemented (for example `Phi Gamma Delta` also queries `fiji`).
+- Additional fraternity-specific host/source hints can be defined in `services/crawler/src/fratfinder_crawler/discovery.py` when search providers are noisy.
+- For map-backed chapter directories (for example Google My Maps embeds), embedded-data detection can emit a KML API hint and `locator_api` can parse KML placemarks into canonical chapter records.
 
 ## Migrations and Seeds
 
@@ -222,6 +273,7 @@ docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supaba
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0004_chapter_field_states.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0005_crawl_run_intelligence.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0006_benchmark_runs.sql
+docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0007_fraternity_crawl_requests.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/seeds/0001_seed.sql
 ```
 

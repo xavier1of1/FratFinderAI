@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { scheduleBenchmarkRun } from "@/lib/benchmark-runner";
-import { createBenchmarkRun, getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
+import { createBenchmarkRun, failStaleBenchmarkRuns, getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
 import type { BenchmarkFieldName, BenchmarkRunConfig } from "@/lib/types";
 
 const benchmarkPayloadSchema = z.object({
@@ -23,6 +23,7 @@ function formatDefaultBenchmarkName(fieldName: BenchmarkFieldName): string {
 
 export async function GET(request: NextRequest) {
   try {
+    await failStaleBenchmarkRuns();
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "100");
 
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    await failStaleBenchmarkRuns();
     const body = await request.json();
     const payload = benchmarkPayloadSchema.parse(body);
 
