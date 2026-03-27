@@ -5,6 +5,7 @@ import json
 
 from fratfinder_crawler.config import get_settings
 from fratfinder_crawler.logging_utils import configure_logging
+from fratfinder_crawler.models import FIELD_JOB_TYPES
 from fratfinder_crawler.pipeline import CrawlService
 
 
@@ -18,6 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_parser = subparsers.add_parser("process-field-jobs", help="Process queued field jobs")
     jobs_parser.add_argument("--limit", type=int, default=25)
     jobs_parser.add_argument("--source-slug", help="Only process field jobs for one source slug", default=None)
+    jobs_parser.add_argument("--field-name", choices=FIELD_JOB_TYPES, help="Only process one field job type", default=None)
+    jobs_parser.add_argument("--workers", type=int, default=None, help="Number of concurrent field-job workers to run")
 
     health_parser = subparsers.add_parser("health", help="Run crawler health probes")
     health_parser.add_argument("--probe", choices=["liveness", "readiness"], default="readiness")
@@ -40,7 +43,12 @@ def main() -> None:
         return
 
     if args.command == "process-field-jobs":
-        result = service.process_field_jobs(limit=args.limit, source_slug=args.source_slug)
+        result = service.process_field_jobs(
+            limit=args.limit,
+            source_slug=args.source_slug,
+            field_name=args.field_name,
+            workers=args.workers,
+        )
         print(json.dumps(result, indent=2))
         return
 

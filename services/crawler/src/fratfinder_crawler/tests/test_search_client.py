@@ -174,3 +174,26 @@ def test_auto_provider_falls_back_to_bing_when_brave_unavailable():
     assert results[0].provider == "bing_html"
     assert calls[0].startswith("https://api.search.brave.com")
     assert calls[1].startswith("https://www.bing.com")
+
+
+def test_search_client_caches_duplicate_queries():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        return SimpleNamespace(
+            status_code=200,
+            text="""<html><body><ol><li class="b_algo"><h2><a href="https://example.org/chapter">Sigma Chi at Demo University</a></h2><div class="b_caption"><p>Official chapter website</p></div></li></ol></body></html>""",
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        get_requester=requester,
+    )
+
+    first = client.search("sigma chi demo university website")
+    second = client.search("sigma chi demo university website")
+
+    assert first == second
+    assert len(calls) == 1

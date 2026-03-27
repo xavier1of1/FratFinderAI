@@ -1,4 +1,4 @@
-﻿export type ReviewStatus = "open" | "triaged" | "resolved" | "ignored";
+export type ReviewStatus = "open" | "triaged" | "resolved" | "ignored";
 
 export interface ChapterListItem {
   id: string;
@@ -74,4 +74,67 @@ export interface ReviewItemAuditLog {
   toStatus: ReviewStatus;
   notes: string | null;
   createdAt: string;
+}
+
+export type BenchmarkStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type BenchmarkFieldName = "find_website" | "find_email" | "find_instagram" | "all";
+
+export interface BenchmarkRunConfig {
+  fieldName: BenchmarkFieldName;
+  sourceSlug: string | null;
+  workers: number;
+  limitPerCycle: number;
+  cycles: number;
+  pauseMs: number;
+}
+
+export interface BenchmarkCycleSample {
+  cycle: number;
+  startedAt: string;
+  durationMs: number;
+  processed: number;
+  requeued: number;
+  failedTerminal: number;
+  queued: number;
+  running: number;
+  done: number;
+  failed: number;
+}
+
+export interface BenchmarkRunSummary {
+  elapsedMs: number;
+  cyclesCompleted: number;
+  totalProcessed: number;
+  totalRequeued: number;
+  totalFailedTerminal: number;
+  jobsPerMinute: number;
+  avgCycleMs: number;
+  queueDepthStart: number;
+  queueDepthEnd: number;
+  queueDepthDelta: number;
+}
+
+export interface BenchmarkRunListItem {
+  id: string;
+  name: string;
+  status: BenchmarkStatus;
+  fieldName: BenchmarkFieldName;
+  sourceSlug: string | null;
+  config: BenchmarkRunConfig;
+  summary: BenchmarkRunSummary | null;
+  samples: BenchmarkCycleSample[];
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BenchmarkQueueSnapshot {
+  queued: number;
+  running: number;
+  done: number;
+  failed: number;
+  total: number;
 }

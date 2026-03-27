@@ -7,6 +7,7 @@ from typing import Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
 from fratfinder_crawler.config import Settings
@@ -32,7 +33,17 @@ class SearchUnavailableError(RuntimeError):
 class SearchClient:
     def __init__(self, settings: Settings, get_requester: Callable[..., object] | None = None):
         self._settings = settings
-        self._get_requester = get_requester or requests.get
+        self._query_cache: dict[tuple[str, str, int], list[SearchResult]] = {}
+        self._session: requests.Session | None = None
+        if get_requester is None:
+            session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            self._session = session
+            self._get_requester = session.get
+        else:
+            self._get_requester = get_requester
 
     def search(self, query: str, max_results: int | None = None) -> list[SearchResult]:
         if not self._settings.crawler_search_enabled:
@@ -40,22 +51,35 @@ class SearchClient:
 
         provider = self._settings.crawler_search_provider.lower()
         limit = max_results or self._settings.crawler_search_max_results
+        cache_key = (provider, query.strip().lower(), limit)
+        cached = self._query_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
         if provider == "auto":
-            return self._search_auto(query, limit)
+            results = self._search_auto(query, limit)
+            self._query_cache[cache_key] = list(results)
+            return results
         if provider == "brave_api":
             if not self._settings.crawler_search_brave_api_key:
                 raise SearchUnavailableError("Brave Search API key is required when CRAWLER_SEARCH_PROVIDER=brave_api")
             try:
-                return self._search_brave_api(query, limit)
+                results = self._search_brave_api(query, limit)
             except (SearchUnavailableError, requests.RequestException):
-                return self._search_bing_html(query, limit)
+                results = self._search_bing_html(query, limit)
+            self._query_cache[cache_key] = list(results)
+            return results
         if provider == "bing_html":
-            return self._search_bing_html(query, limit)
+            results = self._search_bing_html(query, limit)
+            self._query_cache[cache_key] = list(results)
+            return results
         if provider == "duckduckgo_html":
             try:
-                return self._search_duckduckgo_html(query, limit)
+                results = self._search_duckduckgo_html(query, limit)
             except (SearchUnavailableError, requests.RequestException):
-                return self._search_bing_html(query, limit)
+                results = self._search_bing_html(query, limit)
+            self._query_cache[cache_key] = list(results)
+            return results
         raise SearchUnavailableError(f"Unsupported search provider: {self._settings.crawler_search_provider}")
 
     def _search_auto(self, query: str, max_results: int) -> list[SearchResult]:

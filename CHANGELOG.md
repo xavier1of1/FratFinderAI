@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -7,10 +7,20 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Added a simple U.S. state-tile chapter map to the chapters dashboard, with one marker per loaded chapter and live counts that respond to the current table filters.
 - Added per-column chapter filters for name, fraternity, university, state, status, website, Instagram, and email directly in the chapters overview table.
+- Added a Bing-only operating profile to the crawler settings and runbook, including a configurable negative-result cooldown for search-backed enrichment.
 
 ### Changed
 - The chapters page now loads up to 500 rows for the operator view instead of truncating at 200, which fixes silent omission of loaded chapter data in the dashboard.
 - Refactored the chapters dashboard into a small client component so filtering stays instant without moving crawl or database logic into the frontend.
+- Bing-backed field jobs now behave more conservatively: website searches cool down for 30 days after a clean miss, email and Instagram searches wait for a confident website first, and medium-confidence Bing search matches are routed to review instead of being written directly.
+- Bing-only website discovery now runs school-domain-first (`site:.edu` and optional known campus domains), treats generic web search as fallback, blocks Sigma chemistry domains outright, and caps low-signal website jobs at one retry before terminal failure.
+- Instagram enrichment now uses a dedicated search strategy: it searches broad Instagram/web results before provenance fallback, supports school-initial and handle-shape queries like `fsusigmachi` / `wcsu_sigma_chi`, and no longer waits on website discovery before attempting a chapter Instagram match.
+- Instagram-only batches can now be targeted directly from the CLI, and Instagram search skips low-signal result hosts plus search-page fetches so focused runs spend more time on likely profile hits and less time on junk results.
+- Instagram hardening now uses a bounded query funnel with configurable Instagram-specific caps, keeps only strong school-initial handle searches, checks trusted chapter websites before broad search, and rejects weak generic Instagram candidates before they can write or enter review.
+- Instagram matching now avoids Greek-letter chapter-name search terms, rejects wrong-organization results like `Tri Sigma UVA`, treats matching chapter designations like `Theta Chapter` / `Omicron Omicron Chapter` as strong evidence, and can mark chapters inactive when official school-affiliation pages exclude the fraternity.
+- Field-job processing now supports concurrent workers, with an explicit worker cap in settings/CLI so large source batches can scale out to multiple `SKIP LOCKED` workers safely.
+- Queue operations now support field-type targeting end-to-end, which lets us run Instagram-only throughput batches without spending slots on website/email jobs.
+- Field-job processing can now target a single job type from the CLI, and Instagram search skips low-signal result hosts plus unnecessary page fetches for direct Instagram hits so focused batches run faster and waste fewer searches.
 
 ## [0.7.0] - 2026-03-22
 
@@ -143,4 +153,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
+
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Any
@@ -352,8 +352,10 @@ class CrawlerRepository:
         self._connection.commit()
         return created
 
-    def claim_next_field_job(self, worker_id: str, source_slug: str | None = None) -> FieldJob | None:
+    def claim_next_field_job(self, worker_id: str, source_slug: str | None = None, field_name: str | None = None, require_confident_website_for_email: bool = False) -> FieldJob | None:
         source_filter = ""
+        field_name_filter = ""
+        email_dependency_filter = ""
         params: dict[str, Any] = {"worker_id": worker_id}
         if source_slug is not None:
             source_filter = """
@@ -366,7 +368,22 @@ class CrawlerRepository:
                       )
             """
             params["source_slug"] = source_slug
+        if field_name is not None:
+            field_name_filter = """
+                      AND fj.field_name = %(field_name)s
+            """
+            params["field_name"] = field_name
 
+        if require_confident_website_for_email:
+            email_dependency_filter = """
+                      AND (
+                          fj.field_name <> 'find_email'
+                          OR (
+                              c.website_url IS NOT NULL
+                              AND COALESCE(c.field_states->>'website_url', '') <> 'low_confidence'
+                          )
+                      )
+            """
         with self._connection.transaction(), self._connection.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -374,10 +391,13 @@ class CrawlerRepository:
                     SELECT
                         fj.id
                     FROM field_jobs fj
+                    JOIN chapters c ON c.id = fj.chapter_id
                     WHERE fj.status = 'queued'
                       AND fj.scheduled_at <= NOW()
                       AND fj.attempts < fj.max_attempts
 {source_filter}
+{field_name_filter}
+ {email_dependency_filter}
                     ORDER BY
                         fj.scheduled_at ASC,
                         CASE fj.field_name
@@ -514,6 +534,7 @@ class CrawlerRepository:
                         instagram_url = COALESCE(instagram_url, %(instagram_url)s),
                         contact_email = COALESCE(contact_email, %(contact_email)s),
                         university_name = COALESCE(university_name, %(university_name)s),
+                        chapter_status = COALESCE(%(chapter_status)s, chapter_status),
                         field_states = COALESCE(field_states, '{}'::jsonb) || %(field_states)s,
                         updated_at = NOW()
                     WHERE id = %(chapter_id)s
@@ -524,6 +545,7 @@ class CrawlerRepository:
                         "instagram_url": chapter_updates.get("instagram_url"),
                         "contact_email": chapter_updates.get("contact_email"),
                         "university_name": chapter_updates.get("university_name"),
+                        "chapter_status": chapter_updates.get("chapter_status"),
                         "field_states": Jsonb(field_state_updates),
                     },
                 )
@@ -582,7 +604,7 @@ class CrawlerRepository:
                 (Jsonb(completed_payload), job.id),
             )
 
-    def requeue_field_job(self, job: FieldJob, error: str, delay_seconds: int) -> None:
+    def requeue_field_job(self, job: FieldJob, error: str, delay_seconds: int, preserve_attempt: bool = False) -> None:
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
             cursor.execute(
@@ -595,10 +617,11 @@ class CrawlerRepository:
                     finished_at = NULL,
                     last_error = %s,
                     claim_token = NULL,
-                    terminal_failure = FALSE
+                    terminal_failure = FALSE,
+                    attempts = CASE WHEN %s THEN GREATEST(attempts - 1, 0) ELSE attempts END
                 WHERE id = %s
                 """,
-                (delay_seconds, error, job.id),
+                (delay_seconds, error, preserve_attempt, job.id),
             )
 
     def fail_field_job_terminal(self, job: FieldJob, error: str) -> None:
@@ -665,3 +688,6 @@ class CrawlerRepository:
             "school_match": FIELD_JOB_VERIFY_SCHOOL,
         }
         return mapping.get(raw_name.lower(), raw_name.lower())
+
+
+

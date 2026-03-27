@@ -1,4 +1,4 @@
-﻿# Frat Finder AI
+# Frat Finder AI
 
 Frat Finder AI is a source-aware chapter discovery and data platform for NIC fraternities.
 
@@ -107,7 +107,7 @@ python -m fratfinder_crawler.cli process-field-jobs --limit 25
 Process missing-field jobs for one source only:
 
 ```bash
-python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --limit 25
+python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25
 ```
 
 ### Search-Backed Enrichment
@@ -119,11 +119,38 @@ Relevant env settings:
 - `CRAWLER_SEARCH_ENABLED=true` enables search-backed enrichment for missing fields.
 - `CRAWLER_SEARCH_PROVIDER=auto` is now the recommended default: it prefers Brave Search API when `CRAWLER_SEARCH_BRAVE_API_KEY` is set and otherwise falls back to Bing HTML.
 - `CRAWLER_SEARCH_PROVIDER=bing_html` remains available for explicit local-only testing when you want to bypass Brave.
+- `CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS` controls how long Bing-backed jobs cool down after a clean no-result pass so hopeless chapters do not get reprocessed every day.
+- `CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS` controls backoff for dependency-blocked jobs (for example, Bing email jobs waiting on confident website discovery) without consuming retry budget.
+- `CRAWLER_FIELD_JOB_MAX_WORKERS` controls how many field-job workers can run concurrently in one batch.
+- `CRAWLER_SEARCH_EMAIL_MAX_QUERIES` caps the email query funnel so contact-email jobs stay bounded and do not fan out unnecessarily.
+- `CRAWLER_SEARCH_INSTAGRAM_MAX_QUERIES` caps the Instagram query funnel so Bing-backed Instagram jobs stay bounded by default.
+- `CRAWLER_SEARCH_ENABLE_SCHOOL_INITIALS`, `CRAWLER_SEARCH_MIN_SCHOOL_INITIAL_LENGTH`, `CRAWLER_SEARCH_ENABLE_COMPACT_FRATERNITY`, and `CRAWLER_SEARCH_INSTAGRAM_ENABLE_HANDLE_QUERIES` tune the Instagram-specific handle/query strategy without changing the broader search stack.
 - `CRAWLER_SEARCH_PROVIDER=duckduckgo_html` remains available and now auto-falls back to Bing when DuckDuckGo returns anomaly pages or transport-level failures.
 - `CRAWLER_SEARCH_PROVIDER=brave_api` can be used explicitly if you want Brave only; when Brave errors, the crawler falls back to Bing instead of stalling jobs.
 - `CRAWLER_SEARCH_MAX_RESULTS` and `CRAWLER_SEARCH_MAX_PAGES_PER_JOB` bound how aggressively each job searches and fetches candidate pages.
 
 The crawler only writes high-confidence matches directly. Lower-confidence search candidates are routed into review instead of silently mutating chapter records.
+
+For a cost-first Bing-only run, use a conservative profile:
+
+- `CRAWLER_SEARCH_PROVIDER=bing_html`
+- `CRAWLER_SEARCH_MAX_RESULTS=3`
+- `CRAWLER_SEARCH_MAX_PAGES_PER_JOB=1`
+- `CRAWLER_SEARCH_EMAIL_MAX_QUERIES=5`
+- `CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS=30`
+- `CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS=300`
+
+In Bing-only mode, the crawler now:
+
+- searches school-owned domains first for `find_website` jobs using `site:.edu` and any known `campusDomains` carried in the job payload
+- treats generic web search as fallback only when the campus-domain pass yields no usable website candidate
+- waits for a confident chapter website before running Bing-backed email searches, which keeps request volume lower and reduces false positives
+- prioritizes chapter website + same-domain contact/officer pages for `find_email` before broad web search, improving precision and lowering query load
+- lets Instagram jobs run independently with an Instagram-specific funnel that starts with `site:instagram.com`, searches using fraternity name plus school, preserves high-yield handle-shape searches like `fsusigmachi`, and cuts weak short school aliases by default
+- uses stricter Instagram relevance gates so wrong organizations like `Tri Sigma` / weak generic handles are rejected instead of written or reviewed automatically
+- falls back to trusted school/IFC affiliation pages when Instagram discovery fails; if an official campus chapter list excludes the fraternity, the crawler marks that chapter inactive instead of requeueing forever
+- auto-writes only tier-1 website evidence from campus `.edu` pages or known fraternity domains; lower-trust aggregator/profile candidates are routed to review
+- caps low-signal Bing website jobs at one retry so the queue does not churn on hopeless chapters
 
 Check crawler probes:
 
@@ -171,6 +198,7 @@ This test requires local Postgres to be reachable and skips itself when the data
   - Chapters: `/chapters`
   - Crawl Runs: `/runs`
   - Review Queue: `/review-items`
+  - Benchmarks: `/benchmarks`
   - Health: `/api/health`, `/api/health/liveness`, `/api/health/readiness`
 
 ### Dashboard Signals
@@ -193,6 +221,7 @@ docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supaba
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0003_adaptive_source_types.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0004_chapter_field_states.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0005_crawl_run_intelligence.sql
+docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0006_benchmark_runs.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/seeds/0001_seed.sql
 ```
 

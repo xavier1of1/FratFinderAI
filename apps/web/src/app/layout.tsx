@@ -16,7 +16,8 @@ const navItems = [
   { href: "/", label: "Overview" },
   { href: "/chapters", label: "Chapters" },
   { href: "/runs", label: "Crawl Runs" },
-  { href: "/review-items", label: "Review Queue" }
+  { href: "/review-items", label: "Review Queue" },
+  { href: "/benchmarks", label: "Benchmarks" }
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -24,10 +25,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${displayFont.variable} ${monoFont.variable}`}>
       <body>
         <div className="shell">
-          <header className="header">
-            <div>
+          <header className="header appHeader">
+            <div className="brandBlock">
               <p className="eyebrow">Frat Finder AI</p>
               <h1>Operator Dashboard</h1>
+              <p className="headerDescription">A cleaner operating view for chapter coverage, crawl health, and manual review decisions.</p>
             </div>
             <nav>
               {navItems.map((item) => (
@@ -37,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               ))}
             </nav>
           </header>
-          <main>{children}</main>
+          <main className="mainStack">{children}</main>
         </div>
       </body>
     </html>

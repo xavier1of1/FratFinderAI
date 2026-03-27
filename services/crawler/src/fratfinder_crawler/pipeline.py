@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from fratfinder_crawler.adapters import AdapterRegistry
 from fratfinder_crawler.config import Settings
@@ -64,22 +65,106 @@ class CrawlService:
         log_event(LOGGER, "crawl_batch_finished", **result)
         return result
 
-    def process_field_jobs(self, limit: int = 25, source_slug: str | None = None) -> dict[str, int]:
+    def process_field_jobs(
+        self,
+        limit: int = 25,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        workers: int | None = None,
+    ) -> dict[str, int]:
+        worker_limits = _distribute_limit(limit, workers or self._settings.crawler_field_job_max_workers)
+        if not worker_limits:
+            result = {"processed": 0, "requeued": 0, "failed_terminal": 0}
+            log_event(
+                LOGGER,
+                "field_job_batch_finished",
+                limit=limit,
+                source_slug=source_slug,
+                field_name=field_name,
+                workers=0,
+                **result,
+            )
+            return result
+
+        if len(worker_limits) == 1:
+            result = self._process_field_job_chunk(
+                limit=worker_limits[0],
+                source_slug=source_slug,
+                field_name=field_name,
+                worker_index=1,
+                total_workers=1,
+            )
+            log_event(
+                LOGGER,
+                "field_job_batch_finished",
+                limit=limit,
+                source_slug=source_slug,
+                field_name=field_name,
+                workers=1,
+                **result,
+            )
+            return result
+
+        with ThreadPoolExecutor(max_workers=len(worker_limits), thread_name_prefix="field-job-worker") as executor:
+            futures = [
+                executor.submit(
+                    self._process_field_job_chunk,
+                    worker_limit,
+                    source_slug,
+                    field_name,
+                    index,
+                    len(worker_limits),
+                )
+                for index, worker_limit in enumerate(worker_limits, start=1)
+            ]
+
+        aggregate = {"processed": 0, "requeued": 0, "failed_terminal": 0}
+        for future in futures:
+            chunk_result = future.result()
+            for key in aggregate:
+                aggregate[key] += chunk_result[key]
+
+        log_event(
+            LOGGER,
+            "field_job_batch_finished",
+            limit=limit,
+            source_slug=source_slug,
+            field_name=field_name,
+            workers=len(worker_limits),
+            **aggregate,
+        )
+        return aggregate
+
+    def _process_field_job_chunk(
+        self,
+        limit: int,
+        source_slug: str | None,
+        field_name: str | None,
+        worker_index: int,
+        total_workers: int,
+    ) -> dict[str, int]:
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
             engine = FieldJobEngine(
                 repository=repository,
                 logger=LOGGER,
-                worker_id=self._settings.crawler_field_job_worker_id,
+                worker_id=_worker_id(self._settings.crawler_field_job_worker_id, worker_index, total_workers),
                 base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
                 source_slug=source_slug,
+                field_name=field_name,
                 search_client=SearchClient(self._settings),
+                search_provider=self._settings.crawler_search_provider,
                 max_search_pages=self._settings.crawler_search_max_pages_per_job,
+                negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
+                dependency_wait_seconds=self._settings.crawler_search_dependency_wait_seconds,
+                email_max_queries=self._settings.crawler_search_email_max_queries,
+                instagram_max_queries=self._settings.crawler_search_instagram_max_queries,
+                enable_school_initials=self._settings.crawler_search_enable_school_initials,
+                min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
+                enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
+                instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
             )
-            result = engine.process(limit=limit)
-
-        log_event(LOGGER, "field_job_batch_finished", limit=limit, source_slug=source_slug, **result)
-        return result
+            return engine.process(limit=limit)
 
     def liveness(self) -> dict[str, object]:
         return {"ok": True, "service": "crawler", "probe": "liveness"}
@@ -92,3 +177,18 @@ class CrawlService:
                 raise RuntimeError("Database readiness check failed")
 
         return {"ok": True, "service": "crawler", "probe": "readiness"}
+
+
+def _distribute_limit(limit: int, workers: int) -> list[int]:
+    effective_limit = max(0, limit)
+    if effective_limit == 0:
+        return []
+    effective_workers = max(1, min(workers, effective_limit))
+    base, remainder = divmod(effective_limit, effective_workers)
+    return [base + (1 if index < remainder else 0) for index in range(effective_workers) if base + (1 if index < remainder else 0) > 0]
+
+
+def _worker_id(base_worker_id: str, worker_index: int, total_workers: int) -> str:
+    if total_workers <= 1:
+        return base_worker_id
+    return f"{base_worker_id}-{worker_index}"
