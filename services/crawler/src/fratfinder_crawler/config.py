@@ -77,10 +77,20 @@ class Settings(BaseSettings):
     crawler_llm_model: str = Field(default="gpt-4o-mini", alias="CRAWLER_LLM_MODEL")
     crawler_llm_max_tokens: int = Field(default=2000, alias="CRAWLER_LLM_MAX_TOKENS")
     crawler_llm_max_calls_per_run: int = Field(default=3, alias="CRAWLER_LLM_MAX_CALLS_PER_RUN")
+    crawler_runtime_mode: str = Field(default="legacy", alias="CRAWLER_RUNTIME_MODE")
+    crawler_adaptive_enabled: bool = Field(default=False, alias="CRAWLER_ADAPTIVE_ENABLED")
+    crawler_frontier_max_pages_per_source: int = Field(default=40, alias="CRAWLER_FRONTIER_MAX_PAGES_PER_SOURCE")
+    crawler_frontier_max_depth: int = Field(default=3, alias="CRAWLER_FRONTIER_MAX_DEPTH")
+    crawler_frontier_max_pages_per_template: int = Field(default=8, alias="CRAWLER_FRONTIER_MAX_PAGES_PER_TEMPLATE")
+    crawler_frontier_max_empty_streak: int = Field(default=5, alias="CRAWLER_FRONTIER_MAX_EMPTY_STREAK")
+    crawler_adaptive_epsilon: float = Field(default=0.1, alias="CRAWLER_ADAPTIVE_EPSILON")
+    crawler_adaptive_min_score: float = Field(default=0.1, alias="CRAWLER_ADAPTIVE_MIN_SCORE")
+    crawler_adaptive_stop_saturation_threshold: int = Field(default=4, alias="CRAWLER_ADAPTIVE_STOP_SATURATION_THRESHOLD")
+    crawler_policy_version: str = Field(default="adaptive-v1", alias="CRAWLER_POLICY_VERSION")
+    crawler_replay_export_limit: int = Field(default=500, alias="CRAWLER_REPLAY_EXPORT_LIMIT")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

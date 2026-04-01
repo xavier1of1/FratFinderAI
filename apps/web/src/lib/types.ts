@@ -45,6 +45,9 @@ export interface CrawlRunListItem {
   fieldJobsCreated: number;
   lastError: string | null;
   strategyUsed: string | null;
+  runtimeMode: string | null;
+  stopReason: string | null;
+  crawlSessionCount: number;
   pageLevelConfidence: number | null;
   llmCallsUsed: number;
 }
@@ -443,3 +446,5 @@ export interface CampaignRun {
   items: CampaignRunItem[];
   events: CampaignRunEvent[];
 }
+
+

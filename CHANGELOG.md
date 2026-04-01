@@ -1,7 +1,29 @@
-# Changelog
+## [0.10.10] - 2026-04-01
 
-All notable changes to this project will be documented in this file.
+### Added
+- Added `infra/supabase/migrations/0013_adaptive_crawl_runtime.sql` introducing adaptive crawl sessions, frontier storage, page observations, reward events, template profiles, and policy snapshots.
+- Added a new adaptive crawler foundation with:
+  - persistent crawl sessions
+  - weighted-BFS frontier scoring
+  - template-signature memory
+  - contextual-bandit style policy decisions
+  - adaptive observation export, replay summary, and policy report CLI commands
+- Added explicit CLI runtime commands:
+  - `run-legacy`
+  - `run-adaptive`
+  - `crawl-export-observations`
+  - `crawl-replay-policy`
+  - `crawl-policy-report`
+- Added `services/crawler/src/fratfinder_crawler/tests/test_adaptive_runtime.py` covering adaptive frontier, template, policy, and stop-condition behavior.
 
+### Changed
+- `CrawlService` now supports dual-track runtime dispatch while preserving the existing crawl-run, chapter, provenance, review, and field-job contracts.
+- Crawl runs now persist adaptive runtime metadata such as runtime mode, stop reason, and policy snapshot inside `crawl_runs.extraction_metadata`.
+- The Runs and Overview web surfaces now expose adaptive runtime metadata so operators can compare legacy vs adaptive executions without leaving the dashboard.
+- `.env.example` and `README.md` now document the adaptive runtime controls and inspection commands.
+
+### Fixed
+- Fixed the transition risk of an immediate crawl-core rewrite by implementing the adaptive runtime as a side-by-side path instead of mutating the legacy LangGraph in place.
 ## [0.10.9] - 2026-04-01
 
 ### Added
@@ -421,6 +443,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
 
 
 

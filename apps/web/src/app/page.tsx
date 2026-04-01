@@ -79,6 +79,7 @@ export default async function OverviewPage() {
         {latestRun ? (
           <p>
             <StatusPill status={latestRun.status} /> <span className="muted"> Source:</span> {latestRun.sourceSlug ?? "n/a"}
+            {latestRun.runtimeMode ? (<><span className="muted"> | Runtime:</span> <TagPill label={latestRun.runtimeMode} tone="info" /></>) : null}
             {latestRun.strategyUsed ? (
               <>
                 <span className="muted"> | Strategy:</span> <TagPill label={latestRun.strategyUsed} tone="info" />
@@ -91,6 +92,7 @@ export default async function OverviewPage() {
             ) : null}
             <span className="muted"> | Upserted:</span> {latestRun.recordsUpserted}
             <span className="muted"> | Review Items:</span> {latestRun.reviewItemsCreated}
+            {latestRun.stopReason ? (<><span className="muted"> | Stop:</span> {latestRun.stopReason}</>) : null}
           </p>
         ) : (
           <p className="muted">No crawl runs found yet.</p>
@@ -112,3 +114,6 @@ export default async function OverviewPage() {
     </div>
   );
 }
+
+
+

@@ -14,7 +14,7 @@ export default async function RunsPage() {
       <PageIntro
         eyebrow="Runs"
         title="Execution history for your chapter crawls"
-        description="This page is for auditing source performance: which parser or strategy fired, what confidence the crawler had, and how many records or review items each run produced."
+        description="This page is for auditing source performance: which parser or strategy fired, which runtime handled the crawl, and how many records or review items each run produced."
         meta={[`${data.length} recent runs`, `${succeeded} succeeded`, `${partial} partial`]}
       />
 
@@ -29,6 +29,9 @@ export default async function RunsPage() {
                 <th>Source</th>
                 <th>Status</th>
                 <th>Strategy</th>
+                <th>Runtime</th>
+                <th>Stop Reason</th>
+                <th>Sessions</th>
                 <th>Page Confidence</th>
                 <th>LLM Calls</th>
                 <th>Seen</th>
@@ -46,9 +49,10 @@ export default async function RunsPage() {
                   <td>
                     <StatusPill status={run.status} />
                   </td>
-                  <td>
-                    {run.strategyUsed ? <TagPill label={run.strategyUsed} tone="info" /> : <span className="muted">n/a</span>}
-                  </td>
+                  <td>{run.strategyUsed ? <TagPill label={run.strategyUsed} tone="info" /> : <span className="muted">n/a</span>}</td>
+                  <td>{run.runtimeMode ? <TagPill label={run.runtimeMode} tone="info" /> : <span className="muted">legacy</span>}</td>
+                  <td>{run.stopReason ?? <span className="muted">n/a</span>}</td>
+                  <td>{run.crawlSessionCount}</td>
                   <td>{run.pageLevelConfidence !== null ? run.pageLevelConfidence.toFixed(2) : <span className="muted">n/a</span>}</td>
                   <td>{run.llmCallsUsed}</td>
                   <td>{run.recordsSeen}</td>
@@ -65,3 +69,4 @@ export default async function RunsPage() {
     </div>
   );
 }
+

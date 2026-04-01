@@ -11,6 +11,7 @@ from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
     CrawlMetrics,
     ExistingSourceCandidate,
+    FrontierItem,
     FieldJob,
     FIELD_TO_CHAPTER_COLUMN,
     FIELD_JOB_FIND_EMAIL,
@@ -20,8 +21,11 @@ from fratfinder_crawler.models import (
     FIELD_JOB_VERIFY_WEBSITE,
     FIELD_JOB_TYPES,
     NormalizedChapter,
+    PageObservation,
     ProvenanceRecord,
+    RewardEvent,
     ReviewItemCandidate,
+    TemplateProfile,
     SourceRecord,
     VerifiedSourceRecord,
 )
@@ -1155,3 +1159,466 @@ class CrawlerRepository:
 
 
 
+
+
+    def start_crawl_session(
+        self,
+        *,
+        crawl_run_id: int,
+        source_id: str,
+        runtime_mode: str,
+        seed_urls: list[str],
+        budget_config: dict[str, Any],
+    ) -> str:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawl_sessions (crawl_run_id, source_id, runtime_mode, status, seed_urls, budget_config, summary)
+                VALUES (%s, %s, %s, 'running', %s, %s, '{}'::jsonb)
+                RETURNING id
+                """,
+                (crawl_run_id, source_id, runtime_mode, Jsonb(seed_urls), Jsonb(budget_config)),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return str(row["id"])
+
+    def finish_crawl_session(
+        self,
+        crawl_session_id: str,
+        *,
+        status: str,
+        stop_reason: str | None,
+        summary: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE crawl_sessions
+                SET
+                    status = %s,
+                    stop_reason = %s,
+                    summary = COALESCE(%s, summary),
+                    finished_at = NOW()
+                WHERE id = %s
+                """,
+                (status, stop_reason, Jsonb(summary or {}), crawl_session_id),
+            )
+        self._connection.commit()
+
+    def load_recent_crawl_session(self, crawl_run_id: int) -> dict[str, Any] | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, crawl_run_id, source_id, runtime_mode, status, seed_urls, budget_config, stop_reason, summary
+                FROM crawl_sessions
+                WHERE crawl_run_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (crawl_run_id,),
+            )
+            row = cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def enqueue_frontier_items(self, crawl_session_id: str, items: list[FrontierItem]) -> int:
+        if not items:
+            return 0
+        created = 0
+        with self._connection.cursor() as cursor:
+            for item in items:
+                cursor.execute(
+                    """
+                    INSERT INTO crawl_frontier_items (
+                        crawl_session_id,
+                        url,
+                        canonical_url,
+                        parent_url,
+                        depth,
+                        anchor_text,
+                        discovered_from,
+                        state,
+                        score_total,
+                        score_components,
+                        selected_count
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (crawl_session_id, canonical_url)
+                    DO UPDATE SET
+                        score_total = GREATEST(crawl_frontier_items.score_total, EXCLUDED.score_total),
+                        score_components = CASE
+                            WHEN EXCLUDED.score_total >= crawl_frontier_items.score_total THEN EXCLUDED.score_components
+                            ELSE crawl_frontier_items.score_components
+                        END,
+                        anchor_text = COALESCE(crawl_frontier_items.anchor_text, EXCLUDED.anchor_text),
+                        parent_url = COALESCE(crawl_frontier_items.parent_url, EXCLUDED.parent_url),
+                        discovered_from = CASE
+                            WHEN EXCLUDED.score_total >= crawl_frontier_items.score_total THEN EXCLUDED.discovered_from
+                            ELSE crawl_frontier_items.discovered_from
+                        END
+                    RETURNING id
+                    """,
+                    (
+                        crawl_session_id,
+                        item.url,
+                        item.canonical_url,
+                        item.parent_url,
+                        item.depth,
+                        item.anchor_text,
+                        item.discovered_from,
+                        item.state,
+                        item.score_total,
+                        Jsonb(item.score_components),
+                        item.selected_count,
+                    ),
+                )
+                if cursor.fetchone() is not None:
+                    created += 1
+        self._connection.commit()
+        return created
+
+    def pop_next_frontier_item(self, crawl_session_id: str) -> FrontierItem | None:
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH next_item AS (
+                    SELECT id
+                    FROM crawl_frontier_items
+                    WHERE crawl_session_id = %s
+                      AND state = 'queued'
+                    ORDER BY score_total DESC, depth ASC, created_at ASC
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                ),
+                claimed AS (
+                    UPDATE crawl_frontier_items cfi
+                    SET
+                        state = 'visited',
+                        selected_count = selected_count + 1,
+                        updated_at = NOW()
+                    FROM next_item
+                    WHERE cfi.id = next_item.id
+                    RETURNING cfi.*
+                )
+                SELECT * FROM claimed
+                """,
+                (crawl_session_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return FrontierItem(
+            id=str(row["id"]),
+            url=row["url"],
+            canonical_url=row["canonical_url"],
+            parent_url=row["parent_url"],
+            depth=int(row["depth"]),
+            anchor_text=row["anchor_text"],
+            discovered_from=row["discovered_from"],
+            state=row["state"],
+            score_total=float(row["score_total"] or 0.0),
+            score_components=row["score_components"] or {},
+            selected_count=int(row["selected_count"] or 0),
+        )
+
+    def count_frontier_items(self, crawl_session_id: str, state: str = 'queued') -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*)::int AS count FROM crawl_frontier_items WHERE crawl_session_id = %s AND state = %s",
+                (crawl_session_id, state),
+            )
+            row = cursor.fetchone()
+        return int(row["count"] or 0)
+
+    def append_page_observation(self, observation: PageObservation) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawl_page_observations (
+                    crawl_session_id,
+                    url,
+                    template_signature,
+                    http_status,
+                    latency_ms,
+                    page_analysis,
+                    classification,
+                    embedded_data,
+                    candidate_actions,
+                    selected_action,
+                    selected_action_score,
+                    selected_action_score_components,
+                    outcome
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    observation.crawl_session_id,
+                    observation.url,
+                    observation.template_signature,
+                    observation.http_status,
+                    observation.latency_ms,
+                    Jsonb(observation.page_analysis),
+                    Jsonb(observation.classification),
+                    Jsonb(observation.embedded_data),
+                    Jsonb(observation.candidate_actions),
+                    observation.selected_action,
+                    observation.selected_action_score,
+                    Jsonb(observation.selected_action_score_components),
+                    Jsonb(observation.outcome),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return int(row["id"])
+
+    def append_reward_event(self, crawl_session_id: str, page_observation_id: int | None, event: RewardEvent) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawl_reward_events (
+                    crawl_session_id,
+                    page_observation_id,
+                    action_type,
+                    reward_value,
+                    reward_components,
+                    delayed
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    crawl_session_id,
+                    page_observation_id,
+                    event.action_type,
+                    event.reward_value,
+                    Jsonb(event.reward_components),
+                    event.delayed,
+                ),
+            )
+        self._connection.commit()
+
+    def get_template_profile(self, template_signature: str, host_family: str) -> TemplateProfile | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    template_signature,
+                    host_family,
+                    page_role_guess,
+                    best_action_family,
+                    best_extraction_family,
+                    visit_count,
+                    chapter_yield,
+                    contact_yield,
+                    empty_rate,
+                    timeout_rate,
+                    updated_at
+                FROM crawl_template_profiles
+                WHERE template_signature = %s
+                  AND host_family = %s
+                LIMIT 1
+                """,
+                (template_signature, host_family),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return TemplateProfile(
+            template_signature=row["template_signature"],
+            host_family=row["host_family"],
+            page_role_guess=row["page_role_guess"],
+            best_action_family=row["best_action_family"],
+            best_extraction_family=row["best_extraction_family"],
+            visit_count=int(row["visit_count"] or 0),
+            chapter_yield=float(row["chapter_yield"] or 0.0),
+            contact_yield=float(row["contact_yield"] or 0.0),
+            empty_rate=float(row["empty_rate"] or 0.0),
+            timeout_rate=float(row["timeout_rate"] or 0.0),
+            updated_at=row["updated_at"].isoformat() if row["updated_at"] else None,
+        )
+
+    def upsert_template_profile(
+        self,
+        *,
+        template_signature: str,
+        host_family: str,
+        page_role_guess: str | None,
+        action_type: str,
+        extraction_family: str | None,
+        chapter_yield: int,
+        contact_yield: int,
+        timeout: bool,
+        empty: bool,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawl_template_profiles (
+                    template_signature,
+                    host_family,
+                    page_role_guess,
+                    best_action_family,
+                    best_extraction_family,
+                    visit_count,
+                    chapter_yield,
+                    contact_yield,
+                    empty_rate,
+                    timeout_rate,
+                    updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, NOW())
+                ON CONFLICT (template_signature, host_family)
+                DO UPDATE SET
+                    page_role_guess = COALESCE(EXCLUDED.page_role_guess, crawl_template_profiles.page_role_guess),
+                    best_action_family = CASE
+                        WHEN EXCLUDED.chapter_yield + EXCLUDED.contact_yield >= crawl_template_profiles.chapter_yield + crawl_template_profiles.contact_yield
+                        THEN EXCLUDED.best_action_family
+                        ELSE crawl_template_profiles.best_action_family
+                    END,
+                    best_extraction_family = CASE
+                        WHEN EXCLUDED.chapter_yield + EXCLUDED.contact_yield >= crawl_template_profiles.chapter_yield + crawl_template_profiles.contact_yield
+                        THEN EXCLUDED.best_extraction_family
+                        ELSE crawl_template_profiles.best_extraction_family
+                    END,
+                    visit_count = crawl_template_profiles.visit_count + 1,
+                    chapter_yield = ((crawl_template_profiles.chapter_yield * crawl_template_profiles.visit_count) + EXCLUDED.chapter_yield)
+                        / NULLIF(crawl_template_profiles.visit_count + 1, 0),
+                    contact_yield = ((crawl_template_profiles.contact_yield * crawl_template_profiles.visit_count) + EXCLUDED.contact_yield)
+                        / NULLIF(crawl_template_profiles.visit_count + 1, 0),
+                    empty_rate = ((crawl_template_profiles.empty_rate * crawl_template_profiles.visit_count) + EXCLUDED.empty_rate)
+                        / NULLIF(crawl_template_profiles.visit_count + 1, 0),
+                    timeout_rate = ((crawl_template_profiles.timeout_rate * crawl_template_profiles.visit_count) + EXCLUDED.timeout_rate)
+                        / NULLIF(crawl_template_profiles.visit_count + 1, 0),
+                    updated_at = NOW()
+                """,
+                (
+                    template_signature,
+                    host_family,
+                    page_role_guess,
+                    action_type,
+                    extraction_family,
+                    float(chapter_yield),
+                    float(contact_yield),
+                    1.0 if empty else 0.0,
+                    1.0 if timeout else 0.0,
+                ),
+            )
+        self._connection.commit()
+
+    def save_policy_snapshot(
+        self,
+        *,
+        policy_version: str,
+        runtime_mode: str,
+        feature_schema_version: str,
+        model_payload: dict[str, Any],
+        metrics: dict[str, Any],
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawl_policy_snapshots (
+                    policy_version,
+                    runtime_mode,
+                    feature_schema_version,
+                    model_payload,
+                    metrics
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (policy_version, runtime_mode, feature_schema_version, Jsonb(model_payload), Jsonb(metrics)),
+            )
+        self._connection.commit()
+
+    def export_crawl_observations(
+        self,
+        *,
+        source_slug: str | None = None,
+        crawl_session_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        filters = []
+        params: list[Any] = []
+        if source_slug is not None:
+            params.append(source_slug)
+            filters.append(f"s.slug = %s")
+        if crawl_session_id is not None:
+            params.append(crawl_session_id)
+            filters.append(f"cpo.crawl_session_id = %s")
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(max(1, limit))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    cpo.id,
+                    cpo.crawl_session_id,
+                    s.slug AS source_slug,
+                    cs.runtime_mode,
+                    cpo.url,
+                    cpo.template_signature,
+                    cpo.http_status,
+                    cpo.latency_ms,
+                    cpo.page_analysis,
+                    cpo.classification,
+                    cpo.embedded_data,
+                    cpo.candidate_actions,
+                    cpo.selected_action,
+                    cpo.selected_action_score,
+                    cpo.selected_action_score_components,
+                    cpo.outcome,
+                    cpo.created_at
+                FROM crawl_page_observations cpo
+                JOIN crawl_sessions cs ON cs.id = cpo.crawl_session_id
+                JOIN sources s ON s.id = cs.source_id
+                {where_clause}
+                ORDER BY cpo.created_at DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def build_policy_report(self, limit: int = 25) -> dict[str, Any]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    template_signature,
+                    host_family,
+                    page_role_guess,
+                    best_action_family,
+                    best_extraction_family,
+                    visit_count,
+                    chapter_yield,
+                    contact_yield,
+                    empty_rate,
+                    timeout_rate,
+                    updated_at
+                FROM crawl_template_profiles
+                ORDER BY updated_at DESC, visit_count DESC
+                LIMIT %s
+                """,
+                (max(1, limit),),
+            )
+            templates = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT
+                    action_type,
+                    COUNT(*)::int AS event_count,
+                    COALESCE(AVG(reward_value), 0) AS avg_reward,
+                    COALESCE(SUM(reward_value), 0) AS total_reward
+                FROM crawl_reward_events
+                GROUP BY action_type
+                ORDER BY avg_reward DESC, event_count DESC
+                LIMIT %s
+                """,
+                (max(1, limit),),
+            )
+            action_summary = [dict(row) for row in cursor.fetchall()]
+        return {
+            "templateProfiles": templates,
+            "actionSummary": action_summary,
+        }

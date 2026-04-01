@@ -153,6 +153,71 @@ class CrawlMetrics:
 
 
 @dataclass(slots=True)
+class FrontierItem:
+    id: str | None
+    url: str
+    canonical_url: str
+    parent_url: str | None
+    depth: int
+    anchor_text: str | None
+    discovered_from: str
+    state: str = "queued"
+    score_total: float = 0.0
+    score_components: dict[str, float] = field(default_factory=dict)
+    selected_count: int = 0
+
+
+@dataclass(slots=True)
+class PolicyDecision:
+    action_type: str
+    score: float
+    score_components: dict[str, float] = field(default_factory=dict)
+    predicted_reward: float = 0.0
+    context: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PageObservation:
+    id: int | None
+    crawl_session_id: str
+    url: str
+    template_signature: str
+    http_status: int | None
+    latency_ms: int
+    page_analysis: dict[str, Any]
+    classification: dict[str, Any]
+    embedded_data: dict[str, Any]
+    candidate_actions: list[dict[str, Any]] = field(default_factory=list)
+    selected_action: str | None = None
+    selected_action_score: float | None = None
+    selected_action_score_components: dict[str, float] = field(default_factory=dict)
+    outcome: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class RewardEvent:
+    action_type: str
+    reward_value: float
+    reward_components: dict[str, float] = field(default_factory=dict)
+    delayed: bool = False
+
+
+@dataclass(slots=True)
+class TemplateProfile:
+    template_signature: str
+    host_family: str
+    page_role_guess: str | None = None
+    best_action_family: str | None = None
+    best_extraction_family: str | None = None
+    visit_count: int = 0
+    chapter_yield: float = 0.0
+    contact_yield: float = 0.0
+    empty_rate: float = 0.0
+    timeout_rate: float = 0.0
+    updated_at: str | None = None
+
+
+@dataclass(slots=True)
 class PageAnalysis:
     title: str | None
     headings: list[str]
@@ -225,4 +290,3 @@ class UnsupportedSourceError(Exception):
 
 class AmbiguousRecordError(Exception):
     pass
-

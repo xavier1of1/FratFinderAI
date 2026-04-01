@@ -139,6 +139,22 @@ Revalidate one verified seed (manual/operator-driven):
 python -m fratfinder_crawler.cli revalidate-verified-source --fraternity-slug sigma-chi
 ```
 
+Run the new dual-track crawl runtimes explicitly:
+
+```bash
+python -m fratfinder_crawler.cli run-legacy --source-slug sigma-chi-main
+python -m fratfinder_crawler.cli run-adaptive --source-slug sigma-chi-main --runtime-mode adaptive_shadow
+python -m fratfinder_crawler.cli run-adaptive --source-slug sigma-chi-main --runtime-mode adaptive_assisted
+```
+
+Inspect adaptive crawl telemetry and policy summaries:
+
+```bash
+python -m fratfinder_crawler.cli crawl-export-observations --source-slug sigma-chi-main --limit 50
+python -m fratfinder_crawler.cli crawl-replay-policy --source-slug sigma-chi-main --limit 200
+python -m fratfinder_crawler.cli crawl-policy-report --limit 25
+```
+
 Revalidate the newest N verified seeds:
 
 ```bash
@@ -346,3 +362,4 @@ docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supaba
 - Field jobs are processed by the crawler service with claim/start/complete/fail/requeue semantics and exponential backoff.
 - Crawl runs persist page-analysis, classification, and extraction metadata for operator inspection.
 - This README is intended to remain an operational runbook as the project evolves.
+

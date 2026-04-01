@@ -18,7 +18,7 @@ from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.search import SearchClient, SearchUnavailableError
 from fratfinder_crawler.models import CrawlMetrics
-from fratfinder_crawler.orchestration import CrawlOrchestrator
+from fratfinder_crawler.orchestration import AdaptiveCrawlOrchestrator, CrawlOrchestrator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,23 +27,25 @@ class CrawlService:
     def __init__(self, settings: Settings):
         self._settings = settings
 
-    def run(self, source_slug: str | None = None) -> dict[str, int]:
+    def run(self, source_slug: str | None = None, runtime_mode: str | None = None) -> dict[str, int]:
         aggregate = CrawlMetrics()
+        effective_runtime_mode = self._resolve_runtime_mode(runtime_mode)
 
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
             sources = repository.load_sources(source_slug=source_slug)
-            orchestrator = CrawlOrchestrator(repository, HttpClient(self._settings), AdapterRegistry())
+            orchestrator = self._build_orchestrator(repository, effective_runtime_mode)
 
             log_event(
                 LOGGER,
                 "crawl_batch_started",
                 requested_source_slug=source_slug,
                 source_count=len(sources),
+                runtime_mode=effective_runtime_mode,
             )
 
             for source in sources:
-                log_event(LOGGER, "source_crawl_started", source_slug=source.source_slug)
+                log_event(LOGGER, "source_crawl_started", source_slug=source.source_slug, runtime_mode=effective_runtime_mode)
                 metrics = orchestrator.run_for_source(source)
                 aggregate.pages_processed += metrics.pages_processed
                 aggregate.records_seen += metrics.records_seen
@@ -54,6 +56,7 @@ class CrawlService:
                     LOGGER,
                     "source_crawl_finished",
                     source_slug=source.source_slug,
+                    runtime_mode=effective_runtime_mode,
                     pages_processed=metrics.pages_processed,
                     records_seen=metrics.records_seen,
                     records_upserted=metrics.records_upserted,
@@ -62,6 +65,7 @@ class CrawlService:
                 )
 
         result = {
+            "runtime_mode": effective_runtime_mode,
             "pages_processed": aggregate.pages_processed,
             "records_seen": aggregate.records_seen,
             "records_upserted": aggregate.records_upserted,
@@ -70,6 +74,75 @@ class CrawlService:
         }
         log_event(LOGGER, "crawl_batch_finished", **result)
         return result
+
+    def run_legacy(self, source_slug: str | None = None) -> dict[str, int]:
+        return self.run(source_slug=source_slug, runtime_mode="legacy")
+
+    def run_adaptive(self, source_slug: str | None = None, runtime_mode: str = "adaptive_shadow") -> dict[str, int]:
+        return self.run(source_slug=source_slug, runtime_mode=runtime_mode)
+
+    def export_crawl_observations(
+        self,
+        *,
+        source_slug: str | None = None,
+        crawl_session_id: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, object]:
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            data = repository.export_crawl_observations(
+                source_slug=source_slug,
+                crawl_session_id=crawl_session_id,
+                limit=limit or self._settings.crawler_replay_export_limit,
+            )
+        return {"count": len(data), "observations": data}
+
+    def crawl_policy_report(self, limit: int = 25) -> dict[str, object]:
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            return repository.build_policy_report(limit=limit)
+
+    def crawl_replay_policy(self, limit: int | None = None, source_slug: str | None = None) -> dict[str, object]:
+        snapshot = self.export_crawl_observations(source_slug=source_slug, limit=limit)
+        action_buckets: dict[str, dict[str, float]] = {}
+        for item in snapshot["observations"]:
+            selected_action = str(item.get("selected_action") or "unknown")
+            bucket = action_buckets.setdefault(selected_action, {"count": 0.0, "records": 0.0, "avgSelectedScore": 0.0})
+            bucket["count"] += 1.0
+            outcome = item.get("outcome") or {}
+            bucket["records"] += float((outcome or {}).get("recordsExtracted") or 0.0)
+            bucket["avgSelectedScore"] += float(item.get("selected_action_score") or 0.0)
+        replay = []
+        for action, values in sorted(action_buckets.items(), key=lambda entry: (-entry[1]["records"], -entry[1]["count"])):
+            replay.append(
+                {
+                    "actionType": action,
+                    "count": int(values["count"]),
+                    "avgRecords": round(values["records"] / max(values["count"], 1.0), 4),
+                    "avgSelectedScore": round(values["avgSelectedScore"] / max(values["count"], 1.0), 4),
+                }
+            )
+        return {"count": len(replay), "actions": replay}
+
+    def _resolve_runtime_mode(self, runtime_mode: str | None) -> str:
+        mode = (runtime_mode or self._settings.crawler_runtime_mode or "legacy").strip().lower()
+        allowed = {"legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"}
+        if mode not in allowed:
+            return "legacy"
+        if mode != "legacy" and not self._settings.crawler_adaptive_enabled and runtime_mode is None:
+            return "legacy"
+        return mode
+
+    def _build_orchestrator(self, repository: CrawlerRepository, runtime_mode: str):
+        if runtime_mode == "legacy":
+            return CrawlOrchestrator(repository, HttpClient(self._settings), AdapterRegistry())
+        return AdaptiveCrawlOrchestrator(
+            repository,
+            HttpClient(self._settings),
+            AdapterRegistry(),
+            settings=self._settings,
+            runtime_mode=runtime_mode,
+        )
 
     def process_field_jobs(
         self,
@@ -609,3 +682,5 @@ def _utc_now_iso() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
+
+
