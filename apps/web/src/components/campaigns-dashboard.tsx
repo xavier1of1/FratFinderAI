@@ -6,7 +6,8 @@ import { buildCampaignReport } from "@/lib/campaign-report";
 import { MetricCard } from "@/components/metric-card";
 import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
-import type { CampaignRun, CampaignRunConfig } from "@/lib/types";
+import { computeRuntimeComparison } from "@/lib/runtime-comparison";
+import type { CampaignRun, CampaignRunConfig, CrawlRunListItem } from "@/lib/types";
 
 interface ApiSuccess<T> {
   success: true;
@@ -92,8 +93,50 @@ async function fetchCampaigns(): Promise<CampaignRun[]> {
   return sortCampaigns(payload.data);
 }
 
-export function CampaignsDashboard({ initialCampaigns }: { initialCampaigns: CampaignRun[] }) {
+
+async function fetchCrawlRuns(): Promise<CrawlRunListItem[]> {
+  const response = await fetch("/api/runs?limit=800", { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<CrawlRunListItem[]>;
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch crawl runs: ${response.status}`);
+  }
+  return payload.data;
+}
+
+function extractCampaignSourceSlugs(campaign: CampaignRun): string[] {
+  const sourceSlugs = new Set<string>();
+
+  for (const event of campaign.events) {
+    const payload = event.payload as Record<string, unknown>;
+    const sourceSlug = payload.sourceSlug;
+    if (typeof sourceSlug === "string" && sourceSlug.trim()) {
+      sourceSlugs.add(sourceSlug.trim());
+    }
+  }
+
+  if (sourceSlugs.size === 0) {
+    for (const item of campaign.items) {
+      if (item.fraternitySlug?.trim()) {
+        sourceSlugs.add(`${item.fraternitySlug.trim()}-main`);
+      }
+    }
+  }
+
+  return [...sourceSlugs];
+}
+
+export function CampaignsDashboard({
+  initialCampaigns,
+  initialRuns
+}: {
+  initialCampaigns: CampaignRun[];
+  initialRuns: CrawlRunListItem[];
+}) {
   const [campaigns, setCampaigns] = useState<CampaignRun[]>(sortCampaigns(initialCampaigns));
+  const [crawlRuns, setCrawlRuns] = useState<CrawlRunListItem[]>(initialRuns);
   const [selectedId, setSelectedId] = useState<string | null>(initialCampaigns[0]?.id ?? null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -133,16 +176,18 @@ export function CampaignsDashboard({ initialCampaigns }: { initialCampaigns: Cam
     return selectedCampaign.status === "running" && selectedCampaign.runtimeActive === false;
   }, [selectedCampaign]);
 
+
   async function refreshCampaigns(options?: { selectNewest?: boolean }) {
     setIsRefreshing(true);
     try {
-      const data = await fetchCampaigns();
-      setCampaigns(data);
-      const selectedStillExists = selectedId ? data.some((item) => item.id === selectedId) : false;
-      if (options?.selectNewest && data[0]) {
-        setSelectedId(data[0].id);
+      const [campaignData, runData] = await Promise.all([fetchCampaigns(), fetchCrawlRuns()]);
+      setCampaigns(campaignData);
+      setCrawlRuns(runData);
+      const selectedStillExists = selectedId ? campaignData.some((item) => item.id === selectedId) : false;
+      if (options?.selectNewest && campaignData[0]) {
+        setSelectedId(campaignData[0].id);
       } else if (!selectedStillExists) {
-        setSelectedId(data[0]?.id ?? null);
+        setSelectedId(campaignData[0]?.id ?? null);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -249,6 +294,14 @@ export function CampaignsDashboard({ initialCampaigns }: { initialCampaigns: Cam
         };
       });
   }, [selectedCampaign]);
+  const campaignSourceSlugs = useMemo(() => (selectedCampaign ? extractCampaignSourceSlugs(selectedCampaign) : []), [selectedCampaign]);
+  const runtimeComparison = useMemo(
+    () =>
+      computeRuntimeComparison(crawlRuns, {
+        sourceSlugs: campaignSourceSlugs
+      }),
+    [crawlRuns, campaignSourceSlugs]
+  );
 
   return (
     <div className="sectionStack">
@@ -467,7 +520,7 @@ export function CampaignsDashboard({ initialCampaigns }: { initialCampaigns: Cam
                             <div
                               className={`historyBar ${point.healthy ? "healthy" : "degraded"}`}
                               style={{ height: `${Math.max(10, point.successRate * 100)}%` }}
-                              title={`${new Date(point.timestamp).toLocaleTimeString()} · ${(point.successRate * 100).toFixed(1)}%`}
+                              title={`${new Date(point.timestamp).toLocaleTimeString()} - ${(point.successRate * 100).toFixed(1)}%`}
                             />
                           </div>
                           <span className="historyBarLabel">{new Date(point.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
@@ -492,7 +545,7 @@ export function CampaignsDashboard({ initialCampaigns }: { initialCampaigns: Cam
                             <div
                               className="historyBar"
                               style={{ height: `${Math.max(10, Math.min(100, point.jobsPerMinute * 10))}%` }}
-                              title={`${point.label} · ${point.jobsPerMinute.toFixed(1)} jobs/min`}
+                              title={`${point.label} - ${point.jobsPerMinute.toFixed(1)} jobs/min`}
                             />
                           </div>
                           <span className="historyBarLabel">{point.label}</span>
@@ -536,6 +589,86 @@ export function CampaignsDashboard({ initialCampaigns }: { initialCampaigns: Cam
                   ))}
                 </div>
               ) : null}
+
+              <h3>Legacy vs Adaptive Runtime</h3>
+              {runtimeComparison.totalRuns === 0 ? (
+                <p className="muted">No crawl runs found for this campaign scope yet.</p>
+              ) : (
+                <div className="comparisonGrid">
+                  <div className="comparisonCard">
+                    <div className="benchmarkListItemHeader">
+                      <strong>Legacy ({runtimeComparison.scopeLabel})</strong>
+                      <span className="cellHint">{runtimeComparison.legacy.runCount} runs</span>
+                    </div>
+                    <div className="comparisonMetrics">
+                      <div>
+                        <span className="comparisonLabel">Success</span>
+                        <strong>{formatPercent(runtimeComparison.legacy.successRate)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Avg Seen</span>
+                        <strong>{formatNumber(runtimeComparison.legacy.avgRecordsSeen, 1)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Avg Upserted</span>
+                        <strong>{formatNumber(runtimeComparison.legacy.avgRecordsUpserted, 1)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Avg Sessions</span>
+                        <strong>{formatNumber(runtimeComparison.legacy.avgCrawlSessions, 2)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="comparisonCard">
+                    <div className="benchmarkListItemHeader">
+                      <strong>Adaptive ({runtimeComparison.scopeLabel})</strong>
+                      <span className="cellHint">{runtimeComparison.adaptive.runCount} runs</span>
+                    </div>
+                    <div className="comparisonMetrics">
+                      <div>
+                        <span className="comparisonLabel">Success</span>
+                        <strong>{formatPercent(runtimeComparison.adaptive.successRate)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Avg Seen</span>
+                        <strong>{formatNumber(runtimeComparison.adaptive.avgRecordsSeen, 1)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Avg Upserted</span>
+                        <strong>{formatNumber(runtimeComparison.adaptive.avgRecordsUpserted, 1)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Avg Sessions</span>
+                        <strong>{formatNumber(runtimeComparison.adaptive.avgCrawlSessions, 2)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="comparisonCard">
+                    <div className="benchmarkListItemHeader">
+                      <strong>Adaptive Delta</strong>
+                      <span className="cellHint">adaptive - legacy</span>
+                    </div>
+                    <div className="comparisonMetrics">
+                      <div>
+                        <span className="comparisonLabel">Success</span>
+                        <strong>{formatPercent(runtimeComparison.deltas.successRate)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Avg Seen</span>
+                        <strong>{formatNumber(runtimeComparison.deltas.avgRecordsSeen, 1)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">Records/Page</span>
+                        <strong>{formatNumber(runtimeComparison.deltas.avgRecordsPerPage, 2)}</strong>
+                      </div>
+                      <div>
+                        <span className="comparisonLabel">LLM Calls</span>
+                        <strong>{formatNumber(runtimeComparison.deltas.avgLlmCalls, 2)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <h3>Fraternity Items</h3>
               <div className="tableWrap">
@@ -646,3 +779,15 @@ export function CampaignsDashboard({ initialCampaigns }: { initialCampaigns: Cam
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1530,6 +1530,94 @@ class CrawlerRepository:
             )
         self._connection.commit()
 
+
+    def load_latest_policy_snapshot(
+        self,
+        *,
+        policy_version: str,
+        runtime_mode: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self._connection.cursor() as cursor:
+            if runtime_mode is None:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        policy_version,
+                        runtime_mode,
+                        feature_schema_version,
+                        model_payload,
+                        metrics,
+                        created_at
+                    FROM crawl_policy_snapshots
+                    WHERE policy_version = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (policy_version,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        policy_version,
+                        runtime_mode,
+                        feature_schema_version,
+                        model_payload,
+                        metrics,
+                        created_at
+                    FROM crawl_policy_snapshots
+                    WHERE policy_version = %s
+                      AND runtime_mode = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (policy_version, runtime_mode),
+                )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = dict(row)
+        created_at = payload.get("created_at")
+        if created_at is not None:
+            payload["created_at"] = created_at.isoformat()
+        return payload
+
+    def list_crawl_run_metrics(
+        self,
+        *,
+        source_slug: str,
+        runtime_mode: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    cr.id,
+                    s.slug AS source_slug,
+                    cr.started_at,
+                    cr.finished_at,
+                    cr.status,
+                    cr.pages_processed,
+                    cr.records_seen,
+                    cr.records_upserted,
+                    cr.review_items_created,
+                    cr.field_jobs_created,
+                    EXTRACT(EPOCH FROM (COALESCE(cr.finished_at, NOW()) - cr.started_at)) * 1000 AS duration_ms
+                FROM crawl_runs cr
+                JOIN sources s ON s.id = cr.source_id
+                WHERE s.slug = %s
+                  AND COALESCE(cr.extraction_metadata ->> 'runtime_mode', 'legacy') = %s
+                ORDER BY cr.started_at DESC
+                LIMIT %s
+                """,
+                (source_slug, runtime_mode, max(1, limit)),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
     def export_crawl_observations(
         self,
         *,

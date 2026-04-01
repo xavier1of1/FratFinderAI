@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     crawler_adaptive_stop_saturation_threshold: int = Field(default=4, alias="CRAWLER_ADAPTIVE_STOP_SATURATION_THRESHOLD")
     crawler_policy_version: str = Field(default="adaptive-v1", alias="CRAWLER_POLICY_VERSION")
     crawler_replay_export_limit: int = Field(default=500, alias="CRAWLER_REPLAY_EXPORT_LIMIT")
+    crawler_adaptive_policy_restore_enabled: bool = Field(default=True, alias="Agent:ADAPTIVE_POLICY_RESTORE_ENABLED")
+    crawler_adaptive_train_default_epochs: int = Field(default=3, alias="Agent:ADAPTIVE_TRAIN_DEFAULT_EPOCHS")
+    crawler_adaptive_train_default_runtime_mode: str = Field(default="adaptive_assisted", alias="Agent:ADAPTIVE_TRAIN_DEFAULT_RUNTIME_MODE")
+    crawler_adaptive_train_source_slugs: str = Field(default="", alias="Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS")
+    crawler_adaptive_eval_source_slugs: str = Field(default="", alias="Agent:ADAPTIVE_EVAL_SOURCE_SLUGS")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
 
 

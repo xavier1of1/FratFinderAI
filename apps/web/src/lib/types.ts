@@ -114,6 +114,8 @@ export interface BenchmarkRunConfig {
   limitPerCycle: number;
   cycles: number;
   pauseMs: number;
+  crawlRuntimeMode?: "legacy" | "adaptive_shadow" | "adaptive_assisted" | "adaptive_primary";
+  runAdaptiveCrawlBeforeCycles?: boolean;
 }
 
 export interface BenchmarkCycleSample {

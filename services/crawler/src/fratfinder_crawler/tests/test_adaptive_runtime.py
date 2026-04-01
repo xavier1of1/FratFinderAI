@@ -1,4 +1,4 @@
-from fratfinder_crawler.adaptive.frontier import score_frontier_item
+from fratfinder_crawler.adaptive.frontier import canonicalize_url, score_frontier_item
 from fratfinder_crawler.adaptive.policy import AdaptivePolicy
 from fratfinder_crawler.adaptive.stop_conditions import evaluate_stop_conditions
 from fratfinder_crawler.adaptive.template_memory import compute_template_signature
@@ -93,3 +93,65 @@ def test_stop_conditions_fire_on_budget_exhaustion():
     )
     assert should_stop is True
     assert reason == "page_budget_exhausted"
+
+
+def test_adaptive_policy_can_resume_from_snapshot():
+    policy = AdaptivePolicy(epsilon=0.0)
+    loaded = policy.load_snapshot(
+        {
+            "policyVersion": policy.policy_version,
+            "actions": {
+                "extract_table": {"count": 10, "avgReward": 3.5},
+            },
+        }
+    )
+    assert loaded is True
+    decisions = policy.choose_action(
+        ["extract_table", "extract_repeated_block"],
+        context={
+            "page_type": "static_directory",
+            "probable_page_role": "directory",
+            "has_map_widget": False,
+            "has_script_json": False,
+            "table_count": 1,
+            "repeated_block_count": 0,
+            "keyword_score": 0.0,
+        },
+        template_profile=None,
+        mode="adaptive_assisted",
+    )
+    assert decisions[0].action_type == "extract_table"
+
+
+def test_template_signature_coarsens_similar_paths():
+    analysis = _analysis()
+    left = compute_template_signature("https://example.org/chapters/california/alpha", analysis)
+    right = compute_template_signature("https://example.org/chapters/oregon/beta", analysis)
+    assert left == right
+
+
+def test_canonicalize_url_drops_tracker_query_params():
+    normalized = canonicalize_url(
+        "https://example.org/chapters/?utm_source=abc&fbclid=1&page=2&gclid=xyz"
+    )
+    assert normalized == "https://example.org/chapters?page=2"
+
+
+def test_adaptive_shadow_policy_returns_score_sorted_candidates():
+    policy = AdaptivePolicy(epsilon=0.0)
+    decisions = policy.choose_action(
+        ["review_branch", "extract_table", "extract_repeated_block"],
+        context={
+            "page_type": "static_directory",
+            "probable_page_role": "directory",
+            "has_map_widget": False,
+            "has_script_json": False,
+            "table_count": 2,
+            "repeated_block_count": 1,
+            "keyword_score": 0.0,
+        },
+        template_profile=None,
+        mode="adaptive_shadow",
+    )
+    scores = [decision.score for decision in decisions]
+    assert scores == sorted(scores, reverse=True)

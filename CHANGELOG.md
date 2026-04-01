@@ -1,3 +1,16 @@
+## [2.0.1] - 2026-04-01
+
+### Added
+- Added adaptive policy snapshot resume support so new adaptive runs can hydrate prior action/reward state before executing.
+- Added `adaptive-train-eval` CLI command to run repeated train/eval epochs and publish per-epoch KPI slope reports.
+- Added benchmark runtime controls (`crawlRuntimeMode`, `runAdaptiveCrawlBeforeCycles`) so benchmark runs can execute adaptive warmup in `adaptive_assisted` mode by default.
+
+### Changed
+- Coarsened adaptive template signatures to improve template-memory reuse across structurally similar pages.
+- Adaptive orchestration now stores both coarse and raw template signature context in telemetry metadata for easier diagnostics.
+- Benchmark config normalization now defaults crawl runtime to `adaptive_assisted` and enables pre-cycle adaptive warmup when a source is provided.
+- Version bumped to `2.0.1` in root package, web app package, and crawler package metadata.
+
 ## [2.0.0] - 2026-04-01
 
 ### Added
@@ -15,11 +28,17 @@
   - `crawl-replay-policy`
   - `crawl-policy-report`
 - Added `services/crawler/src/fratfinder_crawler/tests/test_adaptive_runtime.py` covering adaptive frontier, template, policy, and stop-condition behavior.
+- Added runtime-mode comparison panels to the Benchmarks and Campaigns dashboards (legacy vs adaptive scope cards + adaptive delta metrics).
+- Added cohort benchmark artifacts:
+  - `docs/reports/cohort_runtime_commands_2026-04-01.log`
+  - `docs/reports/cohort_runtime_summary_2026-04-01.json`
+  - `docs/reports/COHORT_RUNTIME_COMPARISON_2026-04-01.md`
 
 ### Changed
 - `CrawlService` now supports dual-track runtime dispatch while preserving the existing crawl-run, chapter, provenance, review, and field-job contracts.
 - Crawl runs now persist adaptive runtime metadata such as runtime mode, stop reason, and policy snapshot inside `crawl_runs.extraction_metadata`.
 - The Runs and Overview web surfaces now expose adaptive runtime metadata so operators can compare legacy vs adaptive executions without leaving the dashboard.
+- Benchmarks and Campaigns pages now hydrate crawl-run telemetry (`/api/runs`) to calculate runtime-mode deltas inside the operator flow.
 - `.env.example` and `README.md` now document the adaptive runtime controls and inspection commands.
 
 ### Fixed
@@ -443,6 +462,7 @@
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
 
 
 

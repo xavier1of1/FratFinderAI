@@ -46,6 +46,8 @@ class AdaptivePolicy:
     ) -> list[PolicyDecision]:
         decisions = [self._score_action(action, context=context, template_profile=template_profile) for action in actions]
         if mode == "adaptive_shadow":
+            # Keep shadow behavior deterministic and inspectable by score order.
+            decisions.sort(key=lambda item: item.score, reverse=True)
             return decisions
         if mode in {"adaptive_assisted", "adaptive_primary"} and decisions:
             if random.random() < self._epsilon:
@@ -61,6 +63,29 @@ class AdaptivePolicy:
         bucket = self._action_stats.setdefault(action_type, {"count": 0.0, "reward_sum": 0.0})
         bucket["count"] += 1.0
         bucket["reward_sum"] += reward_value
+
+    def load_snapshot(self, payload: dict[str, Any] | None) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        snapshot_version = str(payload.get("policyVersion") or "")
+        if snapshot_version and snapshot_version != self._policy_version:
+            return False
+        raw_actions = payload.get("actions")
+        if not isinstance(raw_actions, dict):
+            return False
+        restored: dict[str, dict[str, float]] = {}
+        for action_type, entry in raw_actions.items():
+            if not isinstance(entry, dict):
+                continue
+            count = float(entry.get("count") or 0.0)
+            avg_reward = float(entry.get("avgReward") or 0.0)
+            if count <= 0:
+                continue
+            restored[str(action_type)] = {"count": count, "reward_sum": avg_reward * count}
+        if not restored:
+            return False
+        self._action_stats = restored
+        return True
 
     def snapshot(self) -> dict[str, Any]:
         return {

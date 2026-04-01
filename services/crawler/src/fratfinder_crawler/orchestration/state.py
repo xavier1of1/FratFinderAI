@@ -62,6 +62,7 @@ class AdaptiveCrawlState(TypedDict, total=False):
     classification: SourceClassification
     embedded_data: EmbeddedDataResult
     template_signature: str
+    template_signature_raw: str
     candidate_actions: list[PolicyDecision]
     selected_action: str
     selected_action_score: float

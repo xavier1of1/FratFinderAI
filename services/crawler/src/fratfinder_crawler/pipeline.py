@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse
@@ -77,6 +78,117 @@ class CrawlService:
 
     def run_legacy(self, source_slug: str | None = None) -> dict[str, int]:
         return self.run(source_slug=source_slug, runtime_mode="legacy")
+
+    def adaptive_train_eval(
+        self,
+        *,
+        epochs: int,
+        train_source_slugs: list[str],
+        eval_source_slugs: list[str],
+        runtime_mode: str = "adaptive_assisted",
+        report_path: str | None = None,
+    ) -> dict[str, object]:
+        effective_runtime_mode = self._resolve_runtime_mode(runtime_mode)
+        if effective_runtime_mode == "legacy":
+            effective_runtime_mode = "adaptive_assisted"
+
+        train_sources = _normalize_source_slugs(train_source_slugs)
+        eval_sources = _normalize_source_slugs(eval_source_slugs)
+        if not train_sources:
+            raise ValueError("At least one train source slug is required")
+        if not eval_sources:
+            raise ValueError("At least one eval source slug is required")
+
+        epoch_rows: list[dict[str, object]] = []
+        for epoch in range(1, max(1, epochs) + 1):
+            train_metrics = self._run_sources_batch(train_sources, effective_runtime_mode)
+            eval_legacy = self._run_sources_batch(eval_sources, "legacy")
+            eval_adaptive = self._run_sources_batch(eval_sources, effective_runtime_mode)
+
+            legacy_records_per_page = _safe_ratio(eval_legacy["records_seen"], eval_legacy["pages_processed"])
+            adaptive_records_per_page = _safe_ratio(eval_adaptive["records_seen"], eval_adaptive["pages_processed"])
+            legacy_pages_per_record = _safe_ratio(eval_legacy["pages_processed"], eval_legacy["records_seen"])
+            adaptive_pages_per_record = _safe_ratio(eval_adaptive["pages_processed"], eval_adaptive["records_seen"])
+            legacy_upsert_ratio = _safe_ratio(eval_legacy["records_upserted"], eval_legacy["records_seen"])
+            adaptive_upsert_ratio = _safe_ratio(eval_adaptive["records_upserted"], eval_adaptive["records_seen"])
+
+            epoch_rows.append(
+                {
+                    "epoch": epoch,
+                    "train": train_metrics,
+                    "evalLegacy": eval_legacy,
+                    "evalAdaptive": eval_adaptive,
+                    "kpis": {
+                        "legacyRecordsPerPage": round(legacy_records_per_page, 4),
+                        "adaptiveRecordsPerPage": round(adaptive_records_per_page, 4),
+                        "recordsPerPageDelta": round(adaptive_records_per_page - legacy_records_per_page, 4),
+                        "legacyPagesPerRecord": round(legacy_pages_per_record, 4),
+                        "adaptivePagesPerRecord": round(adaptive_pages_per_record, 4),
+                        "pagesPerRecordDelta": round(adaptive_pages_per_record - legacy_pages_per_record, 4),
+                        "legacyUpsertRatio": round(legacy_upsert_ratio, 4),
+                        "adaptiveUpsertRatio": round(adaptive_upsert_ratio, 4),
+                        "upsertRatioDelta": round(adaptive_upsert_ratio - legacy_upsert_ratio, 4),
+                    },
+                }
+            )
+
+        slope = {
+            "recordsPerPageDeltaSlope": round(_linear_slope([float(row["kpis"]["recordsPerPageDelta"]) for row in epoch_rows]), 6),
+            "pagesPerRecordDeltaSlope": round(_linear_slope([float(row["kpis"]["pagesPerRecordDelta"]) for row in epoch_rows]), 6),
+            "upsertRatioDeltaSlope": round(_linear_slope([float(row["kpis"]["upsertRatioDelta"]) for row in epoch_rows]), 6),
+        }
+
+        final_report_path = report_path or _default_epoch_report_path()
+        report_markdown = _render_epoch_report(
+            epochs=max(1, epochs),
+            runtime_mode=effective_runtime_mode,
+            train_sources=train_sources,
+            eval_sources=eval_sources,
+            epoch_rows=epoch_rows,
+            slope=slope,
+        )
+        report_file = _resolve_repo_root() / final_report_path
+        report_file.parent.mkdir(parents=True, exist_ok=True)
+        report_file.write_text(report_markdown, encoding="utf-8")
+
+        return {
+            "epochs": max(1, epochs),
+            "runtime_mode": effective_runtime_mode,
+            "train_sources": train_sources,
+            "eval_sources": eval_sources,
+            "slope": slope,
+            "rows": epoch_rows,
+            "report_path": str(report_file),
+        }
+
+    def _run_sources_batch(self, source_slugs: list[str], runtime_mode: str) -> dict[str, float]:
+        aggregate = CrawlMetrics()
+        effective_runtime_mode = self._resolve_runtime_mode(runtime_mode)
+        requested = [slug for slug in source_slugs if slug]
+        selected_count = 0
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            orchestrator = self._build_orchestrator(repository, effective_runtime_mode)
+            for slug in requested:
+                matches = repository.load_sources(source_slug=slug)
+                if not matches:
+                    continue
+                source = matches[0]
+                selected_count += 1
+                metrics = orchestrator.run_for_source(source)
+                aggregate.pages_processed += metrics.pages_processed
+                aggregate.records_seen += metrics.records_seen
+                aggregate.records_upserted += metrics.records_upserted
+                aggregate.review_items_created += metrics.review_items_created
+                aggregate.field_jobs_created += metrics.field_jobs_created
+        return {
+            "sourceCount": float(selected_count),
+            "pages_processed": float(aggregate.pages_processed),
+            "records_seen": float(aggregate.records_seen),
+            "records_upserted": float(aggregate.records_upserted),
+            "review_items_created": float(aggregate.review_items_created),
+            "field_jobs_created": float(aggregate.field_jobs_created),
+        }
 
     def run_adaptive(self, source_slug: str | None = None, runtime_mode: str = "adaptive_shadow") -> dict[str, int]:
         return self.run(source_slug=source_slug, runtime_mode=runtime_mode)
@@ -582,6 +694,91 @@ class CrawlService:
         return {"ok": True, "service": "crawler", "probe": "readiness"}
 
 
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    if denominator <= 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _linear_slope(values: list[float]) -> float:
+    n = len(values)
+    if n < 2:
+        return 0.0
+    x_values = list(range(1, n + 1))
+    x_mean = sum(x_values) / n
+    y_mean = sum(values) / n
+    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, values, strict=False))
+    denominator = sum((x - x_mean) ** 2 for x in x_values)
+    if denominator <= 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _normalize_source_slugs(slugs: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for slug in slugs:
+        value = str(slug).strip()
+        if not value:
+            continue
+        if value not in cleaned:
+            cleaned.append(value)
+    return cleaned
+
+
+def _resolve_repo_root() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "pnpm-workspace.yaml").exists():
+            return parent
+    return Path.cwd()
+
+
+def _default_epoch_report_path() -> str:
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"docs/reports/ADAPTIVE_EPOCH_REPORT_{date_str}.md"
+
+
+def _render_epoch_report(
+    *,
+    epochs: int,
+    runtime_mode: str,
+    train_sources: list[str],
+    eval_sources: list[str],
+    epoch_rows: list[dict[str, object]],
+    slope: dict[str, float],
+) -> str:
+    lines = [
+        f"# Adaptive Train/Eval Epoch Report ({datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')})",
+        "",
+        f"- Epochs: `{epochs}`",
+        f"- Adaptive runtime: `{runtime_mode}`",
+        f"- Train sources: `{', '.join(train_sources)}`",
+        f"- Eval sources: `{', '.join(eval_sources)}`",
+        "",
+        "## KPI Delta Slope (Adaptive - Legacy)",
+        f"- recordsPerPageDeltaSlope: `{slope['recordsPerPageDeltaSlope']}`",
+        f"- pagesPerRecordDeltaSlope: `{slope['pagesPerRecordDeltaSlope']}`",
+        f"- upsertRatioDeltaSlope: `{slope['upsertRatioDeltaSlope']}`",
+        "",
+        "## Per-Epoch KPI Deltas",
+        "| Epoch | Records/Page Delta | Pages/Record Delta | Upsert Ratio Delta |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for row in epoch_rows:
+        kpis = row["kpis"]
+        lines.append(
+            f"| {row['epoch']} | {kpis['recordsPerPageDelta']} | {kpis['pagesPerRecordDelta']} | {kpis['upsertRatioDelta']} |"
+        )
+    lines.append("")
+    lines.append("## Raw Rows")
+    lines.append("```json")
+    lines.append(json.dumps(epoch_rows, indent=2))
+    lines.append("```")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _distribute_limit(limit: int, workers: int) -> list[int]:
     effective_limit = max(0, limit)
     if effective_limit == 0:
@@ -682,5 +879,6 @@ def _utc_now_iso() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
+
 
 

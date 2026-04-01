@@ -5,7 +5,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { MetricCard } from "@/components/metric-card";
 import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
-import type { BenchmarkFieldName, BenchmarkRunConfig, BenchmarkRunListItem } from "@/lib/types";
+import { computeRuntimeComparison } from "@/lib/runtime-comparison";
+import type { BenchmarkFieldName, BenchmarkRunConfig, BenchmarkRunListItem, CrawlRunListItem } from "@/lib/types";
 
 interface ApiSuccess<T> {
   success: true;
@@ -65,6 +66,12 @@ function formatDuration(ms: number | null | undefined): string {
   return `${minutes}m ${seconds}s`;
 }
 
+function formatPercent(value: number | null | undefined, digits = 1): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "0%";
+  }
+  return `${(value * 100).toFixed(digits)}%`;
+}
 function formatNumber(value: number | null | undefined, digits = 0): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "0";
@@ -86,14 +93,32 @@ async function fetchBenchmarks(): Promise<BenchmarkRunListItem[]> {
   return sortBenchmarks(payload.data);
 }
 
+async function fetchCrawlRuns(): Promise<CrawlRunListItem[]> {
+  const response = await fetch("/api/runs?limit=600", { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<CrawlRunListItem[]>;
+
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch crawl runs: ${response.status}`);
+  }
+
+  return payload.data;
+}
+
+
 export function BenchmarksDashboard({
   initialBenchmarks,
+  initialRuns,
   activeCampaignCount = 0
 }: {
   initialBenchmarks: BenchmarkRunListItem[];
+  initialRuns: CrawlRunListItem[];
   activeCampaignCount?: number;
 }) {
   const [benchmarks, setBenchmarks] = useState<BenchmarkRunListItem[]>(sortBenchmarks(initialBenchmarks));
+  const [crawlRuns, setCrawlRuns] = useState<CrawlRunListItem[]>(initialRuns);
   const [selectedId, setSelectedId] = useState<string | null>(initialBenchmarks[0]?.id ?? null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -128,14 +153,15 @@ export function BenchmarksDashboard({
   async function refreshBenchmarkList(options?: { selectNewest?: boolean }) {
     setIsRefreshing(true);
     try {
-      const data = await fetchBenchmarks();
-      setBenchmarks(data);
+      const [benchmarkData, runData] = await Promise.all([fetchBenchmarks(), fetchCrawlRuns()]);
+      setBenchmarks(benchmarkData);
+      setCrawlRuns(runData);
 
-      const selectedStillExists = selectedId ? data.some((item) => item.id === selectedId) : false;
-      if (options?.selectNewest && data[0]) {
-        setSelectedId(data[0].id);
+      const selectedStillExists = selectedId ? benchmarkData.some((item) => item.id === selectedId) : false;
+      if (options?.selectNewest && benchmarkData[0]) {
+        setSelectedId(benchmarkData[0].id);
       } else if (!selectedStillExists) {
-        setSelectedId(data[0]?.id ?? null);
+        setSelectedId(benchmarkData[0]?.id ?? null);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -201,6 +227,13 @@ export function BenchmarksDashboard({
   const summary = selectedBenchmark?.summary;
   const bestThroughput = useMemo(() => benchmarks.reduce((best, item) => Math.max(best, item.summary?.jobsPerMinute ?? 0), 0), [benchmarks]);
   const bestQueueDelta = useMemo(() => benchmarks.reduce((best, item) => Math.min(best, item.summary?.queueDepthDelta ?? 0, best), 0), [benchmarks]);
+  const runtimeComparison = useMemo(
+    () =>
+      computeRuntimeComparison(crawlRuns, {
+        sourceSlug: selectedBenchmark?.sourceSlug ?? null
+      }),
+    [crawlRuns, selectedBenchmark?.sourceSlug]
+  );
 
   return (
     <div className="sectionStack">
@@ -418,6 +451,88 @@ export function BenchmarksDashboard({
                 />
               </div>
 
+              <h3>Legacy vs Adaptive Runtime</h3>
+              {runtimeComparison.totalRuns === 0 ? (
+                <p className="muted">No crawl runs match this benchmark scope yet.</p>
+              ) : (
+                <>
+                  <div className="comparisonGrid">
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Legacy ({runtimeComparison.scopeLabel})</strong>
+                        <span className="cellHint">{runtimeComparison.legacy.runCount} runs</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">Success</span>
+                          <strong>{formatPercent(runtimeComparison.legacy.successRate)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Seen</span>
+                          <strong>{formatNumber(runtimeComparison.legacy.avgRecordsSeen, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Upserted</span>
+                          <strong>{formatNumber(runtimeComparison.legacy.avgRecordsUpserted, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Sessions</span>
+                          <strong>{formatNumber(runtimeComparison.legacy.avgCrawlSessions, 2)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Adaptive ({runtimeComparison.scopeLabel})</strong>
+                        <span className="cellHint">{runtimeComparison.adaptive.runCount} runs</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">Success</span>
+                          <strong>{formatPercent(runtimeComparison.adaptive.successRate)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Seen</span>
+                          <strong>{formatNumber(runtimeComparison.adaptive.avgRecordsSeen, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Upserted</span>
+                          <strong>{formatNumber(runtimeComparison.adaptive.avgRecordsUpserted, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Sessions</span>
+                          <strong>{formatNumber(runtimeComparison.adaptive.avgCrawlSessions, 2)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Adaptive Delta</strong>
+                        <span className="cellHint">adaptive - legacy</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">Success</span>
+                          <strong>{formatPercent(runtimeComparison.deltas.successRate)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Seen</span>
+                          <strong>{formatNumber(runtimeComparison.deltas.avgRecordsSeen, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Records/Page</span>
+                          <strong>{formatNumber(runtimeComparison.deltas.avgRecordsPerPage, 2)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">LLM Calls</span>
+                          <strong>{formatNumber(runtimeComparison.deltas.avgLlmCalls, 2)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className="tableWrap">
                 <table>
                   <thead>
@@ -508,3 +623,14 @@ export function BenchmarksDashboard({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+

@@ -30,6 +30,8 @@ class AdaptiveCrawlOrchestrator:
         self._settings = settings or get_settings()
         self._runtime_mode = runtime_mode
         self._policy = AdaptivePolicy(epsilon=self._settings.crawler_adaptive_epsilon, policy_version=self._settings.crawler_policy_version)
+        if self._settings.crawler_adaptive_policy_restore_enabled:
+            self._restore_policy_snapshot()
         self._graph = self._build_graph()
 
     def run_for_source(self, source) -> CrawlMetrics:
@@ -180,7 +182,12 @@ class AdaptiveCrawlOrchestrator:
         return {"page_analysis": analysis, "classification": classification, "embedded_data": embedded, "page_level_confidence": classification.confidence}
 
     def _compute_template_signature(self, state: AdaptiveCrawlState) -> dict[str, Any]:
-        return {"template_signature": compute_template_signature(state["current_page_url"], state["page_analysis"])}
+        analysis = state["page_analysis"]
+        template_signature = compute_template_signature(state["current_page_url"], analysis)
+        raw_tokens = [token for token in state["current_page_url"].split("?")[0].lower().split("/") if token]
+        raw_fragment = "-".join(raw_tokens[:3]) or "root"
+        template_signature_raw = f"{host_family(state['current_page_url'])}|{analysis.probable_page_role}|t{min(analysis.table_count, 3)}|r{min(analysis.repeated_block_count, 4)}|{raw_fragment}"
+        return {"template_signature": template_signature, "template_signature_raw": template_signature_raw}
 
     def _propose_actions(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         plan = select_extraction_plan(page_analysis=state["page_analysis"], classification=state["classification"], embedded_data=state["embedded_data"], llm_enabled=False, source_metadata=state["source"].metadata)
@@ -309,7 +316,7 @@ class AdaptiveCrawlOrchestrator:
 
     def _persist_checkpoint(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         candidate_actions = [{"actionType": d.action_type, "score": d.score, "scoreComponents": d.score_components, "predictedReward": d.predicted_reward} for d in state.get("candidate_actions", [])]
-        observation_id = self._repository.append_page_observation(PageObservation(id=None, crawl_session_id=state["crawl_session_id"], url=state["current_page_url"], template_signature=state["template_signature"], http_status=state.get("current_page_status"), latency_ms=state.get("current_fetch_latency_ms", 0), page_analysis=_to_serializable(state.get("page_analysis")) or {}, classification=_to_serializable(state.get("classification")) or {}, embedded_data=_to_serializable(state.get("embedded_data")) or {}, candidate_actions=candidate_actions, selected_action=state.get("selected_action"), selected_action_score=state.get("selected_action_score"), selected_action_score_components=state.get("selected_action_score_components") or {}, outcome={"recordsExtracted": len(state.get("extracted_from_current", [])), "linksQueued": len(state.get("current_links", [])), "stopReason": state.get("stop_reason")}))
+        observation_id = self._repository.append_page_observation(PageObservation(id=None, crawl_session_id=state["crawl_session_id"], url=state["current_page_url"], template_signature=state["template_signature"], http_status=state.get("current_page_status"), latency_ms=state.get("current_fetch_latency_ms", 0), page_analysis=_to_serializable(state.get("page_analysis")) or {}, classification=_to_serializable(state.get("classification")) or {}, embedded_data=_to_serializable(state.get("embedded_data")) or {}, candidate_actions=candidate_actions, selected_action=state.get("selected_action"), selected_action_score=state.get("selected_action_score"), selected_action_score_components=state.get("selected_action_score_components") or {}, outcome={"recordsExtracted": len(state.get("extracted_from_current", [])), "linksQueued": len(state.get("current_links", [])), "stopReason": state.get("stop_reason"), "templateSignatureRaw": state.get("template_signature_raw")}))
         for event in state.get("reward_events", []):
             self._repository.append_reward_event(state["crawl_session_id"], observation_id, event)
         self._repository.save_policy_snapshot(policy_version=self._policy.policy_version, runtime_mode=state.get("runtime_mode", self._runtime_mode), feature_schema_version="adaptive-v1", model_payload=self._policy.snapshot(), metrics={"runId": state["run_id"], "sourceSlug": state["source"].source_slug, "templateSignature": state.get("template_signature")})
@@ -345,7 +352,7 @@ class AdaptiveCrawlOrchestrator:
             if not chapter.missing_optional_fields:
                 continue
             metrics.field_jobs_created += self._repository.create_field_jobs(chapter_id=bundle["chapter_id"], crawl_run_id=run_id, chapter_slug=chapter.slug, source_slug=source.source_slug, missing_fields=chapter.missing_optional_fields)
-        extraction_metadata = {"strategy_used": state.get("selected_action"), "runtime_mode": state.get("runtime_mode", self._runtime_mode), "page_level_confidence": state.get("page_level_confidence"), "template_signature": state.get("template_signature"), "stop_reason": state.get("stop_reason"), "navigation_stats": state.get("navigation_stats", {}), "policy_snapshot": self._policy.snapshot()}
+        extraction_metadata = {"strategy_used": state.get("selected_action"), "runtime_mode": state.get("runtime_mode", self._runtime_mode), "page_level_confidence": state.get("page_level_confidence"), "template_signature": state.get("template_signature"), "template_signature_raw": state.get("template_signature_raw"), "stop_reason": state.get("stop_reason"), "navigation_stats": state.get("navigation_stats", {}), "policy_snapshot": self._policy.snapshot()}
         page_analysis_payload = _to_serializable(state.get("page_analysis"))
         classification_payload = _to_serializable(state.get("classification"))
         if state.get("error"):
@@ -362,6 +369,27 @@ class AdaptiveCrawlOrchestrator:
         if session_id:
             self._repository.finish_crawl_session(session_id, status=status, stop_reason=state.get("stop_reason"), summary={"recordsUpserted": metrics.records_upserted, "pagesProcessed": metrics.pages_processed, "reviewItemsCreated": metrics.review_items_created, "fieldJobsCreated": metrics.field_jobs_created})
         return {"metrics": metrics, "final_status": status, "stop_reason": state.get("stop_reason")}
+
+    def _restore_policy_snapshot(self) -> None:
+        snapshot = self._repository.load_latest_policy_snapshot(
+            policy_version=self._policy.policy_version,
+            runtime_mode=self._runtime_mode,
+        )
+        if snapshot is None:
+            snapshot = self._repository.load_latest_policy_snapshot(policy_version=self._policy.policy_version)
+        if snapshot is None:
+            return
+        model_payload = snapshot.get("model_payload") if isinstance(snapshot, dict) else None
+        restored = self._policy.load_snapshot(model_payload if isinstance(model_payload, dict) else None)
+        if restored:
+            log_event(
+                LOGGER,
+                "adaptive_policy_snapshot_restored",
+                runtime_mode=self._runtime_mode,
+                policy_version=self._policy.policy_version,
+                snapshot_id=snapshot.get("id"),
+                snapshot_created_at=snapshot.get("created_at"),
+            )
 
     def _strategy_to_action(self, strategy: str | None) -> str | None:
         return {"table": "extract_table", "repeated_block": "extract_repeated_block", "script_json": "extract_script_json", "locator_api": "extract_locator_api", "review": "review_branch"}.get(strategy or "")

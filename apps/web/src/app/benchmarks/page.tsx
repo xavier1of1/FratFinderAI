@@ -1,12 +1,13 @@
 import { BenchmarksDashboard } from "@/components/benchmarks-dashboard";
 import { PageIntro } from "@/components/page-intro";
 import { fetchFromApi } from "@/lib/api-client";
-import type { BenchmarkRunListItem, CampaignRun } from "@/lib/types";
+import type { BenchmarkRunListItem, CampaignRun, CrawlRunListItem } from "@/lib/types";
 
 export default async function BenchmarksPage() {
-  const [benchmarks, campaigns] = await Promise.all([
+  const [benchmarks, campaigns, runs] = await Promise.all([
     fetchFromApi<BenchmarkRunListItem[]>("/api/benchmarks?limit=200"),
-    fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=50")
+    fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=50"),
+    fetchFromApi<CrawlRunListItem[]>("/api/runs?limit=600")
   ]);
   const running = benchmarks.filter((item) => item.status === "running" || item.status === "queued").length;
   const latest = benchmarks[0] ?? null;
@@ -25,7 +26,9 @@ export default async function BenchmarksPage() {
           latest ? `latest: ${latest.name}` : "no benchmarks yet"
         ]}
       />
-      <BenchmarksDashboard initialBenchmarks={benchmarks} activeCampaignCount={activeCampaigns} />
+      <BenchmarksDashboard initialBenchmarks={benchmarks} initialRuns={runs} activeCampaignCount={activeCampaigns} />
     </div>
   );
 }
+
+

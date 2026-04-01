@@ -1,10 +1,13 @@
 import { CampaignsDashboard } from "@/components/campaigns-dashboard";
 import { PageIntro } from "@/components/page-intro";
 import { fetchFromApi } from "@/lib/api-client";
-import type { CampaignRun } from "@/lib/types";
+import type { CampaignRun, CrawlRunListItem } from "@/lib/types";
 
 export default async function CampaignsPage() {
-  const campaigns = await fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=100");
+  const [campaigns, runs] = await Promise.all([
+    fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=100"),
+    fetchFromApi<CrawlRunListItem[]>("/api/runs?limit=800")
+  ]);
   const running = campaigns.filter((item) => item.status === "running" || item.status === "queued").length;
   const latest = campaigns[0] ?? null;
 
@@ -20,7 +23,9 @@ export default async function CampaignsPage() {
           latest ? `latest: ${latest.name}` : "no campaigns yet"
         ]}
       />
-      <CampaignsDashboard initialCampaigns={campaigns} />
+      <CampaignsDashboard initialCampaigns={campaigns} initialRuns={runs} />
     </div>
   );
 }
+
+

@@ -1,0 +1,110 @@
+[
+    {
+        "source_slug":  "sigma-chi-main",
+        "mode":  "legacy",
+        "pages_processed":  1,
+        "records_seen":  0,
+        "records_upserted":  0,
+        "review_items_created":  1,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "sigma-chi-main",
+        "mode":  "adaptive_shadow",
+        "pages_processed":  4,
+        "records_seen":  0,
+        "records_upserted":  0,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "chi-psi-main",
+        "mode":  "legacy",
+        "pages_processed":  30,
+        "records_seen":  51,
+        "records_upserted":  51,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "chi-psi-main",
+        "mode":  "adaptive_shadow",
+        "pages_processed":  5,
+        "records_seen":  51,
+        "records_upserted":  51,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "kappa-delta-rho-main",
+        "mode":  "legacy",
+        "pages_processed":  61,
+        "records_seen":  87,
+        "records_upserted":  87,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "kappa-delta-rho-main",
+        "mode":  "adaptive_shadow",
+        "pages_processed":  5,
+        "records_seen":  87,
+        "records_upserted":  87,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "delta-kappa-epsilon-main",
+        "mode":  "legacy",
+        "pages_processed":  1,
+        "records_seen":  108,
+        "records_upserted":  108,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "delta-kappa-epsilon-main",
+        "mode":  "adaptive_shadow",
+        "pages_processed":  5,
+        "records_seen":  108,
+        "records_upserted":  108,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "alpha-tau-omega-main",
+        "mode":  "legacy",
+        "pages_processed":  2,
+        "records_seen":  126,
+        "records_upserted":  126,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "alpha-tau-omega-main",
+        "mode":  "adaptive_shadow",
+        "pages_processed":  5,
+        "records_seen":  126,
+        "records_upserted":  126,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "delta-sigma-phi-main",
+        "mode":  "legacy",
+        "pages_processed":  1,
+        "records_seen":  94,
+        "records_upserted":  94,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    },
+    {
+        "source_slug":  "delta-sigma-phi-main",
+        "mode":  "adaptive_shadow",
+        "pages_processed":  5,
+        "records_seen":  94,
+        "records_upserted":  94,
+        "review_items_created":  0,
+        "field_jobs_created":  0
+    }
+]

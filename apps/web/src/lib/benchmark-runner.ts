@@ -31,6 +31,13 @@ interface BenchmarkTotals {
   failedTerminal: number;
 }
 
+interface CrawlWarmupResult {
+  runtimeMode: string;
+  recordsSeen: number;
+  recordsUpserted: number;
+  pagesProcessed: number;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -78,6 +85,68 @@ function parseProcessFieldJobsOutput(output: string): ProcessFieldJobResult {
   }
 
   return { processed, requeued, failedTerminal };
+}
+
+async function runAdaptiveCrawlWarmup(config: BenchmarkRunConfig): Promise<CrawlWarmupResult | null> {
+  if (!config.sourceSlug) {
+    return null;
+  }
+  if (!config.runAdaptiveCrawlBeforeCycles) {
+    return null;
+  }
+
+  const runtimeMode = config.crawlRuntimeMode ?? "adaptive_assisted";
+  const args =
+    runtimeMode === "legacy"
+      ? ["-m", "fratfinder_crawler.cli", "run-legacy", "--source-slug", config.sourceSlug]
+      : [
+          "-m",
+          "fratfinder_crawler.cli",
+          "run-adaptive",
+          "--source-slug",
+          config.sourceSlug,
+          "--runtime-mode",
+          runtimeMode
+        ];
+
+  const workingDirectory = findRepositoryRoot();
+
+  return new Promise((resolve, reject) => {
+    const child = spawn("python", args, {
+      cwd: workingDirectory,
+      env: process.env,
+      windowsHide: true
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf-8");
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf-8");
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`crawl warmup exited with code ${code}: ${stderr || stdout}`));
+        return;
+      }
+
+      resolve({
+        runtimeMode,
+        recordsSeen: readLastNumericValue(stdout, "records_seen") ?? 0,
+        recordsUpserted: readLastNumericValue(stdout, "records_upserted") ?? 0,
+        pagesProcessed: readLastNumericValue(stdout, "pages_processed") ?? 0
+      });
+    });
+  });
 }
 
 async function runFieldJobCycle(config: BenchmarkRunConfig): Promise<ProcessFieldJobResult> {
@@ -253,6 +322,8 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
     });
     endSnapshot = startSnapshot;
 
+    const warmup = await runAdaptiveCrawlWarmup(config);
+
     for (let cycle = 1; cycle <= config.cycles; cycle += 1) {
       const cycleStartedAt = new Date().toISOString();
       const cycleStartedAtMs = Date.now();
@@ -277,8 +348,16 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
         queued: endSnapshot.queued,
         running: endSnapshot.running,
         done: endSnapshot.done,
-        failed: endSnapshot.failed
-      });
+        failed: endSnapshot.failed,
+        ...(cycle === 1 && warmup
+          ? {
+              warmupRuntimeMode: warmup.runtimeMode,
+              warmupRecordsSeen: warmup.recordsSeen,
+              warmupRecordsUpserted: warmup.recordsUpserted,
+              warmupPagesProcessed: warmup.pagesProcessed
+            }
+          : {})
+      } as BenchmarkCycleSample);
 
       if (config.pauseMs > 0 && cycle < config.cycles) {
         await delay(config.pauseMs);

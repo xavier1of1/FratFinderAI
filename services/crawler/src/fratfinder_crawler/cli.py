@@ -94,6 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
     policy_report_parser = subparsers.add_parser("crawl-policy-report", help="Show adaptive template/profile policy report")
     policy_report_parser.add_argument("--limit", type=int, default=25)
 
+    epoch_parser = subparsers.add_parser("adaptive-train-eval", help="Run repeated adaptive train/eval epochs and publish KPI slope report")
+    epoch_parser.add_argument("--epochs", type=int, default=None)
+    epoch_parser.add_argument("--train-sources", default=None, help="Comma-separated source slugs for train epochs")
+    epoch_parser.add_argument("--eval-sources", default=None, help="Comma-separated source slugs for eval epochs")
+    epoch_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    epoch_parser.add_argument("--report-path", default=None)
+
     return parser
 
 
@@ -179,6 +186,27 @@ def main() -> None:
 
     if args.command == "crawl-policy-report":
         result = service.crawl_policy_report(limit=args.limit)
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "adaptive-train-eval":
+        runtime_mode = args.runtime_mode or settings.crawler_adaptive_train_default_runtime_mode
+        epochs = args.epochs if args.epochs is not None else settings.crawler_adaptive_train_default_epochs
+        train_raw = args.train_sources if args.train_sources is not None else settings.crawler_adaptive_train_source_slugs
+        eval_raw = args.eval_sources if args.eval_sources is not None else settings.crawler_adaptive_eval_source_slugs
+        train_source_slugs = [value.strip() for value in str(train_raw).split(",") if value.strip()]
+        eval_source_slugs = [value.strip() for value in str(eval_raw).split(",") if value.strip()]
+        if not train_source_slugs:
+            raise ValueError("adaptive-train-eval requires train sources via --train-sources or Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS")
+        if not eval_source_slugs:
+            raise ValueError("adaptive-train-eval requires eval sources via --eval-sources or Agent:ADAPTIVE_EVAL_SOURCE_SLUGS")
+        result = service.adaptive_train_eval(
+            epochs=epochs,
+            train_source_slugs=train_source_slugs,
+            eval_source_slugs=eval_source_slugs,
+            runtime_mode=runtime_mode,
+            report_path=args.report_path,
+        )
         print(json.dumps(result, indent=2, default=str))
         return
 

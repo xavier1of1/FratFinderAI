@@ -6,6 +6,21 @@ import { scheduleBenchmarkRun } from "@/lib/benchmark-runner";
 import { createBenchmarkRun, failStaleBenchmarkRuns, getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
 import type { BenchmarkFieldName, BenchmarkRunConfig } from "@/lib/types";
 
+
+const DEFAULT_RUNTIME_MODE = (() => {
+  const value = String(process.env.BENCHMARK_CRAWL_RUNTIME_MODE ?? "adaptive_assisted").trim();
+  if (value === "legacy" || value === "adaptive_shadow" || value === "adaptive_assisted" || value === "adaptive_primary") {
+    return value;
+  }
+  return "adaptive_assisted";
+})();
+
+const DEFAULT_WARMUP = (() => {
+  const value = String(process.env.BENCHMARK_RUN_ADAPTIVE_WARMUP ?? "true").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+})();
+
+
 const benchmarkPayloadSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   fieldName: z.enum(["find_website", "find_email", "find_instagram", "all"]).default("find_email"),
@@ -13,7 +28,9 @@ const benchmarkPayloadSchema = z.object({
   workers: z.coerce.number().int().min(1).max(16).default(8),
   limitPerCycle: z.coerce.number().int().min(1).max(500).default(25),
   cycles: z.coerce.number().int().min(1).max(100).default(6),
-  pauseMs: z.coerce.number().int().min(0).max(10_000).default(500)
+  pauseMs: z.coerce.number().int().min(0).max(10_000).default(500),
+  crawlRuntimeMode: z.enum(["legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"]).default(DEFAULT_RUNTIME_MODE),
+  runAdaptiveCrawlBeforeCycles: z.coerce.boolean().default(DEFAULT_WARMUP)
 });
 
 function formatDefaultBenchmarkName(fieldName: BenchmarkFieldName): string {
@@ -49,7 +66,9 @@ export async function POST(request: NextRequest) {
       workers: payload.workers,
       limitPerCycle: payload.limitPerCycle,
       cycles: payload.cycles,
-      pauseMs: payload.pauseMs
+      pauseMs: payload.pauseMs,
+      crawlRuntimeMode: payload.crawlRuntimeMode,
+      runAdaptiveCrawlBeforeCycles: payload.runAdaptiveCrawlBeforeCycles
     };
 
     const created = await createBenchmarkRun({

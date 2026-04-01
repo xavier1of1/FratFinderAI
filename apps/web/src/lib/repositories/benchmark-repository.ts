@@ -9,6 +9,20 @@ import type {
   BenchmarkStatus
 } from "../types";
 
+
+function envRuntimeModeDefault(): "legacy" | "adaptive_shadow" | "adaptive_assisted" | "adaptive_primary" {
+  const value = String(process.env.BENCHMARK_CRAWL_RUNTIME_MODE ?? "adaptive_assisted").trim();
+  if (value === "legacy" || value === "adaptive_shadow" || value === "adaptive_assisted" || value === "adaptive_primary") {
+    return value;
+  }
+  return "adaptive_assisted";
+}
+
+function envWarmupDefault(): boolean {
+  const value = String(process.env.BENCHMARK_RUN_ADAPTIVE_WARMUP ?? "true").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 interface BenchmarkRunRow {
   id: string;
   name: string;
@@ -28,13 +42,23 @@ interface BenchmarkRunRow {
 function normalizeBenchmarkConfig(fieldName: BenchmarkFieldName, sourceSlug: string | null, config: unknown): BenchmarkRunConfig {
   const raw = typeof config === "object" && config !== null ? (config as Partial<BenchmarkRunConfig>) : {};
 
+  const runtimeMode =
+    raw.crawlRuntimeMode === "legacy" ||
+    raw.crawlRuntimeMode === "adaptive_shadow" ||
+    raw.crawlRuntimeMode === "adaptive_assisted" ||
+    raw.crawlRuntimeMode === "adaptive_primary"
+      ? raw.crawlRuntimeMode
+      : envRuntimeModeDefault();
+
   return {
     fieldName: raw.fieldName ?? fieldName,
     sourceSlug: raw.sourceSlug ?? sourceSlug,
     workers: Number.isFinite(raw.workers) ? Number(raw.workers) : 8,
     limitPerCycle: Number.isFinite(raw.limitPerCycle) ? Number(raw.limitPerCycle) : 25,
     cycles: Number.isFinite(raw.cycles) ? Number(raw.cycles) : 5,
-    pauseMs: Number.isFinite(raw.pauseMs) ? Number(raw.pauseMs) : 500
+    pauseMs: Number.isFinite(raw.pauseMs) ? Number(raw.pauseMs) : 500,
+    crawlRuntimeMode: runtimeMode,
+    runAdaptiveCrawlBeforeCycles: typeof raw.runAdaptiveCrawlBeforeCycles === "boolean" ? raw.runAdaptiveCrawlBeforeCycles : envWarmupDefault()
   };
 }
 

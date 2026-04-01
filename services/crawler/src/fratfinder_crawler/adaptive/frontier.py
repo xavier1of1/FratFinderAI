@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 
@@ -33,12 +33,35 @@ NEGATIVE_KEYWORDS = {
 }
 
 
+TRACKING_QUERY_PARAMS = {
+    "fbclid",
+    "gclid",
+    "mc_cid",
+    "mc_eid",
+    "mkt_tok",
+    "igshid",
+    "ref",
+    "ref_src",
+    "ref_url",
+    "source",
+}
+
+
 def canonicalize_url(url: str, base_url: str | None = None) -> str:
     resolved = urljoin(base_url, url) if base_url else url
     parsed = urlparse(resolved)
     path = parsed.path or "/"
     normalized_path = path.rstrip("/") or "/"
-    return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), normalized_path, "", parsed.query, ""))
+
+    filtered_pairs = []
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        lowered = key.lower()
+        if lowered.startswith("utm_") or lowered in TRACKING_QUERY_PARAMS:
+            continue
+        filtered_pairs.append((key, value))
+    normalized_query = urlencode(filtered_pairs, doseq=True)
+
+    return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), normalized_path, "", normalized_query, ""))
 
 
 def _keyword_score(text: str) -> float:
