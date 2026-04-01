@@ -30,6 +30,8 @@ _BLOCKED_HOSTS = {
     "wiktionary.org",
 }
 
+_BLOCKED_HOST_SUFFIXES = tuple(sorted(_BLOCKED_HOSTS))
+
 _DIRECTORY_MARKERS = (
     "chapter-directory",
     "chapters",
@@ -53,10 +55,14 @@ _ALIAS_CANONICALS = {
 
 _FRATERNITY_HOST_HINTS = {
     "phi-gamma-delta": ("phigam.org",),
+    "sigma-chi": ("sigmachi.org",),
+    "alpha-tau-omega": ("ato.org",),
 }
 
 _FRATERNITY_SOURCE_HINTS = {
     "phi-gamma-delta": "https://phigam.org/about/overview/our-chapters/",
+    "sigma-chi": "https://sigmachi.org/chapters/",
+    "alpha-tau-omega": "https://ato.org/home-2/ato-map/",
 }
 
 _FRATERNITY_CONTEXT_MARKERS = (
@@ -83,6 +89,22 @@ _NON_ORG_CONTEXT_MARKERS = (
     "island",
     "hotel",
     "airline",
+)
+
+_INVALID_EXISTING_SOURCE_PARSER_KEYS = {
+    "unsupported",
+}
+
+_WEAK_SOURCE_PATH_MARKERS = (
+    "alumni",
+    "alumni-groups",
+    "alumnigroups",
+    "members",
+    "member",
+    "memberhub",
+    "portal",
+    "login",
+    "account",
 )
 
 _GREEK_SYMBOLS = {
@@ -172,6 +194,23 @@ def _root_url(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return url
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _host_is_blocked(host: str) -> bool:
+    if not host:
+        return False
+    normalized = host.lower().strip(".")
+    return normalized in _BLOCKED_HOSTS or any(normalized.endswith(f".{suffix}") for suffix in _BLOCKED_HOST_SUFFIXES)
+
+
+def _host_matches_hint(host: str, hint: str) -> bool:
+    normalized_host = host.lower().strip(".")
+    normalized_hint = hint.lower().strip(".")
+    return normalized_host == normalized_hint or normalized_host.endswith(f".{normalized_hint}")
+
+
+def _host_matches_any_hint(host: str, hints: tuple[str, ...]) -> bool:
+    return any(_host_matches_hint(host, hint) for hint in hints)
 
 
 def _contains_phrase(text: str, phrase: str) -> bool:
@@ -290,7 +329,7 @@ def _score_candidate(fraternity_name: str, fraternity_slug: str, result: SearchR
         score += 0.16
 
     trusted_host_hints = _FRATERNITY_HOST_HINTS.get(fraternity_slug, ())
-    if trusted_host_hints and any(hint in host for hint in trusted_host_hints):
+    if trusted_host_hints and _host_matches_any_hint(host, trusted_host_hints):
         score += 0.35
 
     tokens = _display_tokens(fraternity_name)
@@ -310,6 +349,11 @@ def _score_candidate(fraternity_name: str, fraternity_slug: str, result: SearchR
     if any(marker in lowered_snippet for marker in ("official", "chapter", "directory", "fraternity")):
         score += 0.06
 
+    if any(marker in combined for marker in ("alumni chapter", "alumni association", "alumni club", "alumni")):
+        score -= 0.3
+    if path.endswith(".pdf"):
+        score -= 0.25
+
     context_hits = sum(1 for marker in _FRATERNITY_CONTEXT_MARKERS if marker in combined)
     if context_hits == 0:
         score -= 0.2
@@ -327,6 +371,11 @@ def _score_candidate(fraternity_name: str, fraternity_slug: str, result: SearchR
 
     score += max(0.0, 0.08 - (max(result.rank, 1) - 1) * 0.01)
     return max(0.0, min(0.99, score))
+
+
+def _text_has_directory_signal(*values: str) -> bool:
+    combined = " ".join(value.lower() for value in values if value)
+    return any(marker in combined for marker in _DIRECTORY_MARKERS)
 
 
 def _confidence_tier(score: float) -> str:
@@ -360,6 +409,49 @@ def _verified_health_rank(candidate: VerifiedSourceRecord | None, min_confidence
     if candidate.is_active:
         return 1
     return 0
+
+
+def _evaluate_verified_source_candidate(
+    candidate: VerifiedSourceRecord | None,
+    fraternity_name: str,
+    fraternity_slug: str,
+) -> tuple[bool, list[str]]:
+    if candidate is None:
+        return False, ["missing"]
+
+    parsed = urlparse(candidate.national_url)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").lower()
+    combined = f"{host} {path}"
+    reasons: list[str] = []
+
+    if parsed.scheme not in {"http", "https"}:
+        reasons.append("non_http_url")
+    if _host_is_blocked(host):
+        reasons.append("blocked_host")
+    if any(marker in path for marker in _WEAK_SOURCE_PATH_MARKERS):
+        reasons.append("member_or_alumni_path")
+
+    context_hits = sum(1 for marker in _DIRECTORY_MARKERS if marker in combined)
+    if _contains_phrase(combined, fraternity_name):
+        context_hits += 1
+
+    trusted_host_hints = _FRATERNITY_HOST_HINTS.get(fraternity_slug, ())
+    hinted_source = _FRATERNITY_SOURCE_HINTS.get(fraternity_slug)
+    hinted_path = (urlparse(hinted_source).path or "").strip("/").lower() if hinted_source else ""
+    if trusted_host_hints and _host_matches_any_hint(host, trusted_host_hints):
+        context_hits += 1
+
+    if path.strip("/") == "" and hinted_source and hinted_path and hinted_path != path.strip("/"):
+        reasons.append("generic_root_path")
+    elif context_hits == 0 and path.strip("/") == "":
+        reasons.append("generic_root_path")
+
+    if trusted_host_hints and _host_matches_any_hint(host, trusted_host_hints):
+        if not (hinted_source and hinted_path and hinted_path != path.strip("/")):
+            reasons = [reason for reason in reasons if reason != "generic_root_path"]
+
+    return not reasons, reasons
 
 
 def _existing_health_rank(candidate: ExistingSourceCandidate | None) -> int:
@@ -444,11 +536,62 @@ def _candidate_from_existing_source(candidate: ExistingSourceCandidate, fraterni
     return DiscoveryCandidate(
         title=f"{fraternity_name} existing configured source ({candidate.source_slug})",
         url=candidate.list_url,
-        snippet=f"Existing source with last_run_status={status_text}",
+        snippet=f"Existing source with last_run_status={status_text}; parser_key={candidate.parser_key}",
         provider="existing_source",
         rank=1,
         score=max(0.0, min(0.99, candidate.confidence)),
     )
+
+
+def _evaluate_existing_source_candidate(
+    candidate: ExistingSourceCandidate | None,
+    fraternity_name: str,
+    fraternity_slug: str,
+) -> tuple[bool, list[str]]:
+    if candidate is None:
+        return False, ["missing"]
+
+    parsed = urlparse(candidate.list_url)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").lower()
+    combined = f"{host} {path}"
+    reasons: list[str] = []
+
+    if parsed.scheme not in {"http", "https"}:
+        reasons.append("non_http_url")
+    if _host_is_blocked(host):
+        reasons.append("blocked_host")
+    if candidate.parser_key in _INVALID_EXISTING_SOURCE_PARSER_KEYS:
+        reasons.append("unsupported_parser")
+    if any(marker in path for marker in _WEAK_SOURCE_PATH_MARKERS):
+        reasons.append("member_or_alumni_path")
+
+    fraternity_compact = _compact(fraternity_name)
+    host_text = _compact(host)
+    context_hits = sum(1 for marker in _FRATERNITY_CONTEXT_MARKERS if marker in combined)
+    if fraternity_compact and fraternity_compact in host_text:
+        context_hits += 1
+    if any(marker in combined for marker in _DIRECTORY_MARKERS):
+        context_hits += 1
+    if any(marker in combined for marker in _NON_ORG_CONTEXT_MARKERS):
+        reasons.append("non_org_context")
+    if context_hits == 0:
+        reasons.append("missing_fraternity_context")
+
+    trusted_host_hints = _FRATERNITY_HOST_HINTS.get(fraternity_slug, ())
+    hinted_source = _FRATERNITY_SOURCE_HINTS.get(fraternity_slug)
+    hinted_path = (urlparse(hinted_source).path or "").strip("/").lower() if hinted_source else ""
+    if trusted_host_hints and _host_matches_any_hint(host, trusted_host_hints):
+        reasons = [reason for reason in reasons if reason != "missing_fraternity_context"]
+        if path.strip("/") == "" and not (hinted_source and hinted_path and hinted_path != path.strip("/")):
+            reasons = [reason for reason in reasons if reason != "generic_root_path"]
+
+    if path.strip("/") == "" and hinted_source and hinted_path and hinted_path != path.strip("/"):
+        reasons.append("generic_root_path")
+    elif context_hits == 0 and path.strip("/") == "":
+        reasons.append("generic_root_path")
+
+    return not reasons, reasons
 
 
 def discover_source(
@@ -486,6 +629,16 @@ def discover_source(
         registry_candidate = repository.get_verified_source_by_slug(slug)
         existing_candidates = repository.get_existing_source_candidates(slug)
         existing_candidate = _choose_existing_candidate(existing_candidates)
+        verified_candidate_valid, verified_candidate_reasons = _evaluate_verified_source_candidate(
+            registry_candidate,
+            normalized_name,
+            slug,
+        )
+        existing_candidate_valid, existing_candidate_reasons = _evaluate_existing_source_candidate(
+            existing_candidate,
+            normalized_name,
+            slug,
+        )
 
         if registry_candidate is not None:
             trace.append(
@@ -497,9 +650,12 @@ def discover_source(
                     "http_status": registry_candidate.http_status,
                     "confidence": registry_candidate.confidence,
                     "national_url": registry_candidate.national_url,
+                    "candidate_valid": verified_candidate_valid,
+                    "candidate_reasons": verified_candidate_reasons,
                 }
             )
-            synthetic_candidates.append(_candidate_from_verified_source(registry_candidate))
+            if verified_candidate_valid:
+                synthetic_candidates.append(_candidate_from_verified_source(registry_candidate))
         else:
             trace.append({"step": "checked_verified_registry", "slug": slug, "found": False})
 
@@ -511,18 +667,30 @@ def discover_source(
                     "source_slug": existing_candidate.source_slug,
                     "list_url": existing_candidate.list_url,
                     "active": existing_candidate.active,
+                    "source_type": existing_candidate.source_type,
+                    "parser_key": existing_candidate.parser_key,
                     "last_run_status": existing_candidate.last_run_status,
                     "last_success_at": existing_candidate.last_success_at,
                     "confidence": existing_candidate.confidence,
+                    "candidate_valid": existing_candidate_valid,
+                    "candidate_reasons": existing_candidate_reasons,
                 }
             )
-            synthetic_candidates.append(_candidate_from_existing_source(existing_candidate, normalized_name))
+            if existing_candidate_valid:
+                synthetic_candidates.append(_candidate_from_existing_source(existing_candidate, normalized_name))
         else:
             trace.append({"step": "checked_existing_sources", "slug": slug, "found": False})
+            existing_candidate_valid = False
+            existing_candidate_reasons = ["missing"]
+    else:
+        verified_candidate_valid = False
+        verified_candidate_reasons: list[str] = ["repository_unavailable"]
+        existing_candidate_valid = False
+        existing_candidate_reasons: list[str] = ["repository_unavailable"]
 
     verified_rank = _verified_health_rank(registry_candidate, verified_min_confidence)
-    existing_rank = _existing_health_rank(existing_candidate)
-    if registry_candidate is not None and verified_rank >= 2:
+    existing_rank = _existing_health_rank(existing_candidate) if existing_candidate_valid else 0
+    if registry_candidate is not None and verified_rank >= 2 and verified_candidate_valid:
         selected_url = registry_candidate.national_url
         selected_confidence = registry_candidate.confidence
         source_provenance = "verified_registry"
@@ -534,19 +702,38 @@ def discover_source(
                 "confidence": selected_confidence,
             }
         )
-
-    if existing_candidate is not None and selected_url is None:
-        selected_url = existing_candidate.list_url
-        selected_confidence = existing_candidate.confidence
-        source_provenance = "existing_source"
+    elif registry_candidate is not None and not verified_candidate_valid:
+        fallback_reason = fallback_reason or "verified_source_invalid"
         trace.append(
             {
-                "step": "selected_existing_source_candidate",
-                "url": selected_url,
-                "health_rank": existing_rank,
-                "confidence": selected_confidence,
+                "step": "rejected_verified_registry_candidate",
+                "url": registry_candidate.national_url,
+                "reasons": verified_candidate_reasons,
             }
         )
+
+    if existing_candidate is not None and selected_url is None:
+        if existing_candidate_valid:
+            selected_url = existing_candidate.list_url
+            selected_confidence = existing_candidate.confidence
+            source_provenance = "existing_source"
+            trace.append(
+                {
+                    "step": "selected_existing_source_candidate",
+                    "url": selected_url,
+                    "health_rank": existing_rank,
+                    "confidence": selected_confidence,
+                }
+            )
+        else:
+            fallback_reason = fallback_reason or "existing_source_invalid"
+            trace.append(
+                {
+                    "step": "rejected_existing_source_candidate",
+                    "url": existing_candidate.list_url,
+                    "reasons": existing_candidate_reasons,
+                }
+            )
 
     if (
         selected_url is not None
@@ -608,17 +795,58 @@ def discover_source(
 
         search_candidates.sort(key=lambda item: (item.score, -item.rank, item.url), reverse=True)
         if search_candidates and search_candidates[0].score >= 0.6:
-            selected_url = search_candidates[0].url
-            selected_confidence = search_candidates[0].score
-            source_provenance = "search"
-            trace.append(
-                {
-                    "step": "selected_search_candidate",
-                    "url": selected_url,
-                    "score": selected_confidence,
-                    "provider": search_candidates[0].provider,
-                }
+            top_candidate = search_candidates[0]
+            top_parsed = urlparse(top_candidate.url)
+            top_combined = f"{(top_candidate.title or '').lower()} {(top_candidate.snippet or '').lower()} {(top_parsed.path or '').lower()}"
+            trusted_host_hints = _FRATERNITY_HOST_HINTS.get(slug, ())
+            hinted_source = _FRATERNITY_SOURCE_HINTS.get(slug)
+            top_matches_trusted_host = _host_matches_any_hint((top_parsed.netloc or "").lower(), trusted_host_hints)
+            top_is_noisy = any(marker in top_combined for marker in ("alumni chapter", "alumni association", "alumni club", "alumni")) or (
+                (top_parsed.path or "").lower().endswith(".pdf")
             )
+            top_has_directory_signal = _text_has_directory_signal(top_candidate.title or "", top_candidate.snippet or "", top_parsed.path or "")
+            hinted_path = (urlparse(hinted_source).path or "").lower() if hinted_source else ""
+            hinted_has_directory_signal = _text_has_directory_signal(hinted_path)
+            should_use_hinted_directory = bool(
+                hinted_source
+                and hinted_has_directory_signal
+                and top_matches_trusted_host
+                and not top_has_directory_signal
+            )
+
+            if hinted_source and ((top_is_noisy and not top_matches_trusted_host) or should_use_hinted_directory):
+                selected_url = hinted_source
+                selected_confidence = max(top_candidate.score, 0.7)
+                source_provenance = "search"
+                fallback_reason = fallback_reason or (
+                    "used_curated_source_hint_over_noisy_search"
+                    if top_is_noisy and not top_matches_trusted_host
+                    else "used_curated_source_hint_over_generic_same_host_page"
+                )
+                trace.append(
+                    {
+                        "step": (
+                            "selected_curated_source_hint_over_noisy_search"
+                            if top_is_noisy and not top_matches_trusted_host
+                            else "selected_curated_source_hint_over_generic_same_host_page"
+                        ),
+                        "hinted_url": hinted_source,
+                        "rejected_url": top_candidate.url,
+                        "rejected_score": top_candidate.score,
+                    }
+                )
+            else:
+                selected_url = top_candidate.url
+                selected_confidence = top_candidate.score
+                source_provenance = "search"
+                trace.append(
+                    {
+                        "step": "selected_search_candidate",
+                        "url": selected_url,
+                        "score": selected_confidence,
+                        "provider": top_candidate.provider,
+                    }
+                )
         else:
             hinted_source = _FRATERNITY_SOURCE_HINTS.get(slug)
             if hinted_source:
@@ -668,3 +896,4 @@ def discover_source(
         fallback_reason=fallback_reason,
         resolution_trace=trace,
     )
+

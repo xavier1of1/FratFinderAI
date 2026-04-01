@@ -31,6 +31,11 @@ export default async function ReviewItemsPage() {
                 <th>Type</th>
                 <th>Status</th>
                 <th>Reason</th>
+                <th>Candidate</th>
+                <th>Confidence</th>
+                <th>Source Link</th>
+                <th>Query</th>
+                <th>Rejection Summary</th>
                 <th>Extraction Notes</th>
                 <th>Last Action</th>
                 <th>Action</th>
@@ -47,6 +52,38 @@ export default async function ReviewItemsPage() {
                     <StatusPill status={item.status} />
                   </td>
                   <td>{item.reason}</td>
+                  <td className="monoCell">
+                    {item.candidateValue ? item.candidateValue : <span className="muted">none</span>}
+                  </td>
+                  <td>{item.confidence !== null ? item.confidence.toFixed(2) : <span className="muted">n/a</span>}</td>
+                  <td>
+                    {item.sourceUrl ? (
+                      <a href={item.sourceUrl} target="_blank" rel="noreferrer">
+                        Open Source
+                      </a>
+                    ) : (
+                      <span className="muted">n/a</span>
+                    )}
+                  </td>
+                  <td className="monoCell">{item.query ?? <span className="muted">n/a</span>}</td>
+                  <td>
+                    {item.rejectionSummary ? (
+                      <>
+                        <strong>{item.rejectionSummary.totalRejections}</strong> rejected
+                        <br />
+                        <span className="muted">{item.rejectionSummary.uniqueReasons} reasons</span>
+                        <br />
+                        <span className="muted">
+                          {item.rejectionSummary.topReasons
+                            .slice(0, 2)
+                            .map((entry) => `${entry.reason} (${entry.count})`)
+                            .join(", ")}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="muted">n/a</span>
+                    )}
+                  </td>
                   <td>{item.extractionNotes ?? <span className="muted">none</span>}</td>
                   <td>
                     {item.lastAction ? (

@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 from fratfinder_crawler.adapters.directory_v1 import DirectoryV1Adapter
 
@@ -42,3 +42,86 @@ def test_directory_adapter_skips_table_headers_and_reads_city_state_columns():
     assert records[0].university_name == "Miami University"
     assert records[0].city == "Oxford"
     assert records[0].state == "OH"
+
+
+def test_directory_adapter_extracts_elementor_archive_contact_entries():
+    fixture = """
+    <article>
+      <section>
+        <h2>MISSISSIPPI STATE CHAPTER</h2>
+        <h2>PO Box GK Mississippi State Mississippi State, MS 39762</h2>
+        <div class="elementor-widget-text-editor">
+          <div class="elementor-widget-container">
+            Website: <a href="http://msstatedeltachi.com/">Delta Chi Mississippi State</a>
+            Instagram: <a href="https://www.instagram.com/msstatedeltachi">@msstatedeltachi</a>
+          </div>
+        </div>
+      </section>
+    </article>
+    """
+
+    records = DirectoryV1Adapter().parse(fixture, "https://deltachi.org/chapter-directory/mississippi/")
+    stubs = DirectoryV1Adapter().parse_stubs(fixture, "https://deltachi.org/chapter-directory/mississippi/")
+
+    assert len(records) == 1
+    assert records[0].name == "Mississippi State Chapter"
+    assert records[0].university_name == "Mississippi State"
+    assert records[0].website_url == "http://msstatedeltachi.com/"
+    assert records[0].instagram_url == "https://www.instagram.com/msstatedeltachi"
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Mississippi State Chapter"
+    assert stubs[0].provenance == "directory_v1:archive_entry"
+
+def test_directory_adapter_extracts_bootstrap_chapter_cards_and_splits_university_name():
+    fixture = """
+    <div class=\"grid-item\">
+      <div class=\"card h-100\">
+        <div class=\"card-body\">
+          <h3 class=\"card-title\">
+            <a href=\"https://www.kdr.com/chapter/beta-cornell-university/\">Beta - Cornell University</a>
+          </h3>
+        </div>
+      </div>
+    </div>
+    """
+
+    records = DirectoryV1Adapter().parse(fixture, "https://www.kdr.com/chapters/")
+    stubs = DirectoryV1Adapter().parse_stubs(fixture, "https://www.kdr.com/chapters/")
+
+    assert len(records) == 1
+    assert records[0].name == "Beta"
+    assert records[0].university_name == "Cornell University"
+    assert records[0].website_url == "https://www.kdr.com/chapter/beta-cornell-university/"
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Beta"
+    assert stubs[0].university_name == "Cornell University"
+
+
+
+def test_directory_adapter_uses_header_aware_table_columns_for_chi_psi_style_tables():
+    fixture = """
+    <table>
+      <tr>
+        <th>ALPHA</th>
+        <th>SYMBOL</th>
+        <th>COLLEGE</th>
+        <th>FOUNDED</th>
+      </tr>
+      <tr>
+        <td>Pi</td>
+        <td>&Pi;</td>
+        <td>Union College</td>
+        <td>1841</td>
+      </tr>
+    </table>
+    """
+
+    records = DirectoryV1Adapter().parse(fixture, "https://chipsi.org/where-we-are/")
+    stubs = DirectoryV1Adapter().parse_stubs(fixture, "https://chipsi.org/where-we-are/")
+
+    assert len(records) == 1
+    assert records[0].name == "Pi"
+    assert records[0].university_name == "Union College"
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Pi"
+    assert stubs[0].university_name == "Union College"

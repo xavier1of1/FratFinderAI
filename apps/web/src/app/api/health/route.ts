@@ -1,25 +1,22 @@
-import { apiError, apiSuccess } from "@/lib/api-envelope";
-import { getDbPool } from "@/lib/db";
+import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
+import { activeCampaignRunCount, scheduleDueCampaignRuns } from "@/lib/campaign-runner";
+import { reconcileStaleCampaignRuns } from "@/lib/repositories/campaign-run-repository";
 
 export async function GET() {
   try {
-    const dbPool = getDbPool();
-    await dbPool.query("SELECT 1");
+    const reconciledCampaigns = await reconcileStaleCampaignRuns();
+    const scheduledCampaigns = await scheduleDueCampaignRuns();
+
     return apiSuccess({
       ok: true,
-      service: "web",
-      probes: {
-        liveness: "ok",
-        readiness: "ok"
+      runtime: {
+        activeCampaignRuns: activeCampaignRunCount(),
+        reconciledCampaigns,
+        scheduledCampaigns
       },
-      timestamp: new Date().toISOString()
+      checkedAt: new Date().toISOString()
     });
   } catch (error) {
-    return apiError({
-      status: 503,
-      code: "service_unavailable",
-      message: "Health check failed.",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    return toApiErrorResponse(error);
   }
 }

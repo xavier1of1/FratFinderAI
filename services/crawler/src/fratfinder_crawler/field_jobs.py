@@ -53,6 +53,7 @@ _OBFUSCATED_AT_RE = re.compile(r"\s*(?:@|\(at\)|\[at\]|\{at\}|\sat\s)\s*", re.IG
 _OBFUSCATED_DOT_RE = re.compile(r"\s*(?:\.|\(dot\)|\[dot\]|\{dot\}|\sdot\s)\s*", re.IGNORECASE)
 _GENERIC_EMAIL_PREFIXES = {"info", "contact", "admin", "office", "hello", "membership", "national", "headquarters"}
 _IGNORED_INSTAGRAM_SEGMENTS = {"p", "reel", "tv", "stories", "explore", "accounts", "mailto"}
+_DOCUMENT_URL_EXTENSIONS = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".ics")
 _BLOCKED_WEBSITE_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "facebook.com", "www.facebook.com", "instagram.com", "www.instagram.com", "twitter.com", "x.com", "youtube.com", "www.youtube.com", "linkedin.com", "www.linkedin.com", "bing.com", "www.bing.com", "stackoverflow.com", "www.stackoverflow.com", "stackexchange.com", "github.com", "www.github.com", "sigmaaldrich.com", "www.sigmaaldrich.com", "sigma-aldrich.com", "www.sigma-aldrich.com", "milliporesigma.com", "www.milliporesigma.com", "merckmillipore.com", "www.merckmillipore.com"}
 _TIER2_WEBSITE_HOSTS = {"linktr.ee", "www.linktr.ee", "beacons.ai", "www.beacons.ai", "bio.site", "www.bio.site", "campsite.bio", "www.campsite.bio", "allmylinks.com", "www.allmylinks.com", "lnk.bio", "www.lnk.bio", "stan.store", "www.stan.store"}
 _LOW_SIGNAL_INSTAGRAM_RESULT_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "dcurbanmom.com", "www.dcurbanmom.com", "worldscholarshipforum.com", "www.worldscholarshipforum.com", "sigmaaldrich.com", "www.sigmaaldrich.com", "sigma-aldrich.com", "www.sigma-aldrich.com", "milliporesigma.com", "www.milliporesigma.com", "merckmillipore.com", "www.merckmillipore.com"}
@@ -60,6 +61,173 @@ _LOW_SIGNAL_EMAIL_RESULT_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.co
 _FREE_EMAIL_DOMAINS = {"gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com", "aol.com", "icloud.com", "me.com", "protonmail.com"}
 _MATCH_STOPWORDS = {"university", "college", "campus", "chapter", "official", "site", "email", "contact", "instagram", "profile", "fraternity", "house", "the", "and", "for"}
 _GREEK_LETTER_TOKENS = {"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega"}
+_LOW_SIGNAL_AFFILIATION_MARKERS = (
+    "admission",
+    "admissions",
+    "apply",
+    "applying",
+    "archive",
+    "archives",
+    "archivesspace",
+    "article",
+    "articles",
+    "award",
+    "awards",
+    "book export",
+    "calendar",
+    "commencement",
+    "encyclopedia",
+    "event",
+    "events",
+    "fellow",
+    "fellows",
+    "fellowship",
+    "history",
+    "in memoriam",
+    "magazine",
+    "memorial",
+    "news",
+    "obit",
+    "obits",
+    "obituar",
+    "our fellows",
+    "prize",
+    "prizes",
+    "profile",
+    "profiles",
+    "publication",
+    "publications",
+    "review",
+    "scholarship",
+    "scholarships",
+    "special collections",
+    "student voices",
+    "summer",
+    "urology",
+    "visiting writers",
+    "voices",
+)
+_LOW_SIGNAL_WEBSITE_PATH_MARKERS = (
+    "apparel",
+    "article",
+    "articles",
+    "award",
+    "awards",
+    "blog",
+    "bookstore",
+    "calendar",
+    "event",
+    "events",
+    "grade-report",
+    "grade_report",
+    "history",
+    "journalism",
+    "merch",
+    "news",
+    "onebook",
+    "post",
+    "posts",
+    "prize",
+    "prizes",
+    "profile",
+    "profiles",
+    "report",
+    "reports",
+    "resource",
+    "resources",
+    "scholarship",
+    "scholarships",
+    "shop",
+    "statistics",
+    "store",
+    "student-engagement",
+    "story",
+    "stories",
+    "terminology",
+    "statement",
+    "statements",
+    "trustees",
+    "wordpress",
+    "wp-content",
+)
+_OFFICIAL_AFFILIATION_MARKERS = (
+    "chapter profile",
+    "chapter profiles",
+    "chapters",
+    "clubs organizations",
+    "council",
+    "find a student org",
+    "fraternities",
+    "fraternity and sorority",
+    "fraternity chapters",
+    "fraternity sorority life",
+    "greek life",
+    "greek organizations",
+    "ifc",
+    "interfraternity",
+    "organization profile",
+    "organization scorecard",
+    "recognized chapters",
+    "student org",
+    "student organization",
+    "student organizations",
+)
+_WEBSITE_LINK_CUE_MARKERS = (
+    "chapter website",
+    "official website",
+    "visit website",
+    "visit site",
+    "website",
+    "homepage",
+    "home page",
+    "go to site",
+    "chapter site",
+    "site",
+)
+_EMAIL_ROLE_MARKERS = (
+    "advisor",
+    "board",
+    "contact",
+    "contacts",
+    "email",
+    "executive",
+    "leadership",
+    "officer",
+    "officers",
+    "president",
+    "recruit",
+    "recruitment",
+    "rush",
+    "secretary",
+    "treasurer",
+    "vice president",
+)
+_GENERIC_OFFICE_EMAIL_MARKERS = {
+    "admissions",
+    "advisor",
+    "greeklife",
+    "greek.life",
+    "leadership",
+    "office",
+    "reslife",
+    "studentaffairs",
+    "student.life",
+    "studentlife",
+}
+_FRATERNITY_NON_IDENTITY_TOKENS = {"main", "national", "nationals"}
+_CHAPTER_SIGNAL_STOPWORDS = {
+    "chapter",
+    "colony",
+    "active",
+    "inactive",
+    "associate",
+    "associates",
+    "provisional",
+    "suspended",
+    "rechartered",
+    "interest",
+    "group",
+}
 _INSTAGRAM_CONFLICT_MARKERS = {
     "tri sigma": "sigma sigma sigma",
     "sigma sigma sigma": "sigma sigma sigma",
@@ -420,7 +588,7 @@ class FieldJobEngine:
             chapter_slug=job.chapter_slug,
             attempts=job.attempts,
             max_attempts=job.max_attempts,
-            has_website=bool(job.website_url),
+            has_website=bool(_current_website_url(job)),
             has_email=bool(job.contact_email),
             has_instagram=bool(job.instagram_url),
         )
@@ -462,9 +630,10 @@ class FieldJobEngine:
             raise self._no_candidate_error(job, "No candidate instagram URL found in provenance, chapter website, or search results")
 
         if job.field_name == FIELD_JOB_FIND_WEBSITE:
-            if job.website_url:
+            existing_website = _current_website_url(job)
+            if existing_website:
                 self._trace("already_populated", target="website_url")
-                return self._already_populated_result(job.field_name, job.website_url)
+                return self._already_populated_result(job.field_name, existing_website)
             match = self._find_website_candidate(job)
             if match is None:
                 self._trace("no_candidate", target="website_url")
@@ -517,6 +686,7 @@ class FieldJobEngine:
                     "confidence": f"{match.confidence:.2f}",
                     "source_url": match.source_url,
                     "decision_trace": self._build_decision_trace_summary(),
+                    "rejection_summary": self._candidate_rejection_summary_payload(),
                 },
                 review_item=ReviewItemCandidate(
                     item_type="search_candidate_review",
@@ -531,6 +701,7 @@ class FieldJobEngine:
                         "extractionNotes": match.source_snippet,
                         "query": match.query,
                         "decisionTrace": self._build_decision_trace_summary(),
+                        "rejectionSummary": self._candidate_rejection_summary_payload(),
                     },
                 ),
             )
@@ -541,7 +712,8 @@ class FieldJobEngine:
         field_state_updates = {target_field: field_state}
         if target_field != "website_url" and match.related_website_url and _is_safe_related_website_url(job, match.related_website_url):
             sanitized_related_website = sanitize_as_website(match.related_website_url, base_url=match.source_url or job.source_base_url)
-            if sanitized_related_website and (not job.website_url or job.website_url == sanitized_related_website):
+            current_website = _current_website_url(job)
+            if sanitized_related_website and (not current_website or current_website == sanitized_related_website):
                 chapter_updates["website_url"] = sanitized_related_website
                 field_state_updates["website_url"] = "found" if match.confidence >= found_threshold else "low_confidence"
 
@@ -587,19 +759,17 @@ class FieldJobEngine:
         )
 
     def _verify_website(self, job: FieldJob) -> FieldJobResult:
-        if not job.website_url:
+        current_website = _current_website_url(job)
+        if not current_website:
             raise RetryableJobError(
                 "No website URL available to verify",
                 backoff_seconds=self._dependency_wait_seconds,
                 preserve_attempt=True,
                 reason_code="dependency_wait",
             )
-        sanitized_website = sanitize_as_website(job.website_url, base_url=job.source_base_url)
-        if not sanitized_website:
-            raise RuntimeError(f"Website verification received non-http candidate: {job.website_url}")
 
         try:
-            response = self._head_requester(sanitized_website, timeout=10, allow_redirects=True)
+            response = self._head_requester(current_website, timeout=10, allow_redirects=True)
         except requests.Timeout as exc:
             raise RetryableJobError("Website verification timed out", reason_code="transient_network") from exc
         except requests.RequestException as exc:
@@ -611,7 +781,7 @@ class FieldJobEngine:
         verification_method = "head"
         if status_code in {401, 403, 405, 406, 429}:
             try:
-                get_response = self._get_requester(sanitized_website, timeout=10, allow_redirects=True)
+                get_response = self._get_requester(current_website, timeout=10, allow_redirects=True)
             except requests.Timeout as exc:
                 raise RetryableJobError("Website verification timed out", reason_code="transient_network") from exc
             except requests.RequestException as exc:
@@ -625,7 +795,7 @@ class FieldJobEngine:
                 chapter_updates={},
                 completed_payload={
                     "status": "verified",
-                    "website_url": sanitized_website,
+                    "website_url": current_website,
                     "status_code": str(status_code),
                     "verification_method": verification_method,
                     "decision_trace": self._build_decision_trace_summary(),
@@ -710,10 +880,11 @@ class FieldJobEngine:
         return _best_match(matches)
     def _find_instagram_candidate(self, job: FieldJob) -> CandidateMatch | None:
         matches: list[CandidateMatch] = []
+        current_website = _current_website_url(job)
 
-        if job.website_url and _website_trust_tier(job, job.website_url) == "tier1":
+        if current_website and _website_trust_tier(job, current_website) == "tier1":
             self._trace("instagram_strategy", stage="trusted_chapter_website")
-            website_document = self._fetch_search_document(job.website_url, provider="chapter_website")
+            website_document = self._fetch_search_document(current_website, provider="chapter_website")
             if website_document is not None:
                 website_matches = self._extract_instagram_matches(website_document, job)
                 matches.extend(website_matches)
@@ -774,15 +945,16 @@ class FieldJobEngine:
         return _best_match(self._extract_email_matches(provenance_document, job))
 
     def _extract_email_matches_from_website(self, job: FieldJob) -> list[CandidateMatch]:
-        if not job.website_url:
+        current_website = _current_website_url(job)
+        if not current_website:
             return []
 
-        homepage_document = self._fetch_search_document(job.website_url, provider="chapter_website")
+        homepage_document = self._fetch_search_document(current_website, provider="chapter_website")
         if homepage_document is None:
             return []
 
         matches = self._extract_email_matches(homepage_document, job)
-        followup_links = _email_followup_links(homepage_document, job.website_url, limit=self._max_search_pages)
+        followup_links = _email_followup_links(homepage_document, current_website, limit=self._max_search_pages)
         for link in followup_links:
             followup_document = self._fetch_search_document(link, provider="chapter_website")
             if followup_document is None:
@@ -970,14 +1142,13 @@ class FieldJobEngine:
         return _best_match(matches)
 
     def _find_target_candidates_from_nationals(self, job: FieldJob, *, target: str) -> list[CandidateMatch]:
-        if self._greedy_collect_mode == _GREEDY_COLLECT_NONE:
-            return []
         if not job.source_base_url or not job.fraternity_slug:
             return []
         entries = self._get_nationals_entries(job)
         if not entries:
             return []
-        self._maybe_ingest_nationals_entries(job, entries)
+        if self._greedy_collect_mode != _GREEDY_COLLECT_NONE:
+            self._maybe_ingest_nationals_entries(job, entries)
 
         matches: list[CandidateMatch] = []
         for entry in entries:
@@ -1027,6 +1198,8 @@ class FieldJobEngine:
         source_host = (urlparse(base_url).netloc or "").lower()
         if not source_host:
             return []
+        source_record = self._load_source_record(job.source_slug) if job.source_slug else None
+        source_list_url = _source_list_url_for_job(job, source_record)
 
         if self._greedy_collect_mode == _GREEDY_COLLECT_BFS:
             max_pages = 24
@@ -1035,7 +1208,7 @@ class FieldJobEngine:
             max_pages = 8
             max_depth = 1
 
-        seed_urls: list[str] = [base_url]
+        seed_urls: list[str] = [source_list_url, base_url]
         for suffix in ("chapter-directory/", "chapters/", "directory/", "find-a-chapter/", "locations/"):
             seed_urls.append(urljoin(base_url, suffix))
 
@@ -1239,7 +1412,7 @@ class FieldJobEngine:
                 CandidateMatch(
                     value=sanitized_email,
                     confidence=confidence,
-                    source_url=document.url or (job.website_url or job.source_base_url or "search-enrichment"),
+                    source_url=document.url or (_current_website_url(job) or job.source_base_url or "search-enrichment"),
                     source_snippet=document.text[:400],
                     field_name="contact_email",
                     source_provider=document.provider,
@@ -1259,7 +1432,7 @@ class FieldJobEngine:
                 CandidateMatch(
                     value=sanitized_email,
                     confidence=confidence,
-                    source_url=document.url or (job.website_url or job.source_base_url or "search-enrichment"),
+                    source_url=document.url or (_current_website_url(job) or job.source_base_url or "search-enrichment"),
                     source_snippet=document.text[:400],
                     field_name="contact_email",
                     source_provider=document.provider,
@@ -1388,6 +1561,9 @@ class FieldJobEngine:
         local_part = email.split("@", 1)[0].lower()
         domain = _email_domain(email)
         source_tier = _website_trust_tier(job, document.url or "")
+        identity_email = _email_local_part_has_identity(email, job)
+        generic_office_email = _email_local_part_looks_generic_office(email)
+        person_like_email = _email_local_part_looks_personal(email)
         if source_tier == "tier1":
             confidence += 0.05
         if source_tier == "blocked":
@@ -1403,6 +1579,16 @@ class FieldJobEngine:
             confidence += 0.04
         if domain in _FREE_EMAIL_DOMAINS and document.provider in {"search_result", "search_page"}:
             confidence -= 0.08
+        if document.provider in {"search_result", "search_page"} and not identity_email:
+            confidence -= 0.12
+        if generic_office_email and document.provider in {"search_result", "search_page"}:
+            confidence -= 0.08
+        if person_like_email and not identity_email:
+            confidence -= 0.16
+        if _website_document_looks_low_signal(document):
+            confidence -= 0.2
+        if _email_document_has_contact_context(document):
+            confidence += 0.03
 
         if not _email_looks_relevant_to_job(email, job, document=document):
             confidence -= 0.24
@@ -1434,12 +1620,13 @@ class FieldJobEngine:
 
     def _search_documents(self, job: FieldJob, target: str, *, include_existing: bool = True) -> list[SearchDocument]:
         documents: list[SearchDocument] = []
+        current_website = _current_website_url(job)
         if include_existing:
             source_text = self._source_text(job)
             if source_text:
                 documents.append(SearchDocument(text=source_text, provider="provenance", url=job.source_base_url))
-            if job.website_url:
-                website_document = self._fetch_search_document(job.website_url, provider="chapter_website")
+            if current_website:
+                website_document = self._fetch_search_document(current_website, provider="chapter_website")
                 if website_document is not None:
                     documents.append(website_document)
 
@@ -1550,7 +1737,7 @@ class FieldJobEngine:
                 ]
             )
         elif target == "email":
-            website_host = (urlparse(job.website_url or "").netloc or "").lower()
+            website_host = (urlparse(_current_website_url(job) or "").netloc or "").lower()
             if website_host:
                 query_parts.extend(
                     [
@@ -1791,13 +1978,13 @@ class FieldJobEngine:
             source_tier = _website_trust_tier(job, match.source_url)
             if candidate_tier == "tier2":
                 return 1.0
-            if self._search_provider == "bing_html":
+            if match.source_provider in {"search_result", "search_page"}:
                 if candidate_tier == "tier1" or source_tier == "tier1":
-                    return 0.88
+                    return 0.90
                 if match.source_provider == "search_result":
                     return 0.98
-                return 0.96
-        if self._search_provider == "bing_html" and match.source_provider in {"search_result", "search_page"}:
+                return 0.95
+        if match.source_provider in {"search_result", "search_page"}:
             return {
                 "website_url": 0.95,
                 "contact_email": 0.90,
@@ -1811,11 +1998,11 @@ class FieldJobEngine:
             source_tier = _website_trust_tier(job, match.source_url)
             if candidate_tier == "tier2":
                 return 0.99
-            if self._search_provider == "bing_html" and (candidate_tier == "tier1" or source_tier == "tier1"):
-                return 0.90
-        if self._search_provider == "bing_html" and match.source_provider in {"search_result", "search_page"}:
+            if match.source_provider in {"search_result", "search_page"} and (candidate_tier == "tier1" or source_tier == "tier1"):
+                return 0.92
+        if match.source_provider in {"search_result", "search_page"}:
             return {
-                "website_url": 0.95,
+                "website_url": 0.96,
                 "contact_email": 0.92,
                 "instagram_url": 0.90,
             }.get(target_field, 0.90)
@@ -1927,6 +2114,16 @@ class FieldJobEngine:
             "rejections": rejection_histogram,
         }
 
+    def _candidate_rejection_summary_payload(self) -> dict[str, object] | None:
+        if not self._candidate_rejection_counts:
+            return None
+        top_reasons = sorted(self._candidate_rejection_counts.items(), key=lambda item: item[1], reverse=True)[:8]
+        return {
+            "totalRejections": sum(self._candidate_rejection_counts.values()),
+            "uniqueReasons": len(self._candidate_rejection_counts),
+            "topReasons": [{"reason": reason, "count": count} for reason, count in top_reasons],
+        }
+
     def _emit_candidate_rejection_summary(self, job: FieldJob, *, target: str) -> None:
         if not self._candidate_rejection_counts:
             return
@@ -1967,17 +2164,35 @@ class FieldJobEngine:
         overlap_score = _email_context_overlap_score(job, email, document)
         email_domain = _email_domain(email)
         source_tier = _website_trust_tier(job, document.url or "")
+        identity_email = _email_local_part_has_identity(email, job)
+        person_like_email = _email_local_part_looks_personal(email)
+        generic_office_email = _email_local_part_looks_generic_office(email)
+        strong_context = _email_document_has_contact_context(document) and fraternity_match and (school_match or chapter_match)
+        official_chapter_context = _website_document_has_official_chapter_context(job, document)
+
+        if _website_document_looks_low_signal(document):
+            self._record_candidate_rejection("email", "low_signal_page")
+            return False
+        if generic_office_email and not identity_email and not strong_context:
+            self._record_candidate_rejection("email", "generic_office_email")
+            return False
 
         if fraternity_match and (school_match or chapter_match):
             return True
-        if source_tier == "tier1" and school_match and (fraternity_match or chapter_match):
+        if source_tier == "tier1" and official_chapter_context and school_match and (fraternity_match or chapter_match):
             return True
-        if source_tier == "tier1" and school_match and _email_domain_matches_known_school_or_website(job, email_domain):
+        if source_tier == "tier1" and official_chapter_context and school_match and _email_domain_matches_known_school_or_website(job, email_domain) and (identity_email or strong_context):
             return True
         if overlap_score >= 4 and (school_match or fraternity_match):
             return True
         if _email_domain_matches_known_school_or_website(job, email_domain) and (school_match or fraternity_match):
             return True
+        if person_like_email and not strong_context:
+            self._record_candidate_rejection("email", "person_like_email")
+            return False
+        if source_tier == "tier1" and not identity_email and not strong_context and not official_chapter_context:
+            self._record_candidate_rejection("email", "missing_identity_anchor")
+            return False
         if not school_match:
             self._record_candidate_rejection("email", "missing_school_anchor")
         if not fraternity_match and not chapter_match:
@@ -2113,6 +2328,12 @@ class FieldJobEngine:
             if job.source_base_url and _normalize_url(url) == _normalize_url(job.source_base_url):
                 self._record_candidate_rejection("website", "source_base_url_only")
                 continue
+            if _looks_like_document_asset_url(url):
+                self._record_candidate_rejection("website", "document_asset")
+                continue
+            if _website_candidate_looks_low_signal(url, document):
+                self._record_candidate_rejection("website", "low_signal_url")
+                continue
             key = _normalize_url(url)
             if key in seen:
                 continue
@@ -2120,6 +2341,35 @@ class FieldJobEngine:
             if _candidate_is_source_domain(url, job):
                 self._record_candidate_rejection("website", "source_domain_url")
                 continue
+            if _website_document_has_conflicting_org_signal(job, document):
+                self._record_candidate_rejection("website", "conflicting_org_signal")
+                continue
+            if _school_has_conflicting_signal(job, _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:1200], document.url or "", url] if part))):
+                self._record_candidate_rejection("website", "conflicting_school_signal")
+                continue
+            document_host = (urlparse(document.url or "").netloc or "").lower()
+            candidate_host = (urlparse(url).netloc or "").lower()
+            if (
+                document.provider == "search_page"
+                and _website_trust_tier(job, document.url or "") == "tier1"
+                and candidate_host
+                and document_host
+                and candidate_host != document_host
+                and not _trusted_directory_external_candidate(job, url, document)
+                and not _search_page_link_has_website_context(job, document, url)
+            ):
+                self._record_candidate_rejection("website", "weak_external_link_context")
+                continue
+            if document.provider in {"search_result", "search_page"} and _website_trust_tier(job, url) == "tier1":
+                if _looks_like_generic_site_root(url):
+                    self._record_candidate_rejection("website", "generic_school_root")
+                    continue
+                if not _ambiguous_school_tier1_candidate_allowed(job, url, document):
+                    self._record_candidate_rejection("website", "ambiguous_school_tier1_generic")
+                    continue
+                if not _tier1_website_candidate_has_specificity(job, url, document):
+                    self._record_candidate_rejection("website", "low_specificity_tier1")
+                    continue
             confidence = self._score_website_candidate(url, document, job)
             if _trusted_directory_external_candidate(job, url, document):
                 confidence = min(0.95, confidence + 0.08)
@@ -2178,6 +2428,28 @@ def _normalized_match_text(value: str | None) -> str:
 
 def _compact_text(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _current_website_url(job: FieldJob) -> str | None:
+    return sanitize_as_website(job.website_url, base_url=job.source_base_url)
+
+
+def _source_list_url_for_job(job: FieldJob, source_record: SourceRecord | None = None) -> str:
+    payload_list_url = str(job.payload.get("sourceListUrl") or "").strip()
+    if payload_list_url:
+        return payload_list_url
+    if source_record is not None:
+        list_url = getattr(source_record, "list_url", None)
+        if isinstance(list_url, str) and list_url.strip():
+            return list_url.strip()
+        list_path = getattr(source_record, "list_path", None)
+        base_url = str(getattr(source_record, "base_url", "") or "").strip()
+        if isinstance(list_path, str) and list_path.strip():
+            if list_path.startswith("http"):
+                return list_path.strip()
+            if base_url:
+                return urljoin(base_url, list_path)
+    return str(job.source_base_url or "").strip()
 
 
 def _initialism(value: str | None) -> str:
@@ -2407,24 +2679,74 @@ def _significant_tokens(value: str | None) -> list[str]:
     return [token for token in _normalized_match_text(value).split() if len(token) >= 3 and token not in {"the", "and", "of", "for"}]
 
 
+def _canonical_fraternity_display(value: str | None) -> str:
+    tokens = [token for token in _normalized_match_text(_display_name(value)).split() if token not in _FRATERNITY_NON_IDENTITY_TOKENS]
+    if tokens:
+        return " ".join(tokens)
+    return _normalized_match_text(_display_name(value))
+
+
 def _fraternity_tokens(value: str | None) -> list[str]:
-    return [token for token in _normalized_match_text(value).split() if len(token) >= 3 and token not in {"the", "and", "of", "for"}]
+    return [
+        token
+        for token in _normalized_match_text(_canonical_fraternity_display(value)).split()
+        if len(token) >= 3 and token not in {"the", "and", "of", "for"}
+    ]
 
 
 def _fraternity_matches(job: FieldJob, text: str) -> bool:
-    fraternity_display = _display_name(job.fraternity_slug)
+    fraternity_display = _canonical_fraternity_display(job.fraternity_slug)
     fraternity_phrase = _normalized_match_text(fraternity_display)
+    if not fraternity_phrase or not text:
+        return False
     compact_text = _compact_text(text)
     fraternity_compact = _compact_text(fraternity_display)
     if fraternity_phrase and fraternity_phrase in text:
         return True
     if fraternity_compact and fraternity_compact in compact_text:
         return True
+    for alias in _fraternity_query_aliases(fraternity_display, job.fraternity_slug):
+        alias_phrase = _normalized_match_text(alias)
+        alias_compact = _compact_text(alias)
+        if alias_phrase and alias_phrase in text:
+            return True
+        if alias_compact and len(alias_compact) <= 3 and alias_compact.isalpha():
+            if re.search(rf"\b{re.escape(alias_compact)}\b", text):
+                return True
+            continue
+        if alias_compact and alias_compact in compact_text:
+            return True
     tokens = _fraternity_tokens(fraternity_display)
     if not tokens:
         return False
+    if all(token in _GREEK_LETTER_TOKENS for token in tokens):
+        return all(token in text for token in tokens)
     required = len(tokens) if len(tokens) <= 2 else 2
     return sum(1 for token in tokens if token in text) >= required
+
+
+def _school_has_conflicting_signal(job: FieldJob, text: str) -> bool:
+    school = _normalized_match_text(job.university_name or str(job.payload.get("candidateSchoolName") or ""))
+    if not school or not text:
+        return False
+    if school.startswith("university of "):
+        core = school.removeprefix("university of ").strip()
+        if core and (f"{core} state" in text or f"{core} state university" in text):
+            return True
+    if school.endswith(" state university"):
+        core = school.removesuffix(" state university").strip()
+        if core and f"university of {core}" in text and school not in text:
+            return True
+    return False
+
+
+def _school_identity_tokens(job: FieldJob) -> list[str]:
+    university = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+    return _significant_tokens(university)
+
+
+def _school_name_is_ambiguous(job: FieldJob) -> bool:
+    return len(_school_identity_tokens(job)) <= 1
 
 
 def _school_matches(job: FieldJob, text: str) -> bool:
@@ -2440,11 +2762,53 @@ def _school_matches(job: FieldJob, text: str) -> bool:
     return matched >= required
 
 
+def _chapter_signal_tokens(job: FieldJob) -> list[str]:
+    school_tokens = set(_significant_tokens(job.university_name or str(job.payload.get("candidateSchoolName") or "")))
+    fraternity_tokens = set(_fraternity_tokens(_display_name(job.fraternity_slug)))
+    chapter_tokens = [
+        token
+        for token in _significant_tokens(job.chapter_name)
+        if token not in school_tokens and token not in fraternity_tokens and token not in _CHAPTER_SIGNAL_STOPWORDS
+    ]
+    if chapter_tokens:
+        return chapter_tokens
+    slug_tokens = [
+        token
+        for token in _significant_tokens(job.chapter_slug)
+        if token not in school_tokens and token not in fraternity_tokens and token not in _CHAPTER_SIGNAL_STOPWORDS
+    ]
+    return slug_tokens
+
+
 def _chapter_matches(job: FieldJob, text: str) -> bool:
-    chapter_tokens = _significant_tokens(job.chapter_name)
-    if not chapter_tokens:
-        chapter_tokens = _significant_tokens(job.chapter_slug)
+    chapter_tokens = _chapter_signal_tokens(job)
     return sum(1 for token in chapter_tokens if token in text) >= 1
+
+
+def _url_has_job_identity(job: FieldJob, url: str | None) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    combined = _normalized_match_text(" ".join(part for part in [parsed.netloc or "", parsed.path or "", parsed.query or ""] if part))
+    if not combined:
+        return False
+    if _fraternity_matches(job, combined):
+        return True
+    return _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
+
+
+def _ambiguous_school_tier1_candidate_allowed(job: FieldJob, url: str, document: SearchDocument) -> bool:
+    if not _school_name_is_ambiguous(job):
+        return True
+    if _website_trust_tier(job, url) != "tier1":
+        return True
+    if _url_has_job_identity(job, url):
+        return True
+    if _url_has_job_identity(job, document.url or ""):
+        return True
+    if not _looks_like_directory_listing_url(url):
+        return True
+    return False
 
 
 def _document_is_relevant(job: FieldJob, document: SearchDocument) -> bool:
@@ -2459,7 +2823,13 @@ def _website_document_passes_relaxed_gate(job: FieldJob, document: SearchDocumen
         return False
     if _website_trust_tier(job, document.url or "") != "tier1":
         return False
-    combined = _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:1200], document.url or ""] if part))
+    if _website_document_looks_low_signal(document):
+        return False
+    combined = _document_match_text(document, limit=1200)
+    if _school_has_conflicting_signal(job, combined):
+        return False
+    if _website_document_has_conflicting_org_signal(job, document):
+        return False
     if _fraternity_matches(job, combined) and (_school_matches(job, combined) or _chapter_matches(job, combined)):
         return True
     return _school_matches(job, combined) and any(marker in combined for marker in ("ifc", "greek", "fraternity", "student organization", "chapter"))
@@ -2471,11 +2841,50 @@ def _search_result_is_relevant(job: FieldJob, result: SearchResult) -> bool:
 
 
 def _search_result_is_useful(job: FieldJob, result: SearchResult, target: str) -> bool:
+    combined = _normalized_match_text(f"{result.title} {result.snippet} {result.url}")
+
+    if target == "website":
+        if _is_disallowed_website_candidate(result.url):
+            return False
+        if _website_candidate_looks_low_signal(result.url):
+            return False
+        if (
+            _website_trust_tier(job, result.url) == "tier1"
+            and not _ambiguous_school_tier1_candidate_allowed(
+                job,
+                result.url,
+                SearchDocument(
+                    text=result.snippet,
+                    links=[result.url],
+                    url=result.url,
+                    title=result.title,
+                    provider="search_result",
+                ),
+            )
+        ):
+            return False
+        if _school_has_conflicting_signal(job, combined):
+            return False
+        if _text_has_conflicting_org_phrase(job, _normalized_match_text(result.title)):
+            return False
+        if _search_result_is_relevant(job, result):
+            return True
+        if _website_trust_tier(job, result.url) == "tier1":
+            if any(marker in combined for marker in _LOW_SIGNAL_AFFILIATION_MARKERS):
+                return False
+            if not _school_matches(job, combined):
+                return False
+            if not any(marker in combined for marker in _OFFICIAL_AFFILIATION_MARKERS):
+                return False
+            return _fraternity_matches(job, combined) or _chapter_matches(job, combined)
+        return _fraternity_matches(job, combined) and (_school_matches(job, combined) or _chapter_matches(job, combined))
+
     if target == "email":
         hostname = (urlparse(result.url).netloc or "").lower()
         if hostname in _LOW_SIGNAL_EMAIL_RESULT_HOSTS or any(hostname.endswith(f".{blocked}") for blocked in _LOW_SIGNAL_EMAIL_RESULT_HOSTS):
             return False
-        combined = _normalized_match_text(f"{result.title} {result.snippet} {result.url}")
+        if _website_trust_tier(job, result.url) == "tier1" and any(marker in combined for marker in _LOW_SIGNAL_AFFILIATION_MARKERS):
+            return False
         if _search_result_is_relevant(job, result):
             return True
         if _website_trust_tier(job, result.url) == "tier1" and (_school_matches(job, combined) or _fraternity_matches(job, combined)):
@@ -2515,7 +2924,7 @@ def _should_fetch_search_result_page(job: FieldJob, result: SearchResult, target
         lowered = _normalized_match_text(f"{result.title} {result.snippet} {result.url}")
         if any(marker in lowered for marker in ("contact", "email", "officer", "leadership", "board", "about", "ifc", "greek life")):
             return True
-        website_host = (urlparse(job.website_url or "").netloc or "").lower()
+        website_host = (urlparse(_current_website_url(job) or "").netloc or "").lower()
         result_host = (urlparse(result.url).netloc or "").lower()
         if website_host and (result_host == website_host or result_host.endswith(f".{website_host}")):
             return True
@@ -2535,7 +2944,7 @@ def _email_domain_matches_known_school_or_website(job: FieldJob, domain: str) ->
     if domain.endswith(".edu"):
         return True
 
-    website_host = (urlparse(job.website_url or "").netloc or "").lower()
+    website_host = (urlparse(_current_website_url(job) or "").netloc or "").lower()
     if website_host and (domain == website_host or domain.endswith(f".{website_host}")):
         return True
 
@@ -2584,6 +2993,105 @@ def _email_looks_relevant_to_job(email: str, job: FieldJob, *, document: SearchD
     combined = _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:1200], document.url or "", email] if part))
     return _fraternity_matches(job, combined) and (_school_matches(job, combined) or _chapter_matches(job, combined))
 
+
+def _document_match_text(document: SearchDocument, *, limit: int = 1600) -> str:
+    return _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:limit], document.url or ""] if part))
+
+
+def _website_document_looks_low_signal(document: SearchDocument) -> bool:
+    combined = _document_match_text(document, limit=900)
+    return any(marker in combined for marker in _LOW_SIGNAL_AFFILIATION_MARKERS)
+
+
+def _website_candidate_looks_low_signal(url: str, document: SearchDocument | None = None) -> bool:
+    parsed = urlparse(url)
+    path_text = _normalized_match_text(f"{parsed.netloc} {parsed.path} {parsed.query}")
+    if any(marker in path_text for marker in _LOW_SIGNAL_WEBSITE_PATH_MARKERS):
+        return True
+    if document is None:
+        return False
+    title_text = _normalized_match_text(" ".join(part for part in [document.title or "", document.url or ""] if part))
+    return any(marker in title_text for marker in ("one book", "grade report", "architectural journalism", "terminology"))
+
+
+def _website_document_has_official_chapter_context(job: FieldJob, document: SearchDocument) -> bool:
+    combined = _document_match_text(document, limit=1600)
+    if _school_has_conflicting_signal(job, combined):
+        return False
+    if _website_document_has_conflicting_org_signal(job, document):
+        return False
+    if not _school_matches(job, combined):
+        return False
+    if not (_fraternity_matches(job, combined) or _chapter_matches(job, combined)):
+        return False
+    return any(marker in combined for marker in _OFFICIAL_AFFILIATION_MARKERS)
+
+
+def _search_page_link_has_website_context(job: FieldJob, document: SearchDocument, candidate_url: str) -> bool:
+    if document.provider != "search_page" or not document.html:
+        return False
+    document_url = document.url or ""
+    if not document_url:
+        return False
+    candidate_normalized = _normalize_url(urljoin(document_url, candidate_url))
+    soup = BeautifulSoup(document.html, "html.parser")
+    for node in soup.select("a[href]"):
+        href = (node.get("href") or "").strip()
+        if not href:
+            continue
+        absolute = urljoin(document_url, href)
+        if _normalize_url(absolute) != candidate_normalized:
+            continue
+        anchor_text = _normalized_match_text(node.get_text(" ", strip=True))
+        parent_text = ""
+        parent = getattr(node, "parent", None)
+        if parent is not None and getattr(parent, "name", None) not in {"body", "html"}:
+            parent_text = _normalized_match_text(parent.get_text(" ", strip=True)[:400])
+        context = " ".join(part for part in [anchor_text, parent_text] if part)
+        if any(marker in context for marker in _WEBSITE_LINK_CUE_MARKERS):
+            return True
+        if _fraternity_matches(job, context) and (_school_matches(job, context) or _chapter_matches(job, context)):
+            return True
+    return False
+
+
+def _email_local_part_has_identity(email: str, job: FieldJob) -> bool:
+    local_part = _compact_text(email.split("@", 1)[0])
+    if not local_part:
+        return False
+
+    fraternity_display = _display_name(job.fraternity_slug)
+    fraternity_compact = _compact_text(fraternity_display)
+    fraternity_initials = _initialism(fraternity_display)
+    if fraternity_compact and fraternity_compact in local_part:
+        return True
+    if fraternity_initials and len(fraternity_initials) >= 2 and fraternity_initials in local_part:
+        return True
+
+    school_initials = _school_initials(job.university_name or str(job.payload.get("candidateSchoolName") or ""))
+    if school_initials and len(school_initials) >= 3 and school_initials in local_part:
+        return True
+
+    chapter_tokens = _significant_tokens(job.chapter_name)
+    return any(token in local_part for token in chapter_tokens if len(token) >= 4)
+
+
+def _email_local_part_looks_personal(email: str) -> bool:
+    local_part = email.split("@", 1)[0].lower()
+    return bool(re.fullmatch(r"[a-z]{2,}[._-][a-z]{2,}[0-9]{0,4}", local_part))
+
+
+def _email_local_part_looks_generic_office(email: str) -> bool:
+    local_part = email.split("@", 1)[0].lower()
+    if local_part in _GENERIC_EMAIL_PREFIXES:
+        return True
+    return any(marker in local_part for marker in _GENERIC_OFFICE_EMAIL_MARKERS)
+
+
+def _email_document_has_contact_context(document: SearchDocument) -> bool:
+    combined = _document_match_text(document, limit=1200)
+    return any(marker in combined for marker in _EMAIL_ROLE_MARKERS)
+
 def _instagram_handle_match_score(instagram_url: str, job: FieldJob) -> int:
     handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
     score = 0
@@ -2627,7 +3135,9 @@ def _instagram_candidate_text(document: SearchDocument, instagram_url: str) -> s
 
 
 def _has_nongeneric_chapter_signal(job: FieldJob) -> bool:
-    return not _is_generic_greek_letter_chapter_name(job.chapter_name) and bool(_significant_tokens(job.chapter_name))
+    if _is_generic_greek_letter_chapter_name(job.chapter_name):
+        return False
+    return bool(_chapter_signal_tokens(job))
 
 
 def _normalized_greek_chapter_designation(value: str | None) -> str:
@@ -2640,6 +3150,25 @@ def _extract_greek_chapter_designations(text: str) -> set[str]:
     greek = "|".join(sorted(_GREEK_LETTER_TOKENS, key=len, reverse=True))
     pattern = re.compile(rf"\b(?:{greek})(?:\s+(?:{greek})){{0,2}}(?=\s+chapter\b)")
     return {match.group(0).strip() for match in pattern.finditer(text)}
+
+
+def _extract_greek_org_phrases(text: str) -> set[str]:
+    greek = "|".join(sorted(_GREEK_LETTER_TOKENS, key=len, reverse=True))
+    pattern = re.compile(rf"\b(?:{greek})(?:\s+(?:{greek})){{1,3}}\b")
+    return {match.group(0).strip() for match in pattern.finditer(text)}
+
+
+def _text_has_conflicting_org_phrase(job: FieldJob, text: str) -> bool:
+    canonical_target = _normalized_match_text(_canonical_fraternity_display(job.fraternity_slug))
+    if not text or not canonical_target:
+        return False
+    if canonical_target in text:
+        return False
+    for phrase in _extract_greek_org_phrases(text):
+        if phrase == canonical_target:
+            continue
+        return True
+    return False
 
 
 def _chapter_designation_signal(job: FieldJob, text: str) -> int:
@@ -2791,6 +3320,16 @@ def _instagram_has_conflicting_org_signal(job: FieldJob, text: str) -> bool:
     return False
 
 
+def _website_document_has_conflicting_org_signal(job: FieldJob, document: SearchDocument) -> bool:
+    title_text = _normalized_match_text(document.title or "")
+    if _text_has_conflicting_org_phrase(job, title_text):
+        return True
+    document_text = _document_match_text(document, limit=300)
+    if _text_has_conflicting_org_phrase(job, document_text) and not _fraternity_matches(job, document_text):
+        return True
+    return False
+
+
 def _should_skip_search_page_fetch(url: str) -> bool:
     parsed = urlparse(url)
     hostname = (parsed.netloc or "").lower()
@@ -2817,6 +3356,68 @@ def _looks_like_directory_listing_url(url: str) -> bool:
     return any(marker in lowered for marker in directory_markers)
 
 
+def _looks_like_document_asset_url(url: str) -> bool:
+    parsed = urlparse(url)
+    path = (parsed.path or "").lower()
+    return any(path.endswith(extension) for extension in _DOCUMENT_URL_EXTENSIONS)
+
+
+def _looks_like_generic_site_root(url: str) -> bool:
+    parsed = urlparse(url)
+    path = (parsed.path or "").strip("/")
+    return not path and not (parsed.query or "").strip()
+
+
+def _school_exact_phrase_present(job: FieldJob, text: str) -> bool:
+    university = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+    phrase = _normalized_match_text(university)
+    return bool(phrase and phrase in text)
+
+
+def _tier1_website_candidate_has_specificity(job: FieldJob, url: str, document: SearchDocument) -> bool:
+    combined = _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:1600], document.url or "", url] if part))
+    url_text = _normalized_match_text(f"{urlparse(url).netloc} {urlparse(url).path} {urlparse(url).query}")
+    path_has_org_marker = any(
+        marker in url_text
+        for marker in (
+            "fraternity",
+            "sorority",
+            "greek",
+            "ifc",
+            "chapter",
+            "chapters",
+            "student organization",
+            "student organizations",
+            "organization",
+            "organizations",
+            "club",
+            "clubs",
+            "fsl",
+            "council",
+        )
+    )
+    path_has_identity = _fraternity_matches(job, url_text) or _chapter_matches(job, url_text)
+    if _website_document_looks_low_signal(document):
+        return False
+    if _website_candidate_looks_low_signal(url, document):
+        return False
+    if _school_has_conflicting_signal(job, combined):
+        return False
+    if _website_document_has_conflicting_org_signal(job, document):
+        return False
+    if not _ambiguous_school_tier1_candidate_allowed(job, url, document):
+        return False
+    if _normalize_url(url) == _normalize_url(document.url or "") and not _website_document_has_official_chapter_context(job, document):
+        return False
+    if path_has_identity and (_school_exact_phrase_present(job, combined) or _school_matches(job, combined)):
+        return True
+    if path_has_org_marker and _fraternity_matches(job, combined) and (_school_exact_phrase_present(job, combined) or _chapter_matches(job, combined)):
+        return True
+    if _looks_like_directory_listing_url(url) and _fraternity_matches(job, combined) and (_school_exact_phrase_present(job, combined) or _chapter_matches(job, combined)):
+        return True
+    return False
+
+
 def _candidate_is_source_domain(url: str, job: FieldJob) -> bool:
     candidate_host = (urlparse(url).netloc or "").lower()
     source_host = (urlparse(job.source_base_url or "").netloc or "").lower()
@@ -2827,6 +3428,8 @@ def _trusted_directory_external_candidate(job: FieldJob, candidate_url: str, doc
     if document.provider != "search_page":
         return False
     if _website_trust_tier(job, document.url or "") != "tier1":
+        return False
+    if _website_candidate_looks_low_signal(candidate_url, document):
         return False
     if not _looks_like_directory_listing_url(document.url or "") and not _looks_like_official_school_affiliation_page(document):
         return False
@@ -2840,12 +3443,12 @@ def _trusted_directory_external_candidate(job: FieldJob, candidate_url: str, doc
     compact_candidate = _compact_text(candidate_url)
     if compact_target and compact_target in compact_candidate:
         return True
-    combined = _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:1500], candidate_url] if part))
-    return _fraternity_matches(job, combined) and _school_matches(job, combined)
+    return False
 
 
 def _is_safe_related_website_url(job: FieldJob, url: str) -> bool:
-    if job.website_url and _normalize_url(job.website_url) == _normalize_url(url):
+    current_website = _current_website_url(job)
+    if current_website and _normalize_url(current_website) == _normalize_url(url):
         return True
     if _is_disallowed_website_candidate(url):
         return False
@@ -3286,12 +3889,25 @@ def _nationals_entry_match_score(job: FieldJob, entry: NationalsChapterEntry) ->
             if part
         )
     )
+    if not combined:
+        return 0
+    if _school_has_conflicting_signal(job, combined):
+        return 0
+    if _text_has_conflicting_org_phrase(job, combined):
+        return 0
+    school_exact = _school_exact_phrase_present(job, combined)
+    school_match = _school_matches(job, combined)
+    chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
+    if not school_match and not chapter_match:
+        return 0
     score = 0
-    if _school_matches(job, combined):
+    if school_exact:
+        score += 4
+    elif school_match:
         score += 3
-    if _fraternity_matches(job, combined):
+    if chapter_match:
         score += 2
-    if _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined):
+    if _fraternity_matches(job, combined):
         score += 1
     return score
 
@@ -3356,10 +3972,10 @@ class RetryableJobError(Exception):
 
 
 def _website_is_confident(job: FieldJob) -> bool:
-    if not job.website_url:
+    if not _current_website_url(job):
         return False
     state = (job.field_states or {}).get("website_url")
-    return state != "low_confidence"
+    return state not in {"low_confidence", "missing"}
 
 
 

@@ -25,3 +25,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local runtime artifacts
+artifacts/*
+!artifacts/README.md
+/.tmp*.log
+/.tmp*.html

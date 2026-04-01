@@ -233,11 +233,44 @@ def test_bing_redirect_url_is_decoded():
     assert results[0].url == "https://example.org/chapter"
 
 
-def test_auto_provider_prefers_brave_when_key_present():
+def test_auto_provider_prefers_searxng_before_brave_when_available():
     calls: list[str] = []
 
     def requester(url, params, timeout, verify, headers):
         calls.append(url)
+        if "localhost:8888/search" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text='{"results":[{"title":"Sigma Chi at Demo University","url":"https://example.org/chapter","content":"Official chapter website"}]}',
+                json=lambda: {"results": [{"title": "Sigma Chi at Demo University", "url": "https://example.org/chapter", "content": "Official chapter website"}]},
+                raise_for_status=lambda: None,
+            )
+        raise AssertionError("Fallback providers should not be used when SearXNG succeeds")
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="auto",
+            CRAWLER_SEARCH_BRAVE_API_KEY="test-key",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+        ),
+        get_requester=requester,
+    )
+
+    results = client.search("sigma chi demo university website")
+
+    assert len(results) == 1
+    assert results[0].provider == "searxng_json"
+    assert calls == ["http://localhost:8888/search"]
+
+
+def test_auto_provider_falls_back_to_brave_when_searxng_unavailable():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        if "localhost:8888/search" in url:
+            raise requests.ConnectionError("searx unavailable")
         if "api.search.brave.com" in url:
             return SimpleNamespace(
                 status_code=200,
@@ -245,13 +278,14 @@ def test_auto_provider_prefers_brave_when_key_present():
                 json=lambda: {"web": {"results": [{"title": "Sigma Chi at Demo University", "url": "https://example.org/chapter", "description": "Official chapter website"}]}},
                 raise_for_status=lambda: None,
             )
-        raise AssertionError("Bing fallback should not be used when Brave succeeds")
+        raise AssertionError(f"Unexpected fallback URL: {url}")
 
     client = SearchClient(
         Settings(
             database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
             CRAWLER_SEARCH_PROVIDER="auto",
             CRAWLER_SEARCH_BRAVE_API_KEY="test-key",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
         ),
         get_requester=requester,
     )
@@ -260,38 +294,8 @@ def test_auto_provider_prefers_brave_when_key_present():
 
     assert len(results) == 1
     assert results[0].provider == "brave_api"
-    assert calls[0].startswith("https://api.search.brave.com")
-
-
-def test_auto_provider_falls_back_to_bing_when_brave_unavailable():
-    calls: list[str] = []
-
-    def requester(url, params, timeout, verify, headers):
-        calls.append(url)
-        if "api.search.brave.com" in url:
-            raise requests.ConnectionError("brave unavailable")
-        return SimpleNamespace(
-            status_code=200,
-            text="""<html><body><ol><li class="b_algo"><h2><a href="https://example.org/chapter">Sigma Chi at Demo University</a></h2><div class="b_caption"><p>Official chapter website</p></div></li></ol></body></html>""",
-            raise_for_status=lambda: None,
-        )
-
-    client = SearchClient(
-        Settings(
-            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
-            CRAWLER_SEARCH_PROVIDER="auto",
-            CRAWLER_SEARCH_BRAVE_API_KEY="test-key",
-        ),
-        get_requester=requester,
-    )
-
-    results = client.search("sigma chi demo university website")
-
-    assert len(results) == 1
-    assert results[0].provider == "bing_html"
-    assert calls[0].startswith("https://api.search.brave.com")
-    assert any(call.startswith("https://lite.duckduckgo.com") for call in calls[1:])
-    assert any(call.startswith("https://www.bing.com") for call in calls[1:])
+    assert calls[0] == "http://localhost:8888/search"
+    assert calls[1].startswith("https://api.search.brave.com")
 
 
 def test_searxng_json_provider_parses_results():
@@ -381,6 +385,8 @@ def test_auto_free_skips_unconfigured_api_providers_and_uses_duckduckgo_html():
 
     def requester(url, params, timeout, verify, headers):
         calls.append(url)
+        if "localhost:8888/search" in url:
+            raise requests.ConnectionError("searx unavailable")
         if "duckduckgo" in url:
             return SimpleNamespace(
                 status_code=200,
@@ -397,7 +403,10 @@ def test_auto_free_skips_unconfigured_api_providers_and_uses_duckduckgo_html():
         Settings(
             database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
             CRAWLER_SEARCH_PROVIDER="auto_free",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
             CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,tavily_api,serper_api,duckduckgo_html",
+            CRAWLER_SEARCH_TAVILY_API_KEY="",
+            CRAWLER_SEARCH_SERPER_API_KEY="",
         ),
         get_requester=requester,
     )
@@ -406,7 +415,8 @@ def test_auto_free_skips_unconfigured_api_providers_and_uses_duckduckgo_html():
 
     assert len(results) == 1
     assert results[0].provider == "duckduckgo_html"
-    assert calls[0].startswith("https://lite.duckduckgo.com")
+    assert calls[0] == "http://localhost:8888/search"
+    assert calls[1].startswith("https://lite.duckduckgo.com")
 
 
 def test_search_client_caches_duplicate_queries():

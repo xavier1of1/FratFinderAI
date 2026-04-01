@@ -84,6 +84,36 @@ def test_extract_chapter_stubs_uses_directory_adapter_contract():
     assert stubs[0].outbound_chapter_url_candidate == "https://example.org/chapters/alpha"
 
 
+def test_extract_chapter_stubs_reads_map_config_state_urls():
+    html = """
+    <html>
+      <body>
+        <script>
+          var uscanada_config = {
+            'uscanada_1':{
+              'hover': '<p>MISSISSIPPI</p>',
+              'url':'https://example.org/chapters/mississippi/',
+              'enbl':true
+            }
+          };
+        </script>
+      </body>
+    </html>
+    """
+    stubs = extract_chapter_stubs(
+        registry=AdapterRegistry(),
+        html=html,
+        source_url="https://example.org/chapters",
+        mode="map_or_api_locator",
+        embedded_data=EmbeddedDataResult(found=False, data_type=None, raw_data=None, api_url=None),
+        http_client=RoutingHttpClient({}),
+    )
+
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Mississippi"
+    assert stubs[0].detail_url == "https://example.org/chapters/mississippi/"
+
+
 def test_follow_and_extract_contacts_respects_budget_and_extracts_fields():
     html = """
     <html><body>
@@ -119,3 +149,26 @@ def test_follow_and_extract_contacts_respects_budget_and_extracts_fields():
     first = next(iter(hints.values()))
     assert first["email"] == "brothers@example.edu"
     assert first["instagram_url"] == "https://www.instagram.com/examplechapter/"
+
+def test_extract_chapter_stubs_skips_navigation_noise_in_chapter_roll_fallback():
+    html = """
+    <html>
+      <body>
+        <div>
+          ORG QUICK LINKS DONATE SIGMA CHI ONLINE CHI CHAPTER SYSTEM MEMBER DEVELOPMENT
+          ALUMNI OUR HISTORY SCHOLARSHIPS CONTACT US CAREERS PRIVACY STATEMENT
+          REQUEST A PROGRAM SIGMA CHI FRATERNITY FOUNDATION HISTORY LEADERSHIP INSTITUTE CHAPTER UNIVERSITY
+        </div>
+      </body>
+    </html>
+    """
+    stubs = extract_chapter_stubs(
+        registry=AdapterRegistry(),
+        html=html,
+        source_url="https://sigmachi.org/chapters/",
+        mode="direct_chapter_list",
+        embedded_data=EmbeddedDataResult(found=False, data_type=None, raw_data=None, api_url=None),
+        http_client=RoutingHttpClient({}),
+    )
+
+    assert stubs == []

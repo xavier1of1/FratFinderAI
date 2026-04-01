@@ -3,6 +3,7 @@ export type ReviewStatus = "open" | "triaged" | "resolved" | "ignored";
 export interface ChapterListItem {
   id: string;
   fraternitySlug: string;
+  sourceSlug: string | null;
   slug: string;
   name: string;
   universityName: string | null;
@@ -15,6 +16,20 @@ export interface ChapterListItem {
   chapterStatus: string;
   fieldStates: Record<string, string>;
   updatedAt: string;
+}
+
+export type ChapterFieldName = "find_website" | "find_email" | "find_instagram";
+
+export interface ChapterActionResult {
+  affectedCount: number;
+  requestedCount: number;
+  skippedCount?: number;
+  missingSourceCount?: number;
+}
+
+export interface ChapterMapStateSummary {
+  stateCode: string;
+  chapterCount: number;
 }
 
 export interface CrawlRunListItem {
@@ -41,6 +56,15 @@ export interface ReviewItemListItem {
   itemType: string;
   status: string;
   reason: string;
+  candidateValue: string | null;
+  confidence: number | null;
+  sourceUrl: string | null;
+  query: string | null;
+  rejectionSummary: {
+    topReasons: Array<{ reason: string; count: number }>;
+    uniqueReasons: number;
+    totalRejections: number;
+  } | null;
   extractionNotes: string | null;
   triageNotes: string | null;
   createdAt: string;
@@ -119,6 +143,8 @@ export interface BenchmarkRunListItem {
   id: string;
   name: string;
   status: BenchmarkStatus;
+  benchmarkKind?: "queue" | "campaign";
+  campaignRunId?: string | null;
   fieldName: BenchmarkFieldName;
   sourceSlug: string | null;
   config: BenchmarkRunConfig;
@@ -156,6 +182,27 @@ export interface FraternityCrawlRequestConfig {
   pauseMs: number;
 }
 
+export interface FraternityCrawlSourceQuality {
+  score: number;
+  isWeak: boolean;
+  reasons: string[];
+  recoveryAttempts: number;
+  recoveredFromUrl?: string | null;
+  recoveredToUrl?: string | null;
+}
+
+export interface FraternityCrawlEnrichmentAnalytics {
+  adaptiveMaxEnrichmentCycles: number;
+  effectiveFieldJobWorkers: number;
+  effectiveFieldJobLimitPerCycle: number;
+  cyclesCompleted: number;
+  lowProgressCycles: number;
+  degradedCycleCount: number;
+  queueAtStart: number;
+  queueRemaining: number;
+  budgetStrategy: string;
+}
+
 export interface FraternityDiscoveryCandidate {
   title: string;
   url: string;
@@ -190,6 +237,10 @@ export interface FraternityCrawlProgress {
     find_instagram: Record<string, number>;
   };
   totals?: Record<string, number>;
+  analytics?: {
+    sourceQuality?: FraternityCrawlSourceQuality;
+    enrichment?: FraternityCrawlEnrichmentAnalytics;
+  };
 }
 
 export interface FraternityCrawlRequestEvent {
@@ -220,4 +271,175 @@ export interface FraternityCrawlRequest {
   createdAt: string;
   updatedAt: string;
   events: FraternityCrawlRequestEvent[];
+}
+
+export type CampaignRunStatus = "draft" | "queued" | "running" | "succeeded" | "failed" | "canceled";
+export type CampaignRunItemStatus =
+  | "planned"
+  | "request_created"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "canceled";
+
+export interface CampaignRunConfig {
+  targetCount: number;
+  controlCount: number;
+  activeConcurrency: number;
+  maxDurationMinutes: number;
+  checkpointIntervalMs: number;
+  tuningIntervalMs: number;
+  itemPollIntervalMs: number;
+  preflightRequired: boolean;
+  autoTuningEnabled: boolean;
+  controlFraternitySlugs: string[];
+}
+
+export interface CampaignFailureHistogramEntry {
+  reason: string;
+  count: number;
+}
+
+export interface CampaignProviderHealthSnapshot {
+  healthy: boolean;
+  successRate: number;
+  probes: number;
+  successes: number;
+  minSuccessRate: number;
+  providerHealth: Record<string, Record<string, number>>;
+}
+
+export interface CampaignProviderHealthHistoryPoint extends CampaignProviderHealthSnapshot {
+  timestamp: string;
+  activeConcurrency: number;
+  queueDepth: number;
+}
+
+export interface CampaignScorecard {
+  baselineTotalChapters: number;
+  baselineWebsitesFound: number;
+  baselineEmailsFound: number;
+  baselineInstagramsFound: number;
+  baselineChaptersWithAnyContact: number;
+  baselineChaptersWithAllThree: number;
+  chaptersDiscovered: number;
+  fieldJobsCreated: number;
+  processedJobs: number;
+  requeuedJobs: number;
+  failedTerminalJobs: number;
+  reviewItemsCreated: number;
+  websitesFound: number;
+  emailsFound: number;
+  instagramsFound: number;
+  chaptersWithAnyContact: number;
+  chaptersWithAllThree: number;
+  sourceNativeYield: number;
+  searchEfficiency: number;
+  retryEfficiency: number;
+  confidenceQuality: number;
+  providerResilience: number;
+  queueEfficiency: number;
+  providerAttempts: Record<string, number>;
+  failureHistogram: CampaignFailureHistogramEntry[];
+}
+
+export interface CampaignRunSummary {
+  targetCount: number;
+  itemCount: number;
+  completedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  activeCount: number;
+  anyContactSuccessRate: number;
+  allThreeSuccessRate: number;
+  websiteCoverageRate: number;
+  emailCoverageRate: number;
+  instagramCoverageRate: number;
+  jobsPerMinute: number;
+  queueDepthStart: number;
+  queueDepthEnd: number;
+  queueDepthDelta: number;
+  totalProcessed: number;
+  totalRequeued: number;
+  totalFailedTerminal: number;
+  durationMs: number;
+  checkpointCount: number;
+}
+
+export interface CampaignRunEvent {
+  id: number;
+  campaignRunId: string;
+  eventType: string;
+  message: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CampaignRunItem {
+  id: string;
+  campaignRunId: string;
+  fraternityName: string;
+  fraternitySlug: string;
+  requestId: string | null;
+  cohort: "new" | "control";
+  status: CampaignRunItemStatus;
+  selectionReason: string | null;
+  scorecard: CampaignScorecard;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CampaignRunTelemetry {
+  providerHealth?: CampaignProviderHealthSnapshot | null;
+  providerHealthHistory?: CampaignProviderHealthHistoryPoint[];
+  activeConcurrency?: number;
+  lastCheckpointAt?: string | null;
+  lastTuneAt?: string | null;
+  runtimeNotes?: string[];
+}
+
+export interface CampaignCohortSummary {
+  cohort: "new" | "control";
+  itemCount: number;
+  completedCount: number;
+  failedCount: number;
+  anyContactSuccessRate: number;
+  allThreeSuccessRate: number;
+  websiteCoverageRate: number;
+  emailCoverageRate: number;
+  instagramCoverageRate: number;
+  avgJobsPerItem: number;
+}
+
+export interface CampaignReport {
+  campaignId: string;
+  campaignName: string;
+  generatedAt: string;
+  summary: CampaignRunSummary;
+  providerHealthHistory: CampaignProviderHealthHistoryPoint[];
+  cohortComparison: CampaignCohortSummary[];
+  topFailureReasons: Array<{ reason: string; count: number }>;
+  topSuccessfulHabits: Array<{ label: string; value: number }>;
+  recommendations: string[];
+}
+
+export interface CampaignRun {
+  id: string;
+  name: string;
+  status: CampaignRunStatus;
+  runtimeActive?: boolean;
+  scheduledFor: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  config: CampaignRunConfig;
+  summary: CampaignRunSummary;
+  telemetry: CampaignRunTelemetry;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items: CampaignRunItem[];
+  events: CampaignRunEvent[];
 }

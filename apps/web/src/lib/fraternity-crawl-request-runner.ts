@@ -2,6 +2,8 @@ import { spawn } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
 
+import { discoverFraternitySource } from "@/lib/fraternity-discovery";
+import { evaluateSourceUrl, pickBestDiscoveryCandidate } from "@/lib/source-selection";
 import {
   appendFraternityCrawlRequestEvent,
   getFraternityCrawlRequest,
@@ -9,9 +11,16 @@ import {
   getSourceFieldJobSnapshot,
   listDueQueuedFraternityCrawlRequestIds,
   reconcileStaleFraternityCrawlRequests,
-  updateFraternityCrawlRequest
+  updateFraternityCrawlRequest,
+  upsertFraternityRecord,
+  upsertSourceRecord
 } from "@/lib/repositories/fraternity-crawl-request-repository";
-import type { FraternityCrawlProgress } from "@/lib/types";
+import type {
+  FraternityCrawlEnrichmentAnalytics,
+  FraternityCrawlProgress,
+  FraternityCrawlRequest,
+  FraternityCrawlSourceQuality
+} from "@/lib/types";
 
 const activeRequestRuns = new Set<string>();
 
@@ -37,6 +46,15 @@ function findRepositoryRoot(): string {
 interface CommandResult {
   stdout: string;
   stderr: string;
+}
+
+function computeFieldJobCycleTimeoutMs(workers: number, limitPerCycle: number): number {
+  const scaledTimeout = limitPerCycle * Math.max(workers, 1) * 4_000;
+  return Math.max(10 * 60_000, Math.min(30 * 60_000, scaledTimeout));
+}
+
+function computeCrawlRunTimeoutMs(): number {
+  return 30 * 60_000;
 }
 
 async function runPythonCommand(args: string[], timeoutMs: number): Promise<CommandResult> {
@@ -144,6 +162,94 @@ function parseFieldJobResult(output: string): { processed: number; requeued: num
   };
 }
 
+function cloneProgress(progress: FraternityCrawlProgress | undefined): FraternityCrawlProgress {
+  return progress ? JSON.parse(JSON.stringify(progress)) as FraternityCrawlProgress : {};
+}
+
+function totalFieldJobs(totals: Record<string, number> | undefined): number {
+  if (!totals) {
+    return 0;
+  }
+  return Number(totals.queued ?? 0) + Number(totals.running ?? 0) + Number(totals.done ?? 0) + Number(totals.failed ?? 0);
+}
+
+function computeAdaptiveEnrichmentConfig(
+  baseConfig: FraternityCrawlRequest["config"],
+  progress: FraternityCrawlProgress,
+  cycleState: {
+    cyclesCompleted: number;
+    lowProgressCycles: number;
+    degradedCycleCount: number;
+  }
+): FraternityCrawlRequest["config"] {
+  const discovered = Number(progress.crawlRun?.recordsSeen ?? 0);
+  const queueSize = totalFieldJobs(progress.totals);
+  const baseWorkers = Math.max(1, Number(baseConfig.fieldJobWorkers ?? 1));
+  const baseLimit = Math.max(1, Number(baseConfig.fieldJobLimitPerCycle ?? 1));
+  const queuePressure = Math.max(queueSize, discovered);
+
+  let effectiveWorkers = baseWorkers;
+  let effectiveLimit = baseLimit;
+  let adaptiveMaxCycles = Math.max(1, Number(baseConfig.maxEnrichmentCycles ?? 1));
+  let budgetStrategy = "base";
+
+  if (queuePressure >= 300) {
+    effectiveWorkers = Math.max(effectiveWorkers, 10);
+    effectiveLimit = Math.max(effectiveLimit, 100);
+    adaptiveMaxCycles = Math.max(adaptiveMaxCycles, 72);
+    budgetStrategy = "high_volume";
+  } else if (queuePressure >= 150) {
+    effectiveWorkers = Math.max(effectiveWorkers, 8);
+    effectiveLimit = Math.max(effectiveLimit, 80);
+    adaptiveMaxCycles = Math.max(adaptiveMaxCycles, 48);
+    budgetStrategy = "medium_volume";
+  } else if (queuePressure >= 60) {
+    effectiveWorkers = Math.max(effectiveWorkers, 6);
+    effectiveLimit = Math.max(effectiveLimit, 60);
+    adaptiveMaxCycles = Math.max(adaptiveMaxCycles, 32);
+    budgetStrategy = "moderate_volume";
+  }
+
+  if (cycleState.lowProgressCycles >= 2) {
+    effectiveWorkers = Math.max(1, effectiveWorkers - 1);
+    effectiveLimit = Math.max(20, Math.floor(effectiveLimit * 0.8));
+    adaptiveMaxCycles = Math.min(96, adaptiveMaxCycles + 6);
+    budgetStrategy = `${budgetStrategy}_stabilized`;
+  }
+
+  if (cycleState.degradedCycleCount >= 2) {
+    effectiveWorkers = Math.max(1, Math.min(effectiveWorkers, 4));
+    effectiveLimit = Math.max(20, Math.min(effectiveLimit, 50));
+    adaptiveMaxCycles = Math.min(96, adaptiveMaxCycles + 4);
+    budgetStrategy = `${budgetStrategy}_degraded`;
+  }
+
+  return {
+    fieldJobWorkers: effectiveWorkers,
+    fieldJobLimitPerCycle: effectiveLimit,
+    maxEnrichmentCycles: Math.min(96, adaptiveMaxCycles),
+    pauseMs: baseConfig.pauseMs
+  };
+}
+
+function updateProgressAnalytics(
+  progress: FraternityCrawlProgress,
+  analytics: {
+    sourceQuality?: FraternityCrawlSourceQuality;
+    enrichment?: FraternityCrawlEnrichmentAnalytics;
+  }
+): FraternityCrawlProgress {
+  const next = cloneProgress(progress);
+  next.analytics = next.analytics ?? {};
+  if (analytics.sourceQuality) {
+    next.analytics.sourceQuality = analytics.sourceQuality;
+  }
+  if (analytics.enrichment) {
+    next.analytics.enrichment = analytics.enrichment;
+  }
+  return next;
+}
+
 function buildProgressSnapshot(params: {
   sourceUrl: string | null;
   sourceConfidence: number | null;
@@ -154,6 +260,7 @@ function buildProgressSnapshot(params: {
   candidates: unknown[];
   crawlRun: Awaited<ReturnType<typeof getLatestCrawlRunForSource>>;
   fieldSnapshot: Awaited<ReturnType<typeof getSourceFieldJobSnapshot>>;
+  analytics?: FraternityCrawlProgress["analytics"];
 }): FraternityCrawlProgress {
   const fields = {
     find_website: { queued: 0, running: 0, done: 0, failed: 0 },
@@ -205,9 +312,10 @@ function buildProgressSnapshot(params: {
           recordsUpserted: 0,
           reviewItemsCreated: 0,
           fieldJobsCreated: 0
-        },
+    },
     fields,
-    totals
+    totals,
+    analytics: params.analytics
   };
 }
 
@@ -235,13 +343,25 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
     return;
   }
 
+  const confidenceTier =
+    request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low";
+  const currentSourceQuality = request.progress.analytics?.sourceQuality ?? {
+    ...evaluateSourceUrl(request.sourceUrl),
+    recoveryAttempts: Number(request.progress.analytics?.sourceQuality?.recoveryAttempts ?? 0),
+    recoveredFromUrl: request.progress.analytics?.sourceQuality?.recoveredFromUrl ?? null,
+    recoveredToUrl: request.progress.analytics?.sourceQuality?.recoveredToUrl ?? null
+  };
+
   await updateFraternityCrawlRequest({
     id: requestId,
     status: "running",
     stage: "crawl_run",
     startedAtNow: true,
     clearFinishedAt: true,
-    lastError: null
+    lastError: null,
+    progress: updateProgressAnalytics(request.progress, {
+      sourceQuality: currentSourceQuality
+    })
   });
   await appendFraternityCrawlRequestEvent({
     requestId,
@@ -251,20 +371,69 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
   });
 
   try {
-    await runPythonCommand(["-m", "fratfinder_crawler.cli", "run", "--source-slug", request.sourceSlug], 15 * 60_000);
+    try {
+      await runPythonCommand(["-m", "fratfinder_crawler.cli", "run", "--source-slug", request.sourceSlug], computeCrawlRunTimeoutMs());
+    } catch (error) {
+      const crawlRunAfterTimeout = await getLatestCrawlRunForSource(request.sourceSlug);
+      const fieldSnapshotAfterTimeout = await getSourceFieldJobSnapshot(request.sourceSlug);
+      const progressAfterTimeout = buildProgressSnapshot({
+        sourceUrl: request.sourceUrl,
+        sourceConfidence: request.sourceConfidence,
+        confidenceTier,
+        sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
+        fallbackReason: request.progress.discovery?.fallbackReason ?? null,
+        resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
+        candidates: request.progress.discovery?.candidates ?? [],
+        crawlRun: crawlRunAfterTimeout,
+        fieldSnapshot: fieldSnapshotAfterTimeout,
+        analytics: {
+          sourceQuality: currentSourceQuality,
+          enrichment: request.progress.analytics?.enrichment
+        }
+      });
+      const message = error instanceof Error ? error.message : String(error);
+      const crawlWorkDetected =
+        (progressAfterTimeout.crawlRun?.recordsSeen ?? 0) > 0 ||
+        (progressAfterTimeout.crawlRun?.fieldJobsCreated ?? 0) > 0;
+
+      await updateFraternityCrawlRequest({
+        id: requestId,
+        progress: progressAfterTimeout
+      });
+
+      if (message.includes("timed out") && crawlWorkDetected) {
+        await appendFraternityCrawlRequestEvent({
+          requestId,
+          eventType: "stage_degraded",
+          message: "Crawl run timed out after producing usable work; continuing into enrichment",
+          payload: {
+            stage: "crawl_run",
+            error: message,
+            crawlRun: progressAfterTimeout.crawlRun,
+            totals: progressAfterTimeout.totals
+          }
+        });
+      } else {
+        throw error;
+      }
+    }
 
     const crawlRunAfterIngest = await getLatestCrawlRunForSource(request.sourceSlug);
     const fieldSnapshotAfterIngest = await getSourceFieldJobSnapshot(request.sourceSlug);
-    const progressAfterIngest = buildProgressSnapshot({
+    let progressAfterIngest = buildProgressSnapshot({
       sourceUrl: request.sourceUrl,
       sourceConfidence: request.sourceConfidence,
-      confidenceTier: request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low",
+      confidenceTier,
       sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
       fallbackReason: request.progress.discovery?.fallbackReason ?? null,
       resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
       candidates: request.progress.discovery?.candidates ?? [],
       crawlRun: crawlRunAfterIngest,
-      fieldSnapshot: fieldSnapshotAfterIngest
+      fieldSnapshot: fieldSnapshotAfterIngest,
+      analytics: {
+        sourceQuality: currentSourceQuality,
+        enrichment: request.progress.analytics?.enrichment
+      }
     });
 
     await updateFraternityCrawlRequest({
@@ -273,6 +442,104 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
     });
 
     if ((progressAfterIngest.crawlRun?.recordsSeen ?? 0) <= 0) {
+      const recoveryAttempts = Number(currentSourceQuality.recoveryAttempts ?? 0);
+      if (recoveryAttempts < 1) {
+        try {
+          const rediscovered = await discoverFraternitySource(request.fraternityName);
+          const alternateCandidate = pickBestDiscoveryCandidate(rediscovered.candidates, request.sourceUrl);
+          const alternateUrl = alternateCandidate?.url ?? rediscovered.selectedUrl;
+          if (alternateUrl && alternateUrl.replace(/\/+$/, "") !== (request.sourceUrl ?? "").replace(/\/+$/, "")) {
+            const alternateQuality = evaluateSourceUrl(alternateUrl);
+            if (alternateQuality.score > currentSourceQuality.score + 0.12) {
+              const nextSourceSlug = `${rediscovered.fraternitySlug || request.fraternitySlug}-main`;
+              const nextSource = new URL(alternateUrl);
+              const recoveredFraternity = await upsertFraternityRecord({
+                slug: rediscovered.fraternitySlug || request.fraternitySlug,
+                name: rediscovered.fraternityName || request.fraternityName,
+                nicAffiliated: true
+              });
+              await upsertSourceRecord({
+                fraternityId: recoveredFraternity.id,
+                slug: nextSourceSlug,
+                baseUrl: nextSource.origin,
+                listPath: alternateUrl,
+                sourceType: "html_directory",
+                parserKey: "directory_v1",
+                active: true,
+                metadata: {
+                  discovery: {
+                    selectedUrl: alternateUrl,
+                    selectedConfidence: rediscovered.selectedConfidence,
+                    confidenceTier: rediscovered.confidenceTier,
+                    sourceProvenance: rediscovered.sourceProvenance,
+                    fallbackReason: rediscovered.fallbackReason,
+                    resolutionTrace: rediscovered.resolutionTrace,
+                    sourceQuality: alternateQuality
+                  }
+                }
+              });
+
+              const recoveredProgress = updateProgressAnalytics(
+                {
+                  ...progressAfterIngest,
+                  discovery: {
+                    sourceUrl: alternateUrl,
+                    sourceConfidence: rediscovered.selectedConfidence,
+                    confidenceTier: rediscovered.confidenceTier,
+                    sourceProvenance: rediscovered.sourceProvenance,
+                    fallbackReason: rediscovered.fallbackReason,
+                    resolutionTrace: rediscovered.resolutionTrace,
+                    candidates: rediscovered.candidates
+                  }
+                },
+                {
+                  sourceQuality: {
+                    ...alternateQuality,
+                    recoveryAttempts: recoveryAttempts + 1,
+                    recoveredFromUrl: request.sourceUrl,
+                    recoveredToUrl: alternateUrl
+                  }
+                }
+              );
+
+              await updateFraternityCrawlRequest({
+                id: requestId,
+                sourceSlug: nextSourceSlug,
+                sourceUrl: alternateUrl,
+                sourceConfidence: rediscovered.selectedConfidence,
+                progress: recoveredProgress,
+                lastError: null
+              });
+              await appendFraternityCrawlRequestEvent({
+                requestId,
+                eventType: "source_recovered",
+                message: "Recovered from a zero-chapter national source by switching to a stronger candidate",
+                payload: {
+                  previousSourceUrl: request.sourceUrl,
+                  nextSourceUrl: alternateUrl,
+                  previousQuality: currentSourceQuality,
+                  nextQuality: alternateQuality,
+                  fallbackReason: rediscovered.fallbackReason
+                }
+              });
+              await appendFraternityCrawlRequestEvent({
+                requestId,
+                eventType: "stage_restarted",
+                message: "Restarting crawl run after source recovery",
+                payload: {
+                  stage: "crawl_run",
+                  sourceSlug: nextSourceSlug
+                }
+              });
+              await executeFraternityCrawlRequest(requestId);
+              return;
+            }
+          }
+        } catch {
+          // Fall through to terminal failure with the original diagnostics.
+        }
+      }
+
       await updateFraternityCrawlRequest({
         id: requestId,
         status: "failed",
@@ -305,33 +572,107 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
       stage: "enrichment"
     });
 
-    const config = request.config;
-    const maxCycles = Math.max(1, config.maxEnrichmentCycles);
+    let cycleState = {
+      cyclesCompleted: 0,
+      lowProgressCycles: 0,
+      degradedCycleCount: 0
+    };
+    let effectiveConfig = computeAdaptiveEnrichmentConfig(request.config, progressAfterIngest, cycleState);
+    progressAfterIngest = updateProgressAnalytics(progressAfterIngest, {
+      sourceQuality: currentSourceQuality,
+      enrichment: {
+        adaptiveMaxEnrichmentCycles: effectiveConfig.maxEnrichmentCycles,
+        effectiveFieldJobWorkers: effectiveConfig.fieldJobWorkers,
+        effectiveFieldJobLimitPerCycle: effectiveConfig.fieldJobLimitPerCycle,
+        cyclesCompleted: cycleState.cyclesCompleted,
+        lowProgressCycles: cycleState.lowProgressCycles,
+        degradedCycleCount: cycleState.degradedCycleCount,
+        queueAtStart: totalFieldJobs(progressAfterIngest.totals),
+        queueRemaining: totalFieldJobs(progressAfterIngest.totals),
+        budgetStrategy: "initial_adaptive_budget"
+      }
+    });
+    await updateFraternityCrawlRequest({
+      id: requestId,
+      progress: progressAfterIngest
+    });
 
-    for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
-      const commandResult = await runPythonCommand(
-        [
-          "-m",
-          "fratfinder_crawler.cli",
-          "process-field-jobs",
-          "--source-slug",
-          request.sourceSlug,
-          "--workers",
-          String(config.fieldJobWorkers),
-          "--limit",
-          String(config.fieldJobLimitPerCycle)
-        ],
-        10 * 60_000
-      );
+    for (let cycle = 1; cycle <= effectiveConfig.maxEnrichmentCycles; cycle += 1) {
+      let commandResult: CommandResult;
+      try {
+        commandResult = await runPythonCommand(
+          [
+            "-m",
+            "fratfinder_crawler.cli",
+            "process-field-jobs",
+            "--source-slug",
+            request.sourceSlug,
+            "--workers",
+            String(effectiveConfig.fieldJobWorkers),
+            "--limit",
+            String(effectiveConfig.fieldJobLimitPerCycle),
+            "--run-preflight"
+          ],
+          computeFieldJobCycleTimeoutMs(effectiveConfig.fieldJobWorkers, effectiveConfig.fieldJobLimitPerCycle)
+        );
+      } catch (error) {
+        const latestRun = await getLatestCrawlRunForSource(request.sourceSlug);
+        const fieldSnapshot = await getSourceFieldJobSnapshot(request.sourceSlug);
+        const progress = buildProgressSnapshot({
+          sourceUrl: request.sourceUrl,
+          sourceConfidence: request.sourceConfidence,
+          confidenceTier,
+          sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
+          fallbackReason: request.progress.discovery?.fallbackReason ?? null,
+          resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
+          candidates: request.progress.discovery?.candidates ?? [],
+          crawlRun: latestRun,
+          fieldSnapshot,
+          analytics: request.progress.analytics
+        });
+        const message = error instanceof Error ? error.message : String(error);
+        const totals = progress.totals ?? { queued: 0, running: 0, done: 0, failed: 0 };
+        const remainingWork = (totals.queued ?? 0) + (totals.running ?? 0);
+        const isTimeout = message.includes("timed out");
+
+        await updateFraternityCrawlRequest({
+          id: requestId,
+          progress
+        });
+
+        await appendFraternityCrawlRequestEvent({
+          requestId,
+          eventType: isTimeout ? "enrichment_cycle_timeout" : "enrichment_cycle_error",
+          message: isTimeout ? `Enrichment cycle ${cycle} timed out` : `Enrichment cycle ${cycle} failed`,
+          payload: {
+            cycle,
+            error: message,
+            totals,
+            adaptiveConfig: effectiveConfig
+          }
+        });
+
+        if (isTimeout && remainingWork > 0 && cycle < effectiveConfig.maxEnrichmentCycles) {
+          cycleState.degradedCycleCount += 1;
+          effectiveConfig = computeAdaptiveEnrichmentConfig(request.config, progress, cycleState);
+          if (effectiveConfig.pauseMs > 0) {
+            await delay(effectiveConfig.pauseMs);
+          }
+          continue;
+        }
+
+        throw error;
+      }
 
       const parsed = parseFieldJobResult(`${commandResult.stdout}\n${commandResult.stderr}`);
       const latestRun = await getLatestCrawlRunForSource(request.sourceSlug);
       const fieldSnapshot = await getSourceFieldJobSnapshot(request.sourceSlug);
 
+      cycleState.cyclesCompleted = cycle;
       const progress = buildProgressSnapshot({
         sourceUrl: request.sourceUrl,
         sourceConfidence: request.sourceConfidence,
-        confidenceTier: request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low",
+        confidenceTier,
         sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
         fallbackReason: request.progress.discovery?.fallbackReason ?? null,
         resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
@@ -339,10 +680,32 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
         crawlRun: latestRun,
         fieldSnapshot
       });
+      const remainingQueue = Number(progress.totals?.queued ?? 0) + Number(progress.totals?.running ?? 0);
+      const lowSignalCycle = parsed.processed <= 0 && parsed.requeued > 0;
+      cycleState.lowProgressCycles = lowSignalCycle ? cycleState.lowProgressCycles + 1 : 0;
+      if (parsed.requeued > Math.max(parsed.processed * 3, 20)) {
+        cycleState.degradedCycleCount += 1;
+      }
+      const nextProgress = updateProgressAnalytics(progress, {
+        sourceQuality: currentSourceQuality,
+        enrichment: {
+          adaptiveMaxEnrichmentCycles: effectiveConfig.maxEnrichmentCycles,
+          effectiveFieldJobWorkers: effectiveConfig.fieldJobWorkers,
+          effectiveFieldJobLimitPerCycle: effectiveConfig.fieldJobLimitPerCycle,
+          cyclesCompleted: cycleState.cyclesCompleted,
+          lowProgressCycles: cycleState.lowProgressCycles,
+          degradedCycleCount: cycleState.degradedCycleCount,
+          queueAtStart: Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)),
+          queueRemaining: remainingQueue,
+          budgetStrategy:
+            cycleState.degradedCycleCount > 0 ? "adaptive_degraded" : cycleState.lowProgressCycles > 0 ? "adaptive_stabilized" : "adaptive_steady"
+        }
+      });
+      effectiveConfig = computeAdaptiveEnrichmentConfig(request.config, nextProgress, cycleState);
 
       await updateFraternityCrawlRequest({
         id: requestId,
-        progress
+        progress: nextProgress
       });
 
       await appendFraternityCrawlRequestEvent({
@@ -354,45 +717,62 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
           processed: parsed.processed,
           requeued: parsed.requeued,
           failedTerminal: parsed.failedTerminal,
-          totals: progress.totals
+          totals: nextProgress.totals,
+          adaptiveConfig: effectiveConfig
         }
       });
 
-      const totals = progress.totals ?? { queued: 0, running: 0 };
+      const totals = nextProgress.totals ?? { queued: 0, running: 0 };
       if ((totals.queued ?? 0) + (totals.running ?? 0) === 0) {
         await updateFraternityCrawlRequest({
           id: requestId,
           status: "succeeded",
           stage: "completed",
           finishedAtNow: true,
-          progress
+          progress: nextProgress
         });
         await appendFraternityCrawlRequestEvent({
           requestId,
           eventType: "request_completed",
           message: "Fraternity crawl request completed",
-          payload: { totals: progress.totals }
+          payload: { totals: nextProgress.totals }
         });
         return;
       }
 
-      if (cycle < maxCycles && config.pauseMs > 0) {
-        await delay(config.pauseMs);
+      if (cycle < effectiveConfig.maxEnrichmentCycles && effectiveConfig.pauseMs > 0) {
+        await delay(effectiveConfig.pauseMs);
       }
     }
 
     const latestRun = await getLatestCrawlRunForSource(request.sourceSlug);
     const fieldSnapshot = await getSourceFieldJobSnapshot(request.sourceSlug);
+    const exhaustedQueueRemaining =
+      fieldSnapshot.reduce((sum, item) => sum + item.queued + item.running, 0);
     const progress = buildProgressSnapshot({
       sourceUrl: request.sourceUrl,
       sourceConfidence: request.sourceConfidence,
-      confidenceTier: request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low",
+      confidenceTier,
       sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
       fallbackReason: request.progress.discovery?.fallbackReason ?? null,
       resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
       candidates: request.progress.discovery?.candidates ?? [],
       crawlRun: latestRun,
-      fieldSnapshot
+      fieldSnapshot,
+      analytics: updateProgressAnalytics(request.progress, {
+        sourceQuality: currentSourceQuality,
+        enrichment: {
+          adaptiveMaxEnrichmentCycles: effectiveConfig.maxEnrichmentCycles,
+          effectiveFieldJobWorkers: effectiveConfig.fieldJobWorkers,
+          effectiveFieldJobLimitPerCycle: effectiveConfig.fieldJobLimitPerCycle,
+          cyclesCompleted: cycleState.cyclesCompleted,
+          lowProgressCycles: cycleState.lowProgressCycles,
+          degradedCycleCount: cycleState.degradedCycleCount,
+          queueAtStart: Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)),
+          queueRemaining: exhaustedQueueRemaining,
+          budgetStrategy: "adaptive_budget_exhausted"
+        }
+      }).analytics
     });
 
     await updateFraternityCrawlRequest({

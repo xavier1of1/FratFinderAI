@@ -22,6 +22,10 @@ Separation rules:
 ```text
 apps/
   web/
+docs/
+  plans/
+  reports/
+artifacts/
 services/
   crawler/
 packages/

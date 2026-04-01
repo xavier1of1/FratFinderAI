@@ -193,7 +193,7 @@ class SearchClient:
     def _free_provider_order(self) -> list[str]:
         raw_order = (self._settings.crawler_search_provider_order_free or "").strip()
         if not raw_order:
-            raw_order = "searxng_json,tavily_api,serper_api,duckduckgo_html,bing_html,brave_html"
+            raw_order = "searxng_json,serper_api,tavily_api,duckduckgo_html,bing_html,brave_html"
         deduped: list[str] = []
         for token in (part.strip().lower() for part in raw_order.split(",")):
             if not token or token in deduped:

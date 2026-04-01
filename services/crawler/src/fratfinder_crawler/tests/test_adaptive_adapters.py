@@ -117,6 +117,42 @@ def test_script_json_adapter_extracts_json_ld_fixture():
     assert records[0].source_confidence >= 0.85
 
 
+def test_script_json_adapter_extracts_lambdachi_map_payload():
+    html = """
+    <script>
+      window.chaptersMapData = [{
+        "id": 18884,
+        "title": "Epsilon-Psi (South Carolina)",
+        "permalink": "https://www.lambdachi.org/chapters/epsilon-psi-south-carolina/",
+        "country": "United States",
+        "city": "Columbia",
+        "state": "South Carolina",
+        "street": "1400 Greene Street",
+        "universitycollege": "University of South Carolina",
+        "foundation_date": "19450512",
+        "website": null,
+        "instagram": "lambdachisc",
+        "latitude": "33.99648105",
+        "longitude": "-81.0269585784"
+      }];
+    </script>
+    """
+
+    records = ScriptJsonAdapter().parse(html, "https://www.lambdachi.org/chapters/")
+    stubs = ScriptJsonAdapter().parse_stubs(html, "https://www.lambdachi.org/chapters/")
+
+    assert len(records) == 1
+    assert records[0].name == "Epsilon-Psi (South Carolina)"
+    assert records[0].university_name == "University of South Carolina"
+    assert records[0].city == "Columbia"
+    assert records[0].state == "South Carolina"
+    assert records[0].instagram_url == "https://www.instagram.com/lambdachisc"
+    assert records[0].source_url == "https://www.lambdachi.org/chapters/epsilon-psi-south-carolina/"
+    assert records[0].source_confidence >= 0.85
+    assert len(stubs) == 1
+    assert stubs[0].detail_url == "https://www.lambdachi.org/chapters/epsilon-psi-south-carolina/"
+
+
 
 def test_locator_api_adapter_extracts_from_mocked_http_response():
     http_client = RoutingHttpClient(
@@ -220,6 +256,37 @@ def test_locator_api_adapter_extracts_from_google_maps_kml_payload():
     assert records[0].instagram_url == "https://www.instagram.com/cwrufiji/"
 
 
+def test_locator_api_adapter_splits_combined_kml_name_when_alias_missing():
+    kml_payload = """<?xml version="1.0" encoding="UTF-8"?>
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+      <Document>
+        <Placemark>
+          <name>Vanderbilt University - Gamma</name>
+          <description><![CDATA[
+            Preferred City_ State: Nashville, TN<br>
+            Website: https://example.org/gamma<br>
+          ]]></description>
+        </Placemark>
+      </Document>
+    </kml>
+    """
+    http_client = RoutingHttpClient({"https://www.google.com/maps/d/kml?mid=test&forcekml=1": kml_payload})
+
+    records = LocatorApiAdapter().parse(
+        "<html><body><iframe></iframe></body></html>",
+        "https://example.org/chapters",
+        api_url="https://www.google.com/maps/d/kml?mid=test&forcekml=1",
+        http_client=http_client,
+    )
+
+    assert len(records) == 1
+    assert records[0].name == "Gamma"
+    assert records[0].university_name == "Vanderbilt University"
+    assert records[0].city == "Nashville"
+    assert records[0].state == "TN"
+    assert records[0].website_url == "https://example.org/gamma"
+
+
 
 def test_graph_creates_review_item_when_script_json_strategy_extracts_no_records():
     html = """
@@ -286,6 +353,55 @@ def test_locator_api_adapter_returns_empty_list_when_request_fails():
     assert records == []
 
 
+def test_graph_promotes_followed_directory_page_records_over_parent_stub():
+    root_html = """
+    <html>
+      <body>
+        <script>
+          var uscanada_config = {
+            'uscanada_1':{
+              'hover': '<p>MISSISSIPPI</p>',
+              'url':'https://example.org/chapters/mississippi/',
+              'enbl':true
+            }
+          };
+        </script>
+      </body>
+    </html>
+    """
+    mississippi_html = """
+    <article>
+      <section>
+        <h2>MISSISSIPPI STATE CHAPTER</h2>
+        <h2>PO Box GK Mississippi State Mississippi State, MS 39762</h2>
+        <div class="elementor-widget-text-editor">
+          <div class="elementor-widget-container">
+            Website: <a href="http://msstatedeltachi.com/">Delta Chi Mississippi State</a>
+            Instagram: <a href="https://www.instagram.com/msstatedeltachi">@msstatedeltachi</a>
+          </div>
+        </div>
+      </section>
+    </article>
+    """
+    repository = FakeRepository()
+    http_client = RoutingHttpClient(
+        {
+            "https://example.org/chapters": root_html,
+            "https://example.org/chapters/mississippi/": mississippi_html,
+        }
+    )
+    orchestrator = CrawlOrchestrator(repository, http_client, AdapterRegistry())
+
+    metrics = orchestrator.run_for_source(_source())
+
+    assert metrics.records_upserted == 1
+    assert len(repository.persisted_chapters) == 1
+    persisted = repository.persisted_chapters[0][1]
+    assert persisted.name == "Mississippi State Chapter"
+    assert persisted.university_name == "Mississippi State"
+    assert persisted.website_url == "http://msstatedeltachi.com/"
+
+
 def test_directory_adapter_emits_stub_contract():
     html = """
     <li class="chapter-item" data-chapter-card>
@@ -339,3 +455,23 @@ def test_locator_api_adapter_emits_stub_contract():
 
 
 
+
+def test_script_json_adapter_extracts_mapplic_map_payload():
+    html = '''
+    <div id="mapplic-id187" data-mapdata="{&quot;levels&quot;:[{&quot;locations&quot;:[{&quot;id&quot;:&quot;ca&quot;,&quot;title&quot;:&quot;California&quot;,&quot;pin&quot;:&quot;hidden&quot;,&quot;category&quot;:&quot;state&quot;},{&quot;id&quot;:&quot;theta_xi_purdue&quot;,&quot;title&quot;:&quot;Theta Xi - Purdue University&quot;,&quot;pin&quot;:&quot;no-fill&quot;,&quot;category&quot;:&quot;chapter&quot;,&quot;x&quot;:&quot;0.5000&quot;,&quot;y&quot;:&quot;0.2000&quot;,&quot;description&quot;:&quot;&lt;p&gt;Chapter: Theta Xi&lt;br /&gt;University: Purdue University&lt;br /&gt;Location: West Lafayette, IN&lt;/p&gt;&quot;}]}]}"></div>
+    '''
+
+    records = ScriptJsonAdapter().parse(html, "https://ato.org/home-2/ato-map/")
+    stubs = ScriptJsonAdapter().parse_stubs(html, "https://ato.org/home-2/ato-map/")
+
+    assert len(records) == 1
+    assert records[0].name == "Theta Xi"
+    assert records[0].university_name == "Purdue University"
+    assert records[0].city == "West Lafayette"
+    assert records[0].state == "IN"
+    assert records[0].external_id == "theta_xi_purdue"
+    assert records[0].source_confidence >= 0.75
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Theta Xi"
+    assert stubs[0].university_name == "Purdue University"
+    assert stubs[0].detail_url == "https://ato.org/home-2/ato-map/"

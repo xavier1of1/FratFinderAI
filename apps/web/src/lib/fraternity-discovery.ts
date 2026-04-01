@@ -3,6 +3,7 @@ import { existsSync } from "fs";
 import path from "path";
 
 import type { FraternityDiscoveryCandidate } from "@/lib/types";
+import { optimizeDiscoveredSource } from "@/lib/source-selection";
 
 export interface FraternitySourceDiscoveryResult {
   fraternityName: string;
@@ -122,5 +123,5 @@ export async function discoverFraternitySource(fraternityName: string): Promise<
     });
   });
 
-  return parseDiscoveryOutput(output);
+  return optimizeDiscoveredSource(parseDiscoveryOutput(output));
 }

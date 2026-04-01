@@ -165,7 +165,7 @@ def test_discover_source_uses_alias_query_for_phi_gamma_delta_fiji():
     }
     result = discover_source("Phi Gamma Delta", StubSearchClient(responses))
 
-    assert result.selected_url == "https://phigam.org/"
+    assert result.selected_url == "https://phigam.org/about/overview/our-chapters/"
     assert result.confidence_tier in {"high", "medium"}
 
 
@@ -278,6 +278,8 @@ def test_discover_source_falls_back_to_existing_source_when_registry_unhealthy()
                 source_slug="lambda-chi-alpha-main",
                 list_url="https://chapterbuilder.lambdachialpha.org/chapters",
                 base_url="https://chapterbuilder.lambdachialpha.org",
+                source_type="html_directory",
+                parser_key="directory_v1",
                 active=True,
                 last_run_status="succeeded",
                 last_success_at="2026-03-30T00:00:00+00:00",
@@ -312,6 +314,8 @@ def test_discover_source_conflict_policy_prefers_existing_when_healthier():
                 source_slug="phi-gamma-delta-main",
                 list_url="https://phigam.org/chapter-directory/",
                 base_url="https://phigam.org",
+                source_type="html_directory",
+                parser_key="directory_v1",
                 active=True,
                 last_run_status="succeeded",
                 last_success_at="2026-03-30T00:00:00+00:00",
@@ -326,3 +330,253 @@ def test_discover_source_conflict_policy_prefers_existing_when_healthier():
     assert result.selected_url == "https://phigam.org/chapter-directory/"
     assert result.source_provenance == "existing_source"
     assert result.fallback_reason == "registry_disagreed_preferred_existing_source"
+
+
+def test_discover_source_rejects_invalid_existing_source_and_falls_back_to_search():
+    repository = StubDiscoveryRepository(
+        existing_sources=[
+            ExistingSourceCandidate(
+                source_slug="lambda-chi-alpha-main",
+                list_url="https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+                base_url="https://stackoverflow.com",
+                source_type="unsupported",
+                parser_key="unsupported",
+                active=True,
+                last_run_status="succeeded",
+                last_success_at="2026-03-30T00:00:00+00:00",
+                confidence=0.9,
+            )
+        ],
+    )
+    responses = {
+        '"Lambda Chi Alpha" national fraternity website': [
+            SearchResult(
+                title="Lambda Chi Alpha Fraternity - Official Site",
+                url="https://www.lambdachialpha.org/",
+                snippet="Official Lambda Chi Alpha fraternity website with chapter directory.",
+                provider="searxng_json",
+                rank=1,
+            )
+        ],
+        '"Lambda Chi Alpha" fraternity national website': [],
+        '"Lambda Chi Alpha" chapter directory': [],
+        '"Lambda Chi Alpha" official fraternity': [],
+        '"Lambda Chi Alpha" find a chapter': [],
+        '"Lambda Chi Alpha" chapter roll': [],
+    }
+
+    result = discover_source("Lambda Chi Alpha", StubSearchClient(responses), repository=repository)
+
+    assert result.selected_url == "https://www.lambdachialpha.org/"
+    assert result.source_provenance == "search"
+    assert result.fallback_reason == "existing_source_invalid"
+
+
+def test_discover_source_rejects_weak_verified_member_path_and_uses_curated_hint():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="sigma-chi",
+            fraternity_name="Sigma Chi",
+            national_url="https://members.sigmachi.org/alumnigroups",
+            origin="nic_bootstrap",
+            confidence=0.95,
+            http_status=200,
+            checked_at="2026-04-01T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        )
+    )
+
+    result = discover_source("Sigma Chi", StubSearchClient({}), repository=repository)
+
+    assert result.selected_url == "https://sigmachi.org/chapters/"
+    assert result.source_provenance == "search"
+    assert result.fallback_reason == "verified_source_invalid"
+    assert any(step.get("step") == "rejected_verified_registry_candidate" for step in result.resolution_trace)
+
+
+def test_discover_source_rejects_weak_existing_member_path_and_uses_curated_hint():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="sigma-chi",
+            fraternity_name="Sigma Chi",
+            national_url="https://members.sigmachi.org/alumnigroups",
+            origin="nic_bootstrap",
+            confidence=0.95,
+            http_status=200,
+            checked_at="2026-04-01T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        ),
+        existing_sources=[
+            ExistingSourceCandidate(
+                source_slug="sigma-chi-main",
+                list_url="https://members.sigmachi.org/alumnigroups",
+                base_url="https://members.sigmachi.org",
+                source_type="html_directory",
+                parser_key="directory_v1",
+                active=True,
+                last_run_status="partial",
+                last_success_at="2026-03-30T00:00:00+00:00",
+                confidence=0.75,
+            )
+        ],
+    )
+
+    result = discover_source("Sigma Chi", StubSearchClient({}), repository=repository)
+
+    assert result.selected_url == "https://sigmachi.org/chapters/"
+    assert result.source_provenance == "search"
+    assert result.fallback_reason == "verified_source_invalid"
+    assert any(step.get("step") == "rejected_existing_source_candidate" for step in result.resolution_trace)
+
+
+def test_discover_source_uses_curated_hint_over_noisy_alumni_search_result():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="sigma-chi",
+            fraternity_name="Sigma Chi",
+            national_url="https://members.sigmachi.org/alumnigroups",
+            origin="nic_bootstrap",
+            confidence=0.95,
+            http_status=200,
+            checked_at="2026-04-01T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        ),
+        existing_sources=[
+            ExistingSourceCandidate(
+                source_slug="sigma-chi-main",
+                list_url="https://members.sigmachi.org/alumnigroups",
+                base_url="https://members.sigmachi.org",
+                source_type="html_directory",
+                parser_key="directory_v1",
+                active=True,
+                last_run_status="partial",
+                last_success_at="2026-03-30T00:00:00+00:00",
+                confidence=0.75,
+            )
+        ],
+    )
+    responses = {
+        '"Sigma Chi" national fraternity website': [
+            SearchResult(
+                title="San Diego Sigma Chi Alumni Chapter",
+                url="https://www.sandiegosigmachi.org/",
+                snippet="The San Diego Sigma Chi Alumni Chapter serves alumni in Southern California.",
+                provider="searxng_json",
+                rank=1,
+            )
+        ],
+        '"Sigma Chi" fraternity national website': [],
+        '"Sigma Chi" chapter directory': [],
+        '"Sigma Chi" official fraternity': [],
+        '"Sigma Chi" find a chapter': [],
+        '"Sigma Chi" chapter roll': [],
+        '"Sigma Chi" "sigmachi.org" fraternity': [],
+        '"sigmachi.org" chapter directory fraternity': [],
+    }
+
+    result = discover_source("Sigma Chi", StubSearchClient(responses), repository=repository)
+
+    assert result.selected_url == "https://sigmachi.org/chapters/"
+    assert result.source_provenance == "search"
+    assert result.fallback_reason == "verified_source_invalid"
+    assert any(step.get("step") == "selected_curated_source_hint_over_noisy_search" for step in result.resolution_trace)
+
+
+def test_discover_source_uses_curated_hint_over_generic_same_host_page():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="sigma-chi",
+            fraternity_name="Sigma Chi",
+            national_url="https://members.sigmachi.org/alumnigroups",
+            origin="nic_bootstrap",
+            confidence=0.95,
+            http_status=200,
+            checked_at="2026-04-01T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        ),
+        existing_sources=[
+            ExistingSourceCandidate(
+                source_slug="sigma-chi-main",
+                list_url="https://members.sigmachi.org/alumnigroups",
+                base_url="https://members.sigmachi.org",
+                source_type="html_directory",
+                parser_key="directory_v1",
+                active=True,
+                last_run_status="partial",
+                last_success_at="2026-03-30T00:00:00+00:00",
+                confidence=0.75,
+            )
+        ],
+    )
+    responses = {
+        '"Sigma Chi" national fraternity website': [
+            SearchResult(
+                title="History - Sigma Chi",
+                url="https://sigmachi.org/history/",
+                snippet="The history of Sigma Chi and its traditions.",
+                provider="searxng_json",
+                rank=1,
+            )
+        ],
+        '"Sigma Chi" fraternity national website': [],
+        '"Sigma Chi" chapter directory': [],
+        '"Sigma Chi" official fraternity': [],
+        '"Sigma Chi" find a chapter': [],
+        '"Sigma Chi" chapter roll': [],
+        '"Sigma Chi" "sigmachi.org" fraternity': [],
+        '"sigmachi.org" chapter directory fraternity': [],
+    }
+
+    result = discover_source("Sigma Chi", StubSearchClient(responses), repository=repository)
+
+    assert result.selected_url == "https://sigmachi.org/chapters/"
+    assert result.source_provenance == "search"
+    assert any(step.get("step") == "selected_curated_source_hint_over_generic_same_host_page" for step in result.resolution_trace)
+
+
+def test_discover_source_keeps_verified_root_when_not_obviously_weak():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="chi-psi",
+            fraternity_name="Chi Psi",
+            national_url="https://chipsi.org/",
+            origin="nic_bootstrap",
+            confidence=0.85,
+            http_status=200,
+            checked_at="2026-04-01T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        )
+    )
+
+    result = discover_source("Chi Psi", StubSearchClient({}), repository=repository)
+
+    assert result.selected_url == "https://chipsi.org/"
+    assert result.source_provenance == "verified_registry"
+
+def test_discover_source_prefers_curated_ato_map_over_generic_root():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="alpha-tau-omega",
+            fraternity_name="Alpha Tau Omega",
+            national_url="https://ato.org/",
+            origin="nic_bootstrap",
+            confidence=0.9,
+            http_status=200,
+            checked_at="2026-04-01T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        )
+    )
+
+    result = discover_source("Alpha Tau Omega", StubSearchClient({}), repository=repository)
+
+    assert result.selected_url == "https://ato.org/home-2/ato-map/"
+    assert result.source_provenance == "search"
+    assert result.fallback_reason == "verified_source_invalid"
+    assert any(step.get("step") == "selected_curated_hint" for step in result.resolution_trace)
+

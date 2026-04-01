@@ -6,6 +6,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
 from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
     CrawlMetrics,
@@ -231,6 +232,8 @@ class CrawlerRepository:
                     s.slug AS source_slug,
                     s.base_url,
                     s.list_path,
+                    s.source_type,
+                    s.parser_key,
                     s.active,
                     MAX(cr.started_at) FILTER (WHERE cr.status = 'succeeded') AS last_success_at,
                     (
@@ -243,7 +246,7 @@ class CrawlerRepository:
                 JOIN fraternities f ON f.id = s.fraternity_id
                 LEFT JOIN crawl_runs cr ON cr.source_id = s.id
                 WHERE f.slug = %s
-                GROUP BY s.slug, s.base_url, s.list_path, s.active, s.updated_at
+                GROUP BY s.slug, s.base_url, s.list_path, s.source_type, s.parser_key, s.active, s.updated_at
                 ORDER BY
                     s.active DESC,
                     MAX(cr.started_at) FILTER (WHERE cr.status = 'succeeded') DESC NULLS LAST,
@@ -281,6 +284,8 @@ class CrawlerRepository:
                     source_slug=row["source_slug"],
                     list_url=list_url,
                     base_url=base_url,
+                    source_type=row["source_type"],
+                    parser_key=row["parser_key"],
                     active=bool(row["active"]),
                     last_run_status=last_status,
                     last_success_at=row["last_success_at"].isoformat() if row["last_success_at"] else None,
@@ -751,8 +756,8 @@ class CrawlerRepository:
                       AND (
                           fj.field_name <> 'find_email'
                           OR (
-                              c.website_url IS NOT NULL
-                              AND COALESCE(c.field_states->>'website_url', '') <> 'low_confidence'
+                              c.website_url ~* '^https?://'
+                              AND COALESCE(c.field_states->>'website_url', '') NOT IN ('low_confidence', 'missing')
                           )
                       )
             """
@@ -827,7 +832,8 @@ class CrawlerRepository:
                     c.contact_email,
                     c.university_name,
                     c.field_states,
-                    s.base_url AS source_base_url
+                    s.base_url AS source_base_url,
+                    s.list_path AS source_list_path
                 FROM claimed_job cj
                 JOIN chapters c ON c.id = cj.chapter_id
                 JOIN fraternities f ON f.id = c.fraternity_id
@@ -840,18 +846,28 @@ class CrawlerRepository:
             if row is None:
                 return None
 
+            payload = dict(row["payload"] or {})
+            source_base_url = row["source_base_url"]
+            source_list_path = row["source_list_path"]
+            if isinstance(source_list_path, str) and source_list_path.startswith("http"):
+                payload.setdefault("sourceListUrl", source_list_path)
+            elif isinstance(source_list_path, str) and source_list_path and source_base_url:
+                payload.setdefault("sourceListUrl", f"{source_base_url.rstrip('/')}/{source_list_path.lstrip('/')}")
+            elif source_base_url:
+                payload.setdefault("sourceListUrl", source_base_url)
+
             return FieldJob(
                 id=str(row["id"]),
                 chapter_id=str(row["chapter_id"]),
                 chapter_slug=row["chapter_slug"],
                 chapter_name=row["chapter_name"],
                 field_name=row["field_name"],
-                payload=row["payload"] or {},
+                payload=payload,
                 attempts=int(row["attempts"]),
                 max_attempts=int(row["max_attempts"]),
                 priority=int(row["priority"]),
                 claim_token=str(row["claim_token"]),
-                source_base_url=row["source_base_url"],
+                source_base_url=source_base_url,
                 website_url=row["website_url"],
                 instagram_url=row["instagram_url"],
                 contact_email=row["contact_email"],
@@ -948,7 +964,12 @@ class CrawlerRepository:
                     """
                     UPDATE chapters
                     SET
-                        website_url = COALESCE(website_url, %(website_url)s),
+                        website_url = CASE
+                            WHEN %(website_url)s::text IS NULL THEN website_url
+                            WHEN website_url IS NULL THEN %(website_url)s::text
+                            WHEN website_url !~* '^https?://' THEN %(website_url)s::text
+                            ELSE website_url
+                        END,
                         instagram_url = COALESCE(instagram_url, %(instagram_url)s),
                         contact_email = COALESCE(contact_email, %(contact_email)s),
                         university_name = COALESCE(university_name, %(university_name)s),
@@ -1097,7 +1118,20 @@ class CrawlerRepository:
             (chapter_id,),
         )
         row = cursor.fetchone()
-        return row is not None and row[chapter_column] is not None
+        if row is None:
+            return False
+
+        value = row[chapter_column]
+        if value is None:
+            return False
+
+        if field_name == FIELD_JOB_FIND_WEBSITE:
+            return sanitize_as_website(value) is not None
+        if field_name == FIELD_JOB_FIND_INSTAGRAM:
+            return sanitize_as_instagram(value) is not None
+        if field_name == FIELD_JOB_FIND_EMAIL:
+            return sanitize_as_email(value) is not None
+        return True
 
     def _normalize_field_job_name(self, raw_name: str) -> str:
         mapping = {

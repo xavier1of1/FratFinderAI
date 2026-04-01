@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from html import unescape
 import re
 from typing import Any
 
@@ -10,6 +11,7 @@ from fratfinder_crawler.models import ChapterStub, ExtractedChapter
 _JSON_LD_TYPES = {"educationalorganization"}
 _SCRIPT_ARRAY_PATTERNS = (
     re.compile(r"(?:window\.)?chapters\s*=\s*(\[[\s\S]*?\])\s*;", re.IGNORECASE),
+    re.compile(r"(?:window\.)?chaptersMapData\s*=\s*(\[[\s\S]*?\])\s*;", re.IGNORECASE),
     re.compile(r"var\s+chapters\s*=\s*(\[[\s\S]*?\])\s*;", re.IGNORECASE),
     re.compile(r"(?:window\.)?locations\s*=\s*(\[[\s\S]*?\])\s*;", re.IGNORECASE),
     re.compile(r"var\s+locations\s*=\s*(\[[\s\S]*?\])\s*;", re.IGNORECASE),
@@ -26,6 +28,7 @@ class ScriptJsonAdapter:
         *,
         api_url: str | None = None,
         http_client: Any | None = None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> list[ChapterStub]:
         payloads = _extract_json_ld_payloads(html)
         payloads.extend(_extract_inline_array_payloads(html))
@@ -43,6 +46,7 @@ class ScriptJsonAdapter:
         *,
         api_url: str | None = None,
         http_client: Any | None = None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> list[ExtractedChapter]:
         payloads = _extract_json_ld_payloads(html)
         payloads.extend(_extract_inline_array_payloads(html))
@@ -77,6 +81,24 @@ def _extract_inline_array_payloads(html: str) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 continue
             payloads.extend(_coerce_dict_list(data))
+    payloads.extend(_extract_mapplic_payloads(html))
+    return payloads
+
+
+def _extract_mapplic_payloads(html: str) -> list[dict[str, Any]]:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    payloads: list[dict[str, Any]] = []
+    for node in soup.select("[data-mapdata]"):
+        raw_mapdata = node.get("data-mapdata")
+        if not raw_mapdata:
+            continue
+        try:
+            mapdata = json.loads(unescape(raw_mapdata))
+        except json.JSONDecodeError:
+            continue
+        payloads.extend(_coerce_mapplic_locations(mapdata))
     return payloads
 
 
@@ -93,11 +115,12 @@ def _payload_to_stub(payload: dict[str, Any], source_url: str) -> ChapterStub | 
     chapter = _payload_to_chapter(payload, source_url)
     if chapter is None:
         return None
+    detail_url = sanitize_as_website(_get_first_string(payload, ["permalink", "detail_url", "detailUrl", "url"]), base_url=source_url)
     return ChapterStub(
         chapter_name=chapter.name,
         university_name=chapter.university_name,
-        detail_url=chapter.website_url,
-        outbound_chapter_url_candidate=chapter.website_url,
+        detail_url=detail_url or chapter.source_url,
+        outbound_chapter_url_candidate=chapter.website_url or detail_url,
         confidence=chapter.source_confidence,
         provenance=f"script_json:{chapter.source_url}",
     )
@@ -105,7 +128,10 @@ def _payload_to_stub(payload: dict[str, Any], source_url: str) -> ChapterStub | 
 
 def _payload_to_chapter(payload: dict[str, Any], source_url: str) -> ExtractedChapter | None:
     name = _get_first_string(payload, ["chapter_name", "chapterName", "name", "title"])
-    university_name = _get_first_string(payload, ["school_name", "schoolName", "university_name", "universityName", "college", "institution"])
+    university_name = _get_first_string(
+        payload,
+        ["school_name", "schoolName", "university_name", "universityName", "universitycollege", "college", "institution"],
+    )
     city = _get_first_string(payload, ["city", "town"])
     state = _get_first_string(payload, ["state", "stateProvince", "province", "region"])
     website_url = sanitize_as_website(_get_first_string(payload, ["website_url", "websiteUrl", "website", "url"]), base_url=source_url)
@@ -113,7 +139,8 @@ def _payload_to_chapter(payload: dict[str, Any], source_url: str) -> ExtractedCh
     instagram_url = sanitize_as_instagram(
         _get_first_string(payload, ["instagram_url", "instagramUrl", "instagram", "instagram_handle", "instagramHandle"])
     )
-    external_id = _get_first_string(payload, ["chapter_id", "chapterId", "external_id", "externalId", "slug", "id", "@id"])
+    external_id = _get_first_string(payload, ["chapter_id", "chapterId", "external_id", "externalId", "slug", "id", "@id", "permalink"])
+    detail_url = sanitize_as_website(_get_first_string(payload, ["permalink", "detail_url", "detailUrl", "url"]), base_url=source_url)
 
     address = payload.get("address")
     if isinstance(address, dict):
@@ -125,19 +152,125 @@ def _payload_to_chapter(payload: dict[str, Any], source_url: str) -> ExtractedCh
 
     confidence = _calculate_confidence(name, university_name, city, state, website_url, payload)
     snippet = json.dumps(payload, sort_keys=True)[:400]
+    resolved_source_url = detail_url or source_url
     return ExtractedChapter(
-        name=name.strip(),
-        university_name=university_name,
-        city=city,
-        state=state,
+        name=unescape(name.strip()),
+        university_name=unescape(university_name) if university_name else None,
+        city=unescape(city) if city else None,
+        state=unescape(state) if state else None,
         website_url=website_url,
         instagram_url=instagram_url,
         contact_email=contact_email,
         external_id=external_id,
-        source_url=source_url,
+        source_url=resolved_source_url,
         source_snippet=snippet,
         source_confidence=confidence,
     )
+
+
+def _coerce_mapplic_locations(payload: object) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    levels = payload.get("levels")
+    if not isinstance(levels, list):
+        return []
+
+    extracted: list[dict[str, Any]] = []
+    for level in levels:
+        if not isinstance(level, dict):
+            continue
+        locations = level.get("locations")
+        if not isinstance(locations, list):
+            continue
+        for item in locations:
+            if not isinstance(item, dict):
+                continue
+            category = str(item.get("category") or "").strip().lower()
+            pin = str(item.get("pin") or "").strip().lower()
+            if category == "state" or pin == "hidden":
+                continue
+            extracted_item = _mapplic_location_to_payload(item)
+            if extracted_item is not None:
+                extracted.append(extracted_item)
+    return extracted
+
+
+def _mapplic_location_to_payload(location: dict[str, Any]) -> dict[str, Any] | None:
+    title = _normalize_mapplic_value(location.get("title"))
+    if not title:
+        return None
+
+    description_fields = _extract_mapplic_description_fields(location.get("description"))
+    chapter_name, university_name = _split_title_pair(title)
+    chapter_name = _normalize_mapplic_value(description_fields.get("chapter")) or chapter_name
+    university_name = _normalize_mapplic_value(description_fields.get("university")) or university_name
+
+    location_text = _normalize_mapplic_value(description_fields.get("location"))
+    city, state = _split_city_state(location_text)
+    if not city:
+        city = _normalize_mapplic_value(description_fields.get("city"))
+    if not state:
+        state = _normalize_mapplic_value(description_fields.get("state"))
+
+    return {
+        "name": chapter_name or title,
+        "school_name": university_name,
+        "city": city,
+        "state": state,
+        "chapter_id": _normalize_mapplic_value(location.get("id")),
+        "latitude": _normalize_mapplic_value(location.get("x")),
+        "longitude": _normalize_mapplic_value(location.get("y")),
+    }
+
+
+def _extract_mapplic_description_fields(description: object) -> dict[str, str]:
+    from bs4 import BeautifulSoup
+
+    if not isinstance(description, str) or not description.strip():
+        return {}
+    text = BeautifulSoup(unescape(description), "html.parser").get_text("\n", strip=True)
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        normalized_key = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+        cleaned_value = value.strip()
+        if normalized_key and cleaned_value:
+            fields[normalized_key] = cleaned_value
+    return fields
+
+
+def _normalize_mapplic_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        value = str(value)
+    if not isinstance(value, str):
+        return None
+    cleaned = unescape(value).replace("\xa0", " ").strip()
+    if not cleaned:
+        return None
+    return re.sub(r"\s+", " ", cleaned)
+
+
+def _split_title_pair(title: str) -> tuple[str | None, str | None]:
+    if " - " in title:
+        chapter_name, university_name = title.split(" - ", 1)
+        return chapter_name.strip() or None, university_name.strip() or None
+    if "-" in title:
+        chapter_name, university_name = title.split("-", 1)
+        return chapter_name.strip() or None, university_name.strip() or None
+    return title.strip() or None, None
+
+
+def _split_city_state(value: str | None) -> tuple[str | None, str | None]:
+    if not value:
+        return None, None
+    if "," in value:
+        city, state = value.rsplit(",", 1)
+        return city.strip() or None, state.strip() or None
+    return value.strip() or None, None
 
 
 def _looks_like_chapter_payload(
@@ -177,6 +310,10 @@ def _calculate_confidence(
     for value in (university_name, city, state, website_url):
         if value:
             score += 0.1
+    if any(payload.get(key) for key in ("permalink", "detail_url", "detailUrl", "latitude", "longitude", "foundation_date")):
+        score += 0.1
+    if any(payload.get(key) for key in ("instagram", "facebook")):
+        score += 0.05
     if _is_supported_json_ld(payload):
         score += 0.1
     return min(round(score, 2), 1.0)
@@ -190,7 +327,7 @@ def _get_first_string(payload: dict[str, Any], keys: list[str]) -> str | None:
         if isinstance(value, (int, float)):
             value = str(value)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return unescape(value.strip())
     return None
 
 

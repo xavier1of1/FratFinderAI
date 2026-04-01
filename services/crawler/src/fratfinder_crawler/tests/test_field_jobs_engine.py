@@ -6,7 +6,16 @@ from types import SimpleNamespace
 
 import requests
 
-from fratfinder_crawler.field_jobs import CandidateMatch, FieldJobEngine
+from fratfinder_crawler.field_jobs import (
+    CandidateMatch,
+    FieldJobEngine,
+    NationalsChapterEntry,
+    SearchDocument,
+    _fraternity_matches,
+    _nationals_entry_match_score,
+    _normalized_match_text,
+    _search_result_is_useful,
+)
 from fratfinder_crawler.models import FieldJob
 from fratfinder_crawler.search import SearchResult, SearchUnavailableError
 
@@ -490,6 +499,273 @@ def test_field_job_reprocessing_does_not_corrupt_existing_chapter_value():
     assert repo.completed[0][1] == {}
     assert repo.completed[0][2] == {"website_url": "found"}
 
+
+def test_find_website_ignores_invalid_existing_mailto_value():
+    job = _job("find_website", website_url="mailto:admin@example.org", university_name="Demo University")
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["Website https://chapter.example.edu"]})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"website_url": "https://chapter.example.edu"}
+    assert repo.completed[0][2] == {"website_url": "found"}
+
+
+
+def test_extract_website_matches_rejects_generic_school_roots_and_documents():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="The University of Texas", chapter_name="Beta Upsilon Chi"), fraternity_slug="beta-upsilon-chi")
+    document = SearchDocument(
+        text="Beta Upsilon Chi listed on the University of Texas site.",
+        links=[
+            "https://studentaffairs.uga.edu",
+            "https://studentgovernment.web.baylor.edu/sites/g/files/example.pdf",
+        ],
+        url="https://studentaffairs.uga.edu",
+        title="Beta Upsilon Chi | The University of Texas",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_website_matches_keeps_specific_tier1_chapter_listing_pages():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="University of Kentucky", chapter_name="Beta Upsilon Chi"), fraternity_slug="beta-upsilon-chi")
+    document = SearchDocument(
+        text="Beta Upsilon Chi chapter listed by Fraternity and Sorority Life at the University of Kentucky.",
+        links=["https://studentsuccess.uky.edu/fraternity-and-sorority-life/about-fraternity-and-sorority-life/chapters"],
+        url="https://studentsuccess.uky.edu/fraternity-and-sorority-life/about-fraternity-and-sorority-life/chapters",
+        title="Beta Upsilon Chi | University of Kentucky Fraternity and Sorority Life",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert [match.value for match in matches] == [
+        "https://studentsuccess.uky.edu/fraternity-and-sorority-life/about-fraternity-and-sorority-life/chapters"
+    ]
+
+
+def test_extract_website_matches_rejects_ambiguous_school_generic_tier1_directory():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Denver", chapter_name="Denver Chapter"), fraternity_slug="delta-chi")
+    document = SearchDocument(
+        text="Delta Chi listed among student organizations at MSU Denver.",
+        links=["https://www.msudenver.edu/gender-institute-teaching-advocacy/student-organizations/list-of-chapters/"],
+        url="https://www.msudenver.edu/gender-institute-teaching-advocacy/student-organizations/list-of-chapters/",
+        title="Delta Chi | Student Organizations | MSU Denver",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_website_matches_keeps_ambiguous_school_tier1_page_with_fraternity_path_identity():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Denver", chapter_name="Denver Chapter"), fraternity_slug="delta-chi")
+    document = SearchDocument(
+        text="Delta Chi chapter page at Denver fraternity and sorority life.",
+        links=["https://studentaffairs.du.edu/fraternity-sorority-life/chapters/delta-chi"],
+        url="https://studentaffairs.du.edu/fraternity-sorority-life/chapters/delta-chi",
+        title="Delta Chi | Fraternity and Sorority Life | Denver",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert [match.value for match in matches] == [
+        "https://studentaffairs.du.edu/fraternity-sorority-life/chapters/delta-chi"
+    ]
+
+
+def test_extract_website_matches_rejects_low_signal_school_archive_pages():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Hamilton College", chapter_name="Alpha Delta Phi"), fraternity_slug="alpha-delta-phi")
+    document = SearchDocument(
+        text="Alpha Delta Phi at Hamilton College scholarship and prize history.",
+        links=["https://www.hamilton.edu/scholarships-and-prizes/index?action=detail&id=1D296BD5-E521-DF54-2C6ACB17A8464AA3"],
+        url="https://www.hamilton.edu/scholarships-and-prizes/index?action=detail&id=1D296BD5-E521-DF54-2C6ACB17A8464AA3",
+        title="Alpha Delta Phi scholarship prize | Hamilton College",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_website_matches_rejects_low_signal_external_shop_link_from_school_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Virginia Tech", chapter_name="Beta Upsilon Chi"), fraternity_slug="beta-upsilon-chi")
+    document = SearchDocument(
+        text="Beta Upsilon Chi Fraternity - Beta Alpha Chapter | Fraternity and Sorority Life | Virginia Tech",
+        links=["https://shop.hokiesports.com/va-tech-hokies/hokie-gear"],
+        url="https://fsl.vt.edu/organizations/chapters/BetaUpsilonChi.html",
+        title="Beta Upsilon Chi Fraternity - Beta Alpha Chapter | Fraternity and Sorority Life | Virginia Tech",
+        provider="search_page",
+        html='<html><body><a href="https://shop.hokiesports.com/va-tech-hokies/hokie-gear">Shop Hokie Sports</a></body></html>',
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_website_matches_keeps_external_link_with_website_anchor_from_school_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Virginia Tech", chapter_name="Beta Upsilon Chi"), fraternity_slug="beta-upsilon-chi")
+    document = SearchDocument(
+        text="Beta Upsilon Chi Fraternity - Beta Alpha Chapter | Fraternity and Sorority Life | Virginia Tech Website",
+        links=["https://betaupsilonchi.example.org"],
+        url="https://fsl.vt.edu/organizations/chapters/BetaUpsilonChi.html",
+        title="Beta Upsilon Chi Fraternity - Beta Alpha Chapter | Fraternity and Sorority Life | Virginia Tech",
+        provider="search_page",
+        html='<html><body><p>Website: <a href="https://betaupsilonchi.example.org">Visit Website</a></p></body></html>',
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert [match.value for match in matches] == ["https://betaupsilonchi.example.org"]
+
+
+def test_extract_website_matches_rejects_conflicting_org_national_site():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Florida State University", chapter_name="Alpha Delta Phi"), fraternity_slug="alpha-delta-phi")
+    document = SearchDocument(
+        text="Home - Alpha Phi Alpha Fraternity, Inc.",
+        links=["https://apa1906.net/"],
+        url="https://apa1906.net/",
+        title="Home - Alpha Phi Alpha Fraternity, Inc.",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_fraternity_matches_requires_full_identity_for_three_letter_greek_orgs():
+    job = replace(
+        _job("find_website", university_name="West Texas A&M University", chapter_name="West Texas A&M Colony (active)"),
+        fraternity_slug="alpha-gamma-rho",
+        source_slug="alpha-gamma-rho-main",
+        source_base_url="https://alphagammarho.org",
+    )
+
+    assert _fraternity_matches(job, _normalized_match_text("Alpha Gamma Rho at West Texas A&M")) is True
+    assert _fraternity_matches(job, _normalized_match_text("AGR chapter at West Texas A&M")) is True
+    assert _fraternity_matches(job, _normalized_match_text("Sigma Gamma Rho at West Texas A&M")) is False
+
+
+def test_search_result_is_useful_rejects_partial_greek_token_overlap():
+    job = replace(
+        _job("find_website", university_name="West Texas A&M University", chapter_name="West Texas A&M Colony (active)"),
+        fraternity_slug="alpha-gamma-rho",
+        source_slug="alpha-gamma-rho-main",
+        source_base_url="https://alphagammarho.org",
+    )
+    result = SearchResult(
+        title="West Texas A&M | Sigma Gamma Rho Sorority",
+        url="https://www.sigmaswregion.com/texas",
+        snippet="Regional Sigma Gamma Rho sorority page for West Texas A&M.",
+        provider="searxng_json",
+        rank=1,
+    )
+
+    assert _search_result_is_useful(job, result, "website") is False
+
+
+def test_extract_website_matches_rejects_conflicting_state_school_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="University of Oklahoma", chapter_name="Beta Upsilon Chi"), fraternity_slug="beta-upsilon-chi")
+    document = SearchDocument(
+        text="Beta Upsilon Chi appears in the Interfraternity Council directory for Oklahoma State University.",
+        links=["https://campuslife.okstate.edu/fraternity-sorority-affairs/interfraternity-council"],
+        url="https://campuslife.okstate.edu/fraternity-sorority-affairs/interfraternity-council",
+        title="Interfraternity Council (IFC) | Fraternity & Sorority Life | Oklahoma State University",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_website_matches_rejects_generic_school_department_page_when_chapter_name_is_school_shortname():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Northwestern University", chapter_name="Northwestern"), fraternity_slug="alpha-delta-phi")
+    document = SearchDocument(
+        text="Fraternity & Sorority Life is the office that represents the premiere collegiate experience at Northwestern University.",
+        links=["https://www.northwestern.edu/campuslife/departments/"],
+        url="https://www.northwestern.edu/campuslife/departments/",
+        title="Departments of Campus Life - Northwestern University",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_website_matches_rejects_trustees_statement_page_when_chapter_name_is_school_shortname():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_website", university_name="Amherst College", chapter_name="Amherst"), fraternity_slug="alpha-delta-phi")
+    document = SearchDocument(
+        text="Board statement and resolution on fraternities at Amherst College.",
+        links=["https://www.amherst.edu/about/president-college-leadership/trustees/statements/node/546181"],
+        url="https://www.amherst.edu/about/president-college-leadership/trustees/statements/node/546181",
+        title="Board statement and resolution on fraternities | Trustees | Amherst College",
+        provider="search_result",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_email_search_gate_rejects_generic_office_email_from_low_signal_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_email", university_name="Bowdoin College", chapter_name="Alpha Delta Phi"), fraternity_slug="alpha-delta-phi")
+    document = SearchDocument(
+        text="Alpha Delta Phi visiting writers series at Bowdoin College. Contact instagram@noorkhindi.event for event logistics.",
+        url="https://calendar.bowdoin.edu/event/alpha-delta-phi-visiting-writers-series-presents-noor-hindi",
+        title="Alpha Delta Phi visiting writers series | Bowdoin College calendar",
+        provider="search_page",
+    )
+
+    assert engine._email_search_candidate_passes_gate("instagram@noorkhindi.event", document, job) is False
+
+
+def test_email_search_gate_rejects_generic_office_email_without_identity_anchor():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_email", university_name="Columbia University", chapter_name="Alpha Delta Phi"), fraternity_slug="alpha-delta-phi")
+    document = SearchDocument(
+        text="Alpha Delta Phi listed in the Columbia IFC roster. General questions can go to reslife@columbia.edu.",
+        url="https://www.cc-seas.columbia.edu/reslife/fraternity_sorority/ifc",
+        title="Alpha Delta Phi | Columbia IFC",
+        provider="search_page",
+    )
+
+    assert engine._email_search_candidate_passes_gate("reslife@columbia.edu", document, job) is False
 
 
 def test_verify_school_match_creates_review_item_on_clear_mismatch():
@@ -1431,8 +1707,10 @@ def test_instagram_search_skips_low_signal_hosts_and_avoids_fetching_direct_inst
         }
     )
 
-    def fail_fetch(*args, **kwargs):
-        raise AssertionError("direct instagram result should not trigger page fetch")
+    def fail_fetch(url, *args, **kwargs):
+        if "instagram.com/" in url:
+            raise AssertionError("direct instagram result should not trigger page fetch")
+        return SimpleNamespace(status_code=404, text="")
 
     engine = FieldJobEngine(
         repo,
@@ -1844,6 +2122,44 @@ def test_greedy_collect_passive_finds_instagram_from_nationals_directory_page():
     assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/msstatedeltachi"}
 
 
+def test_greedy_collect_none_still_uses_nationals_for_target_chapter():
+    job = replace(
+        _job("find_instagram", university_name="Mississippi State University"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+
+    html = """
+    <html>
+      <body>
+        <h2>MISSISSIPPI STATE CHAPTER</h2>
+        <p>
+          Website: <a href="https://msstatedeltachi.com">Delta Chi Mississippi State</a>
+          Instagram: @msstatedeltachi
+        </p>
+      </body>
+    </html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        greedy_collect_mode="none",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/msstatedeltachi"}
+    assert repo.discovery_upserts == []
+
+
 def test_greedy_collect_bfs_ingests_additional_nationals_chapter_records():
     job = replace(
         _job("find_instagram", university_name="Mississippi State University"),
@@ -1910,9 +2226,74 @@ def test_greedy_collect_skips_follow_on_jobs_for_low_signal_one_token_school_nam
 
     result = engine.process(limit=1)
 
-    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
     assert repo.discovery_upserts
     assert repo.discovery_field_jobs == []
+
+
+def test_nationals_entry_match_score_requires_school_or_chapter_signal():
+    job = replace(
+        _job("find_website", university_name="Jacksonville State University", chapter_name="Jacksonville State"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    wrong_entry = NationalsChapterEntry(
+        chapter_name="Alberta Chapter",
+        university_name="Alberta",
+        website_url="http://www.deltachi.ca/",
+        instagram_url="https://www.instagram.com/deltachialberta",
+        contact_email=None,
+        source_url="https://deltachi.org/chapter-directory/alberta/",
+        source_snippet="Website Delta Chi Alberta Instagram @deltachialberta",
+        confidence=0.9,
+    )
+    right_entry = NationalsChapterEntry(
+        chapter_name="Jacksonville State Chapter",
+        university_name="Jacksonville State University",
+        website_url="https://jsudeltachi.example.org/",
+        instagram_url=None,
+        contact_email=None,
+        source_url="https://deltachi.org/chapter-directory/alabama/",
+        source_snippet="Jacksonville State Chapter Website Delta Chi Jacksonville State",
+        confidence=0.9,
+    )
+
+    assert _nationals_entry_match_score(job, wrong_entry) == 0
+    assert _nationals_entry_match_score(job, right_entry) >= 4
+
+
+def test_website_nationals_directory_does_not_accept_other_chapter_entry():
+    job = replace(
+        _job("find_website", university_name="Jacksonville State University", chapter_name="Jacksonville State"),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        source_base_url="https://deltachi.org/chapter-directory/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+    html = """
+    <html>
+      <body>
+        <h2>ALBERTA CHAPTER</h2>
+        <p>Website: <a href="https://www.deltachi.ca">Delta Chi Alberta</a> Instagram: @deltachialberta</p>
+      </body>
+    </html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        greedy_collect_mode="none",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.completed == []
 
 
 def test_greedy_collect_passive_follows_map_config_state_urls_and_parses_elementor_blocks():

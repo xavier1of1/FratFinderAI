@@ -17,8 +17,9 @@ class LocatorApiAdapter:
         *,
         api_url: str | None = None,
         http_client: Any | None = None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> list[ChapterStub]:
-        chapters = self.parse(html, source_url, api_url=api_url, http_client=http_client)
+        chapters = self.parse(html, source_url, api_url=api_url, http_client=http_client, source_metadata=source_metadata)
         return [
             ChapterStub(
                 chapter_name=chapter.name,
@@ -38,6 +39,7 @@ class LocatorApiAdapter:
         *,
         api_url: str | None = None,
         http_client: Any | None = None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> list[ExtractedChapter]:
         if not api_url or http_client is None:
             return []
@@ -56,6 +58,7 @@ class LocatorApiAdapter:
 
 
 _KML_NAMESPACE = {"k": "http://www.opengis.net/kml/2.2"}
+_COMBINED_LOCATOR_NAME_PATTERN = re.compile(r"^(?P<university>.+?)\s+-\s+(?P<chapter>[A-Za-z0-9&.,() /'-]+)$")
 
 
 def _parse_description_fields(description: str) -> dict[str, str]:
@@ -90,6 +93,18 @@ def _parse_city_state(value: str | None) -> tuple[str | None, str | None]:
     return (value.strip() or None, None)
 
 
+def _split_locator_name(value: str | None) -> tuple[str | None, str | None]:
+    if not value:
+        return None, None
+    trimmed = value.strip()
+    if not trimmed:
+        return None, None
+    match = _COMBINED_LOCATOR_NAME_PATTERN.match(trimmed)
+    if not match:
+        return trimmed, None
+    return match.group("university").strip() or trimmed, match.group("chapter").strip() or None
+
+
 def _kml_to_chapters(kml_text: str, source_url: str) -> list[ExtractedChapter]:
     try:
         root = ET.fromstring(kml_text)
@@ -103,11 +118,12 @@ def _kml_to_chapters(kml_text: str, source_url: str) -> list[ExtractedChapter]:
         name_node = placemark.find("k:name", _KML_NAMESPACE)
         description_node = placemark.find("k:description", _KML_NAMESPACE)
 
-        university_name = (name_node.text or "").strip() if name_node is not None and name_node.text else ""
+        raw_name = (name_node.text or "").strip() if name_node is not None and name_node.text else ""
+        university_name, inferred_chapter_name = _split_locator_name(raw_name)
         description = (description_node.text or "") if description_node is not None and description_node.text else ""
         fields = _parse_description_fields(description)
 
-        chapter_name = fields.get("alias") or university_name
+        chapter_name = fields.get("alias") or inferred_chapter_name or university_name or raw_name
         website_url = fields.get("website") or None
         instagram_url = _normalize_instagram(fields.get("instagram"))
         city, state = _parse_city_state(fields.get("preferred city_ state"))
@@ -135,3 +151,5 @@ def _kml_to_chapters(kml_text: str, source_url: str) -> list[ExtractedChapter]:
         )
 
     return chapters
+
+

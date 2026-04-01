@@ -24,6 +24,30 @@ _BLOCKED_HOST_FRAGMENTS = ("facebook.com", "instagram.com", "linkedin.com", "x.c
 _EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.IGNORECASE)
 _INSTAGRAM_URL_PATTERN = re.compile(r"https?://(?:www\.)?instagram\.com/([A-Za-z0-9_.]+)/?", re.IGNORECASE)
 _INSTAGRAM_HANDLE_PATTERN = re.compile(r"@([A-Za-z0-9_.]{3,30})")
+_MAP_CONFIG_LINK_PATTERN = re.compile(
+    r"'hover'\s*:\s*'<p>(?P<label>[^<]+)</p>'\s*,\s*'url'\s*:\s*'(?P<url>https?://[^']+)'",
+    re.IGNORECASE,
+)
+_CHAPTER_ROLL_BLOCKED_MARKERS = (
+    "org quick links",
+    "quick links",
+    "donate",
+    "careers",
+    "privacy statement",
+    "contact us",
+    "member development",
+    "leadership institute",
+    "officer training academy",
+    "request a program",
+    "our history",
+    "scholarships",
+    "alumni",
+    "foundation",
+    "policies",
+    "history",
+    "system",
+)
+
 
 
 def detect_chapter_index_mode(
@@ -31,7 +55,14 @@ def detect_chapter_index_mode(
     page_analysis: PageAnalysis,
     classification: SourceClassification,
     embedded_data: EmbeddedDataResult,
+    source_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, float, str]:
+    hints = ((source_metadata or {}).get("extractionHints") or {})
+    if isinstance(hints, dict):
+        override_mode = hints.get("chapterIndexMode")
+        if isinstance(override_mode, str) and override_mode:
+            return override_mode, 0.98, "source_metadata_override"
+
     lowered_html = html.lower()
     if any(marker in lowered_html for marker in ("member portal", "member login", "sign in to view", "directory login")):
         return "member_portal_gated", 0.9, "member_portal_keywords"
@@ -54,9 +85,12 @@ def extract_chapter_stubs(
     mode: str,
     embedded_data: EmbeddedDataResult,
     http_client: Any,
+    source_metadata: dict[str, Any] | None = None,
 ) -> list[ChapterStub]:
     stubs: list[ChapterStub] = []
-    strategies: list[str] = ["repeated_block", "table"]
+    hints = ((source_metadata or {}).get("extractionHints") or {})
+    configured_stub_strategies = [value for value in (hints.get("stubStrategies") or []) if isinstance(value, str) and value] if isinstance(hints, dict) else []
+    strategies: list[str] = configured_stub_strategies or ["repeated_block", "table"]
     if embedded_data.found and embedded_data.api_url:
         strategies.insert(0, "locator_api")
     if embedded_data.found and embedded_data.data_type in {"json_ld", "script_json"}:
@@ -76,12 +110,14 @@ def extract_chapter_stubs(
                 source_url,
                 api_url=embedded_data.api_url,
                 http_client=http_client,
+                source_metadata=source_metadata,
             )
         except Exception:
             adapter_stubs = []
         stubs.extend(adapter_stubs)
 
     stubs.extend(_extract_anchor_stubs(html, source_url))
+    stubs.extend(_extract_map_config_state_stubs(html, source_url))
     stubs.extend(_extract_wix_chapter_link_stubs(html, source_url))
     stubs.extend(_extract_elementor_chaptername_stubs(html, source_url))
     stubs.extend(_extract_chapter_roll_text_stubs(html, source_url))
@@ -251,6 +287,31 @@ def _extract_anchor_stubs(html: str, source_url: str) -> list[ChapterStub]:
     return stubs
 
 
+def _extract_map_config_state_stubs(html: str, source_url: str) -> list[ChapterStub]:
+    stubs: list[ChapterStub] = []
+    seen: set[str] = set()
+    for match in _MAP_CONFIG_LINK_PATTERN.finditer(html):
+        label = match.group("label").strip()
+        href = match.group("url").strip()
+        if not label or not href:
+            continue
+        absolute_url = urljoin(source_url, href)
+        if absolute_url in seen:
+            continue
+        seen.add(absolute_url)
+        stubs.append(
+            ChapterStub(
+                chapter_name=label.title(),
+                university_name=None,
+                detail_url=absolute_url,
+                outbound_chapter_url_candidate=absolute_url,
+                confidence=0.78,
+                provenance="map_config",
+            )
+        )
+    return stubs
+
+
 def _extract_wix_chapter_link_stubs(html: str, source_url: str) -> list[ChapterStub]:
     if not _looks_like_wix_page(html, source_url):
         return []
@@ -348,12 +409,18 @@ def _extract_chapter_roll_text_stubs(html: str, source_url: str) -> list[Chapter
         text = " ".join(node.get_text(" ", strip=True).split())
         if len(text) < 20 or " CHAPTER " not in text.upper():
             continue
+        if len(text) > 180:
+            continue
         normalized = text.upper()
+        if any(marker.upper() in normalized for marker in _CHAPTER_ROLL_BLOCKED_MARKERS):
+            continue
         match = pattern.search(normalized)
         if not match:
             continue
         chapter_name = " ".join(match.group("chapter").title().split())
         school_name = " ".join(match.group("school").title().split())
+        if len(chapter_name) > 80 or len(school_name) > 120:
+            continue
         key = (chapter_name.lower(), school_name.lower())
         if key in seen:
             continue
@@ -369,6 +436,7 @@ def _extract_chapter_roll_text_stubs(html: str, source_url: str) -> list[Chapter
             )
         )
     return stubs
+
 
 
 def _extract_university_name(context: str) -> str | None:
@@ -428,3 +496,6 @@ def _should_skip_shared_listing_contact_extraction(url: str, stub: ChapterStub) 
     parsed = urlparse(url)
     path = (parsed.path or "").lower().rstrip("/")
     return path.endswith("/join-a-chapter") or path.endswith("/join-a-chapter/") or path.endswith("/chapter-roll")
+
+
+

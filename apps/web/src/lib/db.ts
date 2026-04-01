@@ -5,8 +5,6 @@ import { Pool } from "pg";
 declare global {
   // eslint-disable-next-line no-var
   var __fratfinderPool: Pool | undefined;
-  // eslint-disable-next-line no-var
-  var __fratfinderEnvLoaded: boolean | undefined;
 }
 
 function loadEnvFile(filePath: string): void {
@@ -43,29 +41,42 @@ function loadEnvFile(filePath: string): void {
   }
 }
 
-function ensureDatabaseUrl(): string {
-  if (process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL;
-  }
+function loadCandidateEnvFiles(): void {
+  const visited = new Set<string>();
+  const candidateDirs = [
+    process.cwd(),
+    path.resolve(process.cwd(), ".."),
+    path.resolve(process.cwd(), "../.."),
+    path.resolve(process.cwd(), "../../.."),
+    path.resolve(__dirname, ".."),
+    path.resolve(__dirname, "../.."),
+    path.resolve(__dirname, "../../.."),
+    path.resolve(__dirname, "../../../..")
+  ];
 
-  if (!global.__fratfinderEnvLoaded) {
-    const projectDir = process.cwd();
-    const repoRoot = path.resolve(projectDir, "../..");
-
-    for (const baseDir of [projectDir, repoRoot]) {
-      loadEnvFile(path.join(baseDir, ".env.local"));
-      loadEnvFile(path.join(baseDir, ".env"));
+  for (const baseDir of candidateDirs) {
+    if (visited.has(baseDir)) {
+      continue;
     }
+    visited.add(baseDir);
+    loadEnvFile(path.join(baseDir, ".env.local"));
+    loadEnvFile(path.join(baseDir, ".env"));
+    if (process.env.DATABASE_URL) {
+      return;
+    }
+  }
+}
 
-    global.__fratfinderEnvLoaded = true;
+function ensureDatabaseUrl(): string {
+  if (!process.env.DATABASE_URL) {
+    loadCandidateEnvFiles();
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
+  if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is not set");
   }
 
-  return databaseUrl;
+  return process.env.DATABASE_URL;
 }
 
 export function getDbPool(): Pool {

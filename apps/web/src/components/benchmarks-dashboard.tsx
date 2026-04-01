@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { MetricCard } from "@/components/metric-card";
+import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
 import type { BenchmarkFieldName, BenchmarkRunConfig, BenchmarkRunListItem } from "@/lib/types";
 
@@ -85,7 +86,13 @@ async function fetchBenchmarks(): Promise<BenchmarkRunListItem[]> {
   return sortBenchmarks(payload.data);
 }
 
-export function BenchmarksDashboard({ initialBenchmarks }: { initialBenchmarks: BenchmarkRunListItem[] }) {
+export function BenchmarksDashboard({
+  initialBenchmarks,
+  activeCampaignCount = 0
+}: {
+  initialBenchmarks: BenchmarkRunListItem[];
+  activeCampaignCount?: number;
+}) {
   const [benchmarks, setBenchmarks] = useState<BenchmarkRunListItem[]>(sortBenchmarks(initialBenchmarks));
   const [selectedId, setSelectedId] = useState<string | null>(initialBenchmarks[0]?.id ?? null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -192,17 +199,44 @@ export function BenchmarksDashboard({ initialBenchmarks }: { initialBenchmarks: 
   }
 
   const summary = selectedBenchmark?.summary;
+  const bestThroughput = useMemo(() => benchmarks.reduce((best, item) => Math.max(best, item.summary?.jobsPerMinute ?? 0), 0), [benchmarks]);
+  const bestQueueDelta = useMemo(() => benchmarks.reduce((best, item) => Math.min(best, item.summary?.queueDepthDelta ?? 0, best), 0), [benchmarks]);
 
   return (
     <div className="sectionStack">
-      <section className="panel">
+      <section className="panel heroPanel">
         <h2>Benchmark Snapshot</h2>
         <p className="sectionDescription">Run repeatable queue benchmarks, compare throughput over time, and inspect per-cycle behavior for each run.</p>
-        <div className="metrics">
-          <MetricCard label="Saved Benchmarks" value={benchmarks.length} />
-          <MetricCard label="Running / Queued" value={runningCount} />
-          <MetricCard label="Latest Throughput" value={summary ? `${formatNumber(summary.jobsPerMinute, 1)} jobs/min` : "n/a"} />
-          <MetricCard label="Latest Queue Delta" value={summary ? formatNumber(summary.queueDepthDelta) : "n/a"} />
+        <div className="heroGrid">
+          <div>
+            <div className="metrics">
+              <MetricCard label="Saved Benchmarks" value={benchmarks.length} />
+              <MetricCard label="Running / Queued" value={runningCount} />
+              <MetricCard label="Active Campaigns" value={activeCampaignCount} />
+              <MetricCard label="Latest Throughput" value={summary ? `${formatNumber(summary.jobsPerMinute, 1)} jobs/min` : "n/a"} />
+              <MetricCard label="Best Throughput" value={`${formatNumber(bestThroughput, 1)} jobs/min`} />
+              <MetricCard label="Best Queue Delta" value={formatNumber(bestQueueDelta)} />
+            </div>
+          </div>
+          <div className="heroAsideCard">
+            <p className="eyebrow">Benchmark Use</p>
+            <div className="heroChecklistItem">
+              <strong>Throughput</strong>
+              <span>Measure jobs/min and compare field-specific saturation.</span>
+            </div>
+            <div className="heroChecklistItem">
+              <strong>Queue Delta</strong>
+              <span>Negative deltas mean the benchmark is actually burning backlog down.</span>
+            </div>
+            <div className="heroChecklistItem">
+              <strong>Regression Detection</strong>
+              <span>Watch for requeue spikes and cycle-duration inflation before rollout.</span>
+            </div>
+            <div className="heroChecklistItem">
+              <strong>Campaign Validation</strong>
+              <span>Need broader proof? Use <a href="/campaigns">Campaigns</a> for multi-fraternity long-run tests.</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -369,6 +403,21 @@ export function BenchmarksDashboard({ initialBenchmarks }: { initialBenchmarks: 
                 </div>
               </div>
 
+              <div className="progressGrid">
+                <ProgressMeter
+                  label="Run Completion"
+                  value={selectedBenchmark.samples.length}
+                  total={selectedBenchmark.config.cycles}
+                  hint={`${selectedBenchmark.samples.length} cycles captured`}
+                />
+                <ProgressMeter
+                  label="Queue Burn-down"
+                  value={Math.max(0, Math.abs(summary?.queueDepthDelta ?? 0))}
+                  total={Math.max(1, Math.abs((summary?.queueDepthStart ?? 0) - (summary?.queueDepthEnd ?? 0)) || 1)}
+                  hint={`delta ${formatNumber(summary?.queueDepthDelta)}`}
+                />
+              </div>
+
               <div className="tableWrap">
                 <table>
                   <thead>
@@ -431,6 +480,23 @@ export function BenchmarksDashboard({ initialBenchmarks }: { initialBenchmarks: 
                   </table>
                 </div>
               )}
+
+              {selectedBenchmark.samples.length ? (
+                <div className="cycleSparkline">
+                  {selectedBenchmark.samples.map((sample) => {
+                    const peak = Math.max(...selectedBenchmark.samples.map((item) => item.processed + item.failedTerminal + item.requeued), 1);
+                    const total = sample.processed + sample.failedTerminal + sample.requeued;
+                    return (
+                      <div key={`${selectedBenchmark.id}-bar-${sample.cycle}`} className="cycleSparklineBarWrap">
+                        <span className="cycleSparklineLabel">C{sample.cycle}</span>
+                        <div className="cycleSparklineTrack">
+                          <div className="cycleSparklineBar" style={{ height: `${Math.max(14, (total / peak) * 100)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
 
               {selectedBenchmark.lastError ? <p className="benchmarkError">{selectedBenchmark.lastError}</p> : null}
             </>

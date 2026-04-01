@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
+import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
 import type { FraternityCrawlRequest, FraternityCrawlRequestStatus } from "@/lib/types";
 
@@ -48,6 +49,10 @@ function formatConfidence(value: unknown): string {
     return "n/a";
   }
   return numeric.toFixed(2);
+}
+
+function stageLabel(stage: string): string {
+  return stage.replaceAll("_", " ");
 }
 
 async function fetchRequests(): Promise<FraternityCrawlRequest[]> {
@@ -220,48 +225,77 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
   }
 
   const activeCount = requests.filter((item) => item.status === "queued" || item.status === "running").length;
+  const selectedFields = selectedRequest?.progress.fields;
+  const selectedTotals = selectedRequest?.progress.totals ?? { queued: 0, running: 0, done: 0, failed: 0 };
+  const selectedSourceQuality = selectedRequest?.progress.analytics?.sourceQuality;
+  const selectedEnrichmentAnalytics = selectedRequest?.progress.analytics?.enrichment;
+  const totalFieldJobs =
+    (selectedTotals.queued ?? 0) + (selectedTotals.running ?? 0) + (selectedTotals.done ?? 0) + (selectedTotals.failed ?? 0);
 
   return (
     <div className="sectionStack">
-      <section className="panel">
+      <section className="panel heroPanel">
         <h2>Suggest Fraternity Crawl</h2>
         <p className="sectionDescription">
           Enter a fraternity name to discover its national source, queue staged crawling, and track website/email/Instagram enrichment progress.
         </p>
-
-        <form onSubmit={submitRequest}>
-          <div className="benchmarkFormGrid">
-            <div className="fieldStack">
-              <label htmlFor="fraternity-name">Fraternity Name</label>
-              <input
-                id="fraternity-name"
-                placeholder="Lambda Chi Alpha"
-                value={fraternityName}
-                onChange={(event) => setFraternityName(event.target.value)}
-                required
-              />
+        <div className="heroGrid">
+          <div className="heroCopy">
+            <div className="heroBulletList">
+              <span className="heroBadge">Registry-first source resolution</span>
+              <span className="heroBadge">Staged crawl + enrichment tracking</span>
+              <span className="heroBadge">Expedite, confirm, and review from one page</span>
             </div>
+            <form onSubmit={submitRequest}>
+              <div className="benchmarkFormGrid">
+                <div className="fieldStack">
+                  <label htmlFor="fraternity-name">Fraternity Name</label>
+                  <input
+                    id="fraternity-name"
+                    placeholder="Lambda Chi Alpha"
+                    value={fraternityName}
+                    onChange={(event) => setFraternityName(event.target.value)}
+                    required
+                  />
+                </div>
 
-            <div className="fieldStack">
-              <label htmlFor="scheduled-for">Scheduled Start</label>
-              <input
-                id="scheduled-for"
-                type="datetime-local"
-                value={scheduledFor}
-                onChange={(event) => setScheduledFor(event.target.value)}
-              />
+                <div className="fieldStack">
+                  <label htmlFor="scheduled-for">Scheduled Start</label>
+                  <input
+                    id="scheduled-for"
+                    type="datetime-local"
+                    value={scheduledFor}
+                    onChange={(event) => setScheduledFor(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="buttonRow">
+                <button type="submit" className="buttonPrimaryAuto" disabled={isSubmitting}>
+                  {isSubmitting ? "Submitting..." : "Create Request"}
+                </button>
+                <button type="button" className="buttonSecondary" onClick={() => void refresh()} disabled={isRefreshing}>
+                  {isRefreshing ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+            </form>
+          </div>
+          <div className="heroAsideCard">
+            <p className="eyebrow">Launch Checklist</p>
+            <div className="heroChecklistItem">
+              <strong>1. Discover</strong>
+              <span>Find the best national source and retain a resolution trace.</span>
+            </div>
+            <div className="heroChecklistItem">
+              <strong>2. Confirm</strong>
+              <span>Override the source when confidence is medium or low.</span>
+            </div>
+            <div className="heroChecklistItem">
+              <strong>3. Enrich</strong>
+              <span>Track website, email, and Instagram coverage field by field.</span>
             </div>
           </div>
-
-          <div className="buttonRow">
-            <button type="submit" className="buttonPrimaryAuto" disabled={isSubmitting}>
-              {isSubmitting ? "Submitting..." : "Create Request"}
-            </button>
-            <button type="button" className="buttonSecondary" onClick={() => void refresh()} disabled={isRefreshing}>
-              {isRefreshing ? "Refreshing..." : "Refresh"}
-            </button>
-          </div>
-        </form>
+        </div>
 
         {errorMessage ? <p className="benchmarkError">{errorMessage}</p> : null}
       </section>
@@ -280,6 +314,10 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
           <div className="metricCard">
             <p className="metricLabel">Latest</p>
             <p className="metricValue">{requests[0]?.fraternityName ?? "n/a"}</p>
+          </div>
+          <div className="metricCard">
+            <p className="metricLabel">Awaiting Confirmation</p>
+            <p className="metricValue">{requests.filter((item) => item.stage === "awaiting_confirmation").length}</p>
           </div>
         </div>
       </section>
@@ -334,6 +372,20 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
                 <StatusPill status={selectedRequest.status} />
               </div>
 
+              <div className="stageRail">
+                {["discovery", "awaiting_confirmation", "crawl_run", "enrichment", "completed"].map((stage) => {
+                  const currentIndex = ["discovery", "awaiting_confirmation", "crawl_run", "enrichment", "completed", "failed"].indexOf(selectedRequest.stage);
+                  const stepIndex = ["discovery", "awaiting_confirmation", "crawl_run", "enrichment", "completed"].indexOf(stage);
+                  const isReached = currentIndex >= stepIndex;
+                  return (
+                    <div key={stage} className={`stageRailStep${selectedRequest.stage === stage ? " active" : ""}${isReached ? " reached" : ""}`}>
+                      <span className="stageRailDot" />
+                      <span>{stageLabel(stage)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
               <div className="benchmarkMetaGrid">
                 <div className="benchmarkMetaCard">
                   <p className="benchmarkMetaLabel">Stage</p>
@@ -375,7 +427,55 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
                   <p className="benchmarkMetaLabel">Field Jobs Created</p>
                   <p className="benchmarkMetaValue">{selectedRequest.progress.crawlRun?.fieldJobsCreated ?? 0}</p>
                 </div>
+                <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Source Quality</p>
+                  <p className="benchmarkMetaValue">
+                    {selectedSourceQuality ? `${selectedSourceQuality.score.toFixed(2)}${selectedSourceQuality.isWeak ? " weak" : " strong"}` : "n/a"}
+                  </p>
+                </div>
+                <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Recovery Attempts</p>
+                  <p className="benchmarkMetaValue">{selectedSourceQuality?.recoveryAttempts ?? 0}</p>
+                </div>
               </div>
+
+              {selectedSourceQuality ? (
+                <>
+                  <h3>Source Diagnostics</h3>
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Signal</th>
+                          <th>Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>Quality Score</td>
+                          <td>{selectedSourceQuality.score.toFixed(2)}</td>
+                        </tr>
+                        <tr>
+                          <td>Weak Source</td>
+                          <td>{selectedSourceQuality.isWeak ? "yes" : "no"}</td>
+                        </tr>
+                        <tr>
+                          <td>Reasons</td>
+                          <td>{selectedSourceQuality.reasons.length ? selectedSourceQuality.reasons.join(", ") : "none"}</td>
+                        </tr>
+                        <tr>
+                          <td>Recovered From</td>
+                          <td>{selectedSourceQuality.recoveredFromUrl ?? "n/a"}</td>
+                        </tr>
+                        <tr>
+                          <td>Recovered To</td>
+                          <td>{selectedSourceQuality.recoveredToUrl ?? "n/a"}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
 
               <h3>Discovery Review</h3>
               <p className="muted">
@@ -493,6 +593,77 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
               </div>
 
               <h3>Field Job Progress</h3>
+              {selectedEnrichmentAnalytics ? (
+                <div className="metrics">
+                  <div className="metricCard">
+                    <p className="metricLabel">Adaptive Cycles</p>
+                    <p className="metricValue">
+                      {selectedEnrichmentAnalytics.cyclesCompleted} / {selectedEnrichmentAnalytics.adaptiveMaxEnrichmentCycles}
+                    </p>
+                  </div>
+                  <div className="metricCard">
+                    <p className="metricLabel">Adaptive Workers</p>
+                    <p className="metricValue">{selectedEnrichmentAnalytics.effectiveFieldJobWorkers}</p>
+                  </div>
+                  <div className="metricCard">
+                    <p className="metricLabel">Adaptive Limit</p>
+                    <p className="metricValue">{selectedEnrichmentAnalytics.effectiveFieldJobLimitPerCycle}</p>
+                  </div>
+                  <div className="metricCard">
+                    <p className="metricLabel">Low-Progress Cycles</p>
+                    <p className="metricValue">{selectedEnrichmentAnalytics.lowProgressCycles}</p>
+                  </div>
+                  <div className="metricCard">
+                    <p className="metricLabel">Degraded Cycles</p>
+                    <p className="metricValue">{selectedEnrichmentAnalytics.degradedCycleCount}</p>
+                  </div>
+                  <div className="metricCard">
+                    <p className="metricLabel">Budget Strategy</p>
+                    <p className="metricValue">{selectedEnrichmentAnalytics.budgetStrategy}</p>
+                  </div>
+                </div>
+              ) : null}
+              <div className="progressGrid">
+                <ProgressMeter
+                  label="Overall Completion"
+                  value={(selectedTotals.done ?? 0) + (selectedTotals.failed ?? 0)}
+                  total={totalFieldJobs}
+                  hint={`${selectedTotals.queued ?? 0} queued / ${selectedTotals.running ?? 0} running`}
+                />
+                <ProgressMeter
+                  label="Website Field"
+                  value={(selectedFields?.find_website?.done ?? 0) + (selectedFields?.find_website?.failed ?? 0)}
+                  total={
+                    (selectedFields?.find_website?.queued ?? 0) +
+                    (selectedFields?.find_website?.running ?? 0) +
+                    (selectedFields?.find_website?.done ?? 0) +
+                    (selectedFields?.find_website?.failed ?? 0)
+                  }
+                  hint={`${selectedFields?.find_website?.queued ?? 0} queued`}
+                />
+                <ProgressMeter
+                  label="Email Field"
+                  value={(selectedFields?.find_email?.done ?? 0) + (selectedFields?.find_email?.failed ?? 0)}
+                  total={
+                    (selectedFields?.find_email?.queued ?? 0) +
+                    (selectedFields?.find_email?.running ?? 0) +
+                    (selectedFields?.find_email?.done ?? 0) +
+                    (selectedFields?.find_email?.failed ?? 0)
+                  }
+                  hint={`${selectedFields?.find_email?.queued ?? 0} queued`}
+                />
+                <ProgressMeter
+                  label="Instagram Field"
+                  value={(selectedFields?.find_instagram?.done ?? 0) + (selectedFields?.find_instagram?.failed ?? 0)}
+                  total={
+                    (selectedFields?.find_instagram?.queued ?? 0) +
+                    (selectedFields?.find_instagram?.running ?? 0) +
+                    (selectedFields?.find_instagram?.done ?? 0) +
+                    (selectedFields?.find_instagram?.failed ?? 0)
+                  }
+                  hint={`${selectedFields?.find_instagram?.queued ?? 0} queued`}
+                />
+              </div>
               <div className="tableWrap">
                 <table>
                   <thead>

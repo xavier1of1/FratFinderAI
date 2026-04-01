@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     crawler_http_timeout_seconds: float = Field(default=20.0, alias="CRAWLER_HTTP_TIMEOUT_SECONDS")
     crawler_http_verify_ssl: bool = Field(default=True, alias="CRAWLER_HTTP_VERIFY_SSL")
     crawler_http_user_agent: str = Field(
-        default="FratFinderAI/1.0 (+https://example.com/fratfinder)",
+        default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         alias="CRAWLER_HTTP_USER_AGENT"
     )
     crawler_max_retries: int = Field(default=3, alias="CRAWLER_MAX_RETRIES")
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     crawler_search_enabled: bool = Field(default=True, alias="CRAWLER_SEARCH_ENABLED")
     crawler_search_provider: str = Field(default="auto", alias="CRAWLER_SEARCH_PROVIDER")
     crawler_search_provider_order_free: str = Field(
-        default="searxng_json,tavily_api,serper_api,duckduckgo_html,bing_html,brave_html",
+        default="searxng_json,serper_api,tavily_api,duckduckgo_html,bing_html,brave_html",
         alias="CRAWLER_SEARCH_PROVIDER_ORDER_FREE",
     )
     crawler_search_max_results: int = Field(default=5, alias="CRAWLER_SEARCH_MAX_RESULTS")

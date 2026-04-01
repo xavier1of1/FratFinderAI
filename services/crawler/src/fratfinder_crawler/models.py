@@ -72,6 +72,8 @@ class ExistingSourceCandidate:
     source_slug: str
     list_url: str
     base_url: str
+    source_type: str
+    parser_key: str
     active: bool
     last_run_status: str | None
     last_success_at: str | None
@@ -189,6 +191,8 @@ class ExtractionPlan:
     fallback_strategies: list[str]
     max_attempts: int = 2
     llm_allowed: bool = True
+    source_hint_applied: str | None = None
+    strategy_overrides: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

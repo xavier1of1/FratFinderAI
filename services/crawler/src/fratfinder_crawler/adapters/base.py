@@ -13,6 +13,7 @@ class ParserAdapter(Protocol):
         *,
         api_url: str | None = None,
         http_client: Any | None = None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> list[ChapterStub]:
         ...
 
@@ -23,5 +24,6 @@ class ParserAdapter(Protocol):
         *,
         api_url: str | None = None,
         http_client: Any | None = None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> list[ExtractedChapter]:
         ...

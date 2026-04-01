@@ -269,3 +269,46 @@ def test_full_graph_executes_end_to_end_against_existing_sample_fixture():
 
 
 
+
+
+def test_strategy_selector_respects_source_metadata_override():
+    page_analysis = PageAnalysis(
+        title="Chapters",
+        headings=["Chapters"],
+        table_count=0,
+        repeated_block_count=0,
+        link_count=3,
+        has_json_ld=False,
+        has_script_json=False,
+        has_map_widget=False,
+        has_pagination=False,
+        probable_page_role="unknown",
+        text_sample="chapter archive",
+    )
+    classification = SourceClassification(
+        page_type="unsupported_or_unclear",
+        confidence=0.2,
+        recommended_strategy="review",
+        needs_follow_links=False,
+        possible_data_locations=[],
+        classified_by="heuristic",
+    )
+    embedded_data = EmbeddedDataResult(found=False, data_type=None, raw_data=None, api_url=None)
+
+    plan = select_extraction_plan(
+        page_analysis,
+        classification,
+        embedded_data,
+        llm_enabled=False,
+        source_metadata={
+            "extractionHints": {
+                "primaryStrategy": "repeated_block",
+                "fallbackStrategies": ["table", "review"],
+            }
+        },
+    )
+
+    assert plan.primary_strategy == "repeated_block"
+    assert plan.fallback_strategies == ["table", "review"]
+    assert plan.source_hint_applied == "primaryStrategy"
+

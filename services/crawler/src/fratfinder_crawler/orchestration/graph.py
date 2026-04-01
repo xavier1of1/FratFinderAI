@@ -220,6 +220,7 @@ class CrawlOrchestrator:
             state["page_analysis"],
             state["classification"],
             state["embedded_data"],
+            state["source"].metadata,
         )
         log_event(
             LOGGER,
@@ -244,6 +245,7 @@ class CrawlOrchestrator:
             mode=state.get("chapter_index_mode", "mixed"),
             embedded_data=state["embedded_data"],
             http_client=self._http,
+            source_metadata=state["source"].metadata,
         )
         log_event(
             LOGGER,
@@ -299,6 +301,7 @@ class CrawlOrchestrator:
             classification=state["classification"],
             embedded_data=state["embedded_data"],
             llm_enabled=settings.crawler_llm_enabled,
+            source_metadata=state["source"].metadata,
         )
         strategy_attempts = state.get("strategy_attempts", 0) + 1
         log_event(
@@ -310,6 +313,7 @@ class CrawlOrchestrator:
             fallback_strategies=extraction_plan.fallback_strategies,
             llm_allowed=extraction_plan.llm_allowed,
             llm_calls_used=state.get("llm_calls_used", 0),
+            source_hint_applied=extraction_plan.source_hint_applied,
         )
         return {"extraction_plan": extraction_plan, "strategy_attempts": strategy_attempts}
 
@@ -541,6 +545,7 @@ class CrawlOrchestrator:
                     source.list_url,
                     api_url=state["embedded_data"].api_url if state.get("embedded_data") else None,
                     http_client=self._http,
+                    source_metadata=source.metadata,
                 )
                 if candidate_records:
                     extracted = candidate_records
@@ -862,9 +867,14 @@ class CrawlOrchestrator:
     def _build_stub_records(self, state: CrawlGraphState) -> list:
         source = state["source"]
         contact_hints = state.get("chapter_contact_hints", {})
+        followed_page_records = self._build_follow_page_records(state)
         records: list[ExtractedChapter] = []
         for stub in state.get("chapter_stubs", []):
             key = _stub_key(stub.chapter_name, stub.university_name)
+            nested_records = followed_page_records.get(key, [])
+            if nested_records:
+                records.extend(nested_records)
+                continue
             hints = contact_hints.get(key, {})
             source_url = sanitize_as_website(stub.detail_url or stub.outbound_chapter_url_candidate, base_url=source.list_url) or source.list_url
             outbound = stub.outbound_chapter_url_candidate or ""
@@ -891,7 +901,80 @@ class CrawlOrchestrator:
                     source_confidence=stub.confidence,
                 )
             )
-        return records
+        return self._dedupe_extracted_records(records)
+
+    def _build_follow_page_records(self, state: CrawlGraphState) -> dict[str, list[ExtractedChapter]]:
+        source = state["source"]
+        adapter = self._registry.get("repeated_block")
+        if adapter is None:
+            return {}
+
+        records_by_stub: dict[str, list[ExtractedChapter]] = {}
+        for stub in state.get("chapter_stubs", []):
+            key = _stub_key(stub.chapter_name, stub.university_name)
+            followed_pages = state.get("chapter_follow_pages", {}).get(key, [])
+            if not followed_pages:
+                continue
+
+            nested_records: list[ExtractedChapter] = []
+            for page_url, html in followed_pages:
+                try:
+                    parsed_records = adapter.parse(
+                        html,
+                        page_url,
+                        http_client=self._http,
+                        source_metadata=source.metadata,
+                    )
+                except Exception:
+                    parsed_records = []
+                nested_records.extend(parsed_records)
+
+            if nested_records:
+                records_by_stub[key] = self._dedupe_extracted_records(nested_records)
+
+        return records_by_stub
+
+    def _dedupe_extracted_records(self, records: list[ExtractedChapter]) -> list[ExtractedChapter]:
+        deduped: dict[tuple[str, str], ExtractedChapter] = {}
+        for record in records:
+            key = (
+                (record.name or "").strip().lower(),
+                (record.university_name or "").strip().lower(),
+            )
+            current = deduped.get(key)
+            record_tuple = (
+                getattr(record, "source_confidence", 0.0),
+                sum(
+                    1
+                    for value in (
+                        record.university_name,
+                        record.city,
+                        record.state,
+                        record.website_url,
+                        record.instagram_url,
+                        record.contact_email,
+                    )
+                    if value
+                ),
+            )
+            current_tuple = (
+                getattr(current, "source_confidence", 0.0),
+                sum(
+                    1
+                    for value in (
+                        current.university_name,
+                        current.city,
+                        current.state,
+                        current.website_url,
+                        current.instagram_url,
+                        current.contact_email,
+                    )
+                    if value
+                ),
+            ) if current is not None else (-1.0, -1)
+            if current is None or record_tuple > current_tuple:
+                deduped[key] = record
+        return list(deduped.values())
 
     def _merge_extracted_records(self, extracted: list, fallback_records: list) -> list:
         if not fallback_records:
@@ -937,3 +1020,11 @@ def _stub_key(chapter_name: str, university_name: str | None) -> str:
     chapter = re.sub(r"[^a-z0-9]+", "-", chapter_name.lower()).strip("-")
     school = re.sub(r"[^a-z0-9]+", "-", (university_name or "").lower()).strip("-")
     return f"{chapter}:{school}"
+
+
+
+
+
+
+
+

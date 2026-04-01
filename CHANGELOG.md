@@ -2,6 +2,206 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.9] - 2026-04-01
+
+### Added
+- Added `infra/supabase/migrations/0011_targeted_source_backfills_and_http_hardening.sql` and `0012_alpha_tau_omega_map_backfill.sql` to preserve the latest benchmark-response source recoveries in database state.
+- Added new crawler regressions covering:
+  - Chi Psi-style header-aware table extraction
+  - Alpha Tau Omega Mapplic `data-mapdata` extraction
+  - curated ATO source-hint preference over a generic official root URL
+- Added `docs/reports/BENCHMARK_RESPONSE_ITERATION_2026-04-01.md` follow-up coverage documenting the live targeted validation tranche for Sigma Chi, KDR, DKE, Chi Psi, and ATO.
+
+### Changed
+- Discovery now treats a generic same-host root as weak when a curated deeper official chapter-directory path is available for that fraternity.
+- The script-json adapter now parses inline Mapplic map payloads, allowing official chapter-map pages to become source-native chapter inventories.
+- The HTTP client now uses a safer browser-like request posture by default, reducing avoidable 403s on official fraternity sites.
+- The directory adapter now uses header-aware table extraction for live chapter tables that label columns with `ALPHA`, `SYMBOL`, `COLLEGE`, and similar variants.
+- The locator adapter now splits combined KML chapter-school names into separate chapter and university fields.
+
+### Fixed
+- Fixed Sigma Chi chapter-roll extraction producing bogus navigation-derived stubs from the official chapters page.
+- Fixed Delta Kappa Epsilon failing at the transport layer on its official chapters feed.
+- Fixed Chi Psi using the wrong official source and misreading the live table column layout.
+- Fixed Alpha Tau Omega remaining in `unsupported_or_unclear_source` despite having recoverable official chapter data embedded in the map page.
+
+## [0.10.8] - 2026-04-01
+
+### Added
+- Added metadata-driven extraction overrides in the crawler so `sources.metadata.extractionHints` can now steer:
+  - chapter index mode detection
+  - extraction strategy selection
+  - stub strategy ordering
+  - directory selector overrides
+- Added `infra/supabase/migrations/0010_benchmark_source_hint_backfills.sql` with conservative source-record backfills for the benchmark response pass.
+- Added new crawler regressions covering:
+  - metadata-forced extraction strategy selection
+  - Bootstrap-style chapter card parsing and chapter/university title splitting
+
+### Changed
+- The directory adapter now understands Bootstrap-style card archives such as Kappa Delta Rho's chapter grid instead of relying only on `.chapter-card` and table patterns.
+- Extraction orchestration now passes source metadata all the way through mode detection, strategy choice, and adapter execution, making source-specific parser hints operational instead of passive.
+- Source-hint backfills now promote Sigma Chi toward the known chapter-directory URL and add KDR card-selector hints directly in migration state.
+
+### Fixed
+- Fixed source-native extraction blind spots where valid chapter-card layouts were present but missed by the generic directory parser.
+- Fixed the gap between benchmark learnings and runtime behavior by making source metadata affect real extraction plans during crawl execution.
+- Fixed the KDR-style combined title pattern (`Beta - Cornell University`) so chapter names and schools are separated cleanly during extraction.
+## [0.10.7] - 2026-04-01
+
+### Added
+- Added `apps/web/src/lib/source-selection.ts` to score discovered source URLs, flag weak intake candidates, and upgrade discovery results toward stronger chapter-directory sources before request creation.
+- Added `apps/web/src/lib/source-selection.test.ts` covering weak-source detection and post-discovery source upgrades for benchmark-problem fraternities.
+- Added source/enrichment analytics to fraternity request progress so the Intake dashboard can now show:
+  - source quality score and weak-source reasons
+  - recovery attempts and recovered source URLs
+  - adaptive enrichment workers/limits/cycle strategy
+  - low-progress and degraded cycle counts
+- Added new discovery regressions in `services/crawler/src/fratfinder_crawler/tests/test_discovery.py` for:
+  - weak existing-source rejection
+  - curated hint preference over noisy alumni search results
+  - curated hint preference over same-host non-directory pages
+
+### Changed
+- Campaign request creation now re-runs discovery when a preferred source looks weak and upgrades to a materially better discovered source before launching the crawl request.
+- Fraternity request execution now adapts enrichment workers, per-cycle limits, and max cycle budgets using live queue pressure and chapter volume instead of fixed campaign-era defaults.
+- Zero-chapter crawl requests can now attempt a one-time source recovery by rediscovering and swapping to a better national source before failing the request.
+- Intake request details now surface benchmark-response diagnostics directly in the website so operators can see whether a weak source or exhausted budget is driving poor results.
+- Discovery host-hint matching is now domain-aware instead of substring-based, preventing false trust matches like `sandiegosigmachi.org` being treated as the canonical `sigmachi.org`.
+
+### Fixed
+- Fixed the benchmark-dominant Sigma Chi source-selection failure where both verified and existing sources pointed to a member/alumni portal and search could still fall into alumni or generic informational pages.
+- Fixed discovery fallback leakage where weak existing configured sources could bypass the new verified-source validation logic and keep the crawler pinned to bad nationals URLs.
+- Fixed source discovery for known curated fraternities so chapter-directory hints can override noisy same-host informational pages when those pages are not actually directory-like.
+- Fixed long-run request execution to apply search preflight during enrichment cycles, so campaign-era degraded-provider protections are used by real crawl requests instead of only by standalone field-job runs.
+
+## [0.10.6] - 2026-04-01
+
+### Added
+- Added `GET /api/health` for lightweight runtime visibility into campaign scheduling state during long operator sessions.
+- Added campaign runtime attachment signals to campaign API responses and the Campaigns dashboard so operators can see when a DB-`running` campaign has lost its in-memory runner and needs reattachment.
+- Added `docs/reports/CAMPAIGN_LIVE_RUN_2026-04-01.md` documenting the real 20-fraternity campaign, the live bottlenecks observed, and the fixes applied during execution.
+
+### Changed
+- Campaign APIs now auto-reattach detached `running` campaigns during normal dashboard polling, making long runs more resilient to Next.js dev reloads.
+- Free-provider search order now prefers `serper_api` ahead of `tavily_api` after live campaign evidence showed Serper succeeding consistently while Tavily was consuming failed attempts.
+- Campaign duration and throughput calculations now anchor to the first true `campaign_started` event, preventing resume/reattach actions from inflating jobs-per-minute analytics.
+
+### Fixed
+- Fixed long-running campaign detachment in local dev by reattaching active campaigns automatically instead of requiring manual operator resumes after every reload.
+- Fixed enrichment-cycle timeout handling so productive long field-job passes can continue instead of hard-failing a fraternity request the moment a single cycle exceeds the old timeout ceiling.
+- Fixed crawl-run timeout handling so source ingests that already discovered chapters or created field jobs can continue into enrichment instead of being discarded as total failures.
+- Fixed runtime config drift between source defaults and local env by updating the live provider order setting to match the new measured fallback priority.
+- Fixed the Chapters state map showing zero dots by using normalized dataset-wide state summaries instead of relying on the latest 500 loaded chapter rows to contain clean state codes.
+
+## [0.10.5] - 2026-04-01
+
+### Added
+- Added `docs/plans/PRODUCTION_READINESS_PROGRAM_2026-04-01.md` capturing the full website-recovery + campaign-benchmark roadmap for future implementation guidance.
+- Added a new campaign benchmark product surface:
+  - database tables for `campaign_runs`, `campaign_run_items`, and `campaign_run_events`
+  - campaign orchestration runner with resumable admission, checkpoints, and safe concurrency tuning hooks
+  - API routes:
+    - `GET/POST /api/campaign-runs`
+    - `GET /api/campaign-runs/[id]`
+    - `POST /api/campaign-runs/[id]/resume`
+    - `POST /api/campaign-runs/[id]/cancel`
+  - new `/campaigns` dashboard page with launch controls, live status, item scorecards, provider-health visibility, and event timeline
+- Added `docs/reports/CAMPAIGN_FOUNDATION_VALIDATION_2026-04-01.md` documenting the smoke validations and the fixes discovered during rollout.
+- Added baseline-aware campaign scorecards so control fraternities can measure delta from pre-existing coverage instead of inflating campaign success with historical data.
+
+### Changed
+- Local web development now starts through a guarded dev wrapper that clears stale `.next` artifacts before launching Next.js, reducing the route/static-asset corruption pattern that was causing dashboard 404s.
+- Next.js dev webpack caching is disabled for local development to reduce stale route bundle lookups during reload cycles on Windows.
+- Benchmarks now acknowledge active long-run campaigns and link operators toward the Campaigns workspace for broader validation work.
+- Overview navigation and workspace structure now include the new Campaigns surface directly.
+
+### Fixed
+- Fixed the current website 404/runtime instability caused by stale `.next` dev artifacts and route-bundle resolution failures.
+- Fixed campaign selection SQL and startup error handling so failed launches now persist an explicit failed state instead of stalling in `running`.
+- Fixed campaign scorecards for control fraternities so pre-existing chapter coverage no longer appears as campaign-earned success.
+
+## [0.10.4] - 2026-04-01
+
+### Added
+- Added chapter-operator controls directly to the Chapters dashboard:
+  - row selection and filtered select-all
+  - bulk rerun requests for `find_website`, `find_email`, and `find_instagram`
+  - bulk delete for selected chapter records
+  - single-chapter edit form for core text/contact fields
+- Added new chapter operator API routes:
+  - `POST /api/chapters/actions`
+  - `PATCH /api/chapters/[id]`
+- Added source provenance visibility to the chapters table via a new `sourceSlug` field in chapter list responses.
+
+### Changed
+- Chapters now use a more operator-focused workflow with a dedicated action panel and single-edit mode alongside the existing filters and map/table browsing views.
+- Chapter repository queries now return latest source provenance for each chapter to support safer reruns and clearer operator context.
+- Web database configuration loading is more resilient during Next.js reloads, preventing intermittent `DATABASE_URL is not set` failures in local development.
+
+### Fixed
+- Fixed the new chapter edit API SQL path so single-record saves no longer fail on invalid `UPDATE ... FROM` references.
+- Fixed nullable contact-field updates by making Postgres parameter typing explicit for chapter edits.
+- Fixed the Chapters page instability caused by one-shot env loading during hot reloads.
+- Fixed the remaining `align-items: end` CSS warnings in the modernized dashboard styles.
+
+## [0.10.3] - 2026-04-01
+
+### Added
+- Added a richer operator-console shell for the web dashboard with:
+  - persistent workspace rail navigation
+  - operator notes
+  - top-level capability chips
+- Added reusable progress meters for staged crawl requests and benchmark progress visualisation.
+- Added benchmark cycle sparklines to make per-cycle output easier to compare visually.
+
+### Changed
+- Fraternity Intake now uses a more structured launch layout with a checklist, stage rail, and field-progress meters.
+- Benchmarks now surface best-throughput/high-level performance context directly in the page hero instead of only in tabular detail.
+- Internal dashboard navigation now uses simple anchor navigation instead of server-rendered `next/link` wrappers in the app shell and overview guide cards.
+
+### Fixed
+- Fixed the current website create-request flow after reproducing the failure path and restarting the dev server with the corrected environment configuration.
+- Removed the most likely source of the `PathnameContext` render failure by hardening server-rendered navigation usage.
+
+## [0.10.2] - 2026-04-01
+
+### Added
+- Added ambiguous-school website regressions covering:
+  - rejection of generic tier-1 `.edu` directory leads for one-token school names
+  - retention of stronger fraternity-specific school paths for those same ambiguous schools
+- Added richer review-queue diagnostics in the web app:
+  - triggering query
+  - rejection summary histogram
+  - candidate/source context for low-confidence review rows
+
+### Changed
+- Website enrichment now applies a stricter ambiguous-school rule for generic tier-1 school pages, preventing one-token school names such as `Denver` from surfacing weak campus-directory candidates as if they were viable chapter leads.
+- Review queue entries now carry enough context to explain why a candidate reached review, including top rejection reasons from the search pass.
+
+### Fixed
+- Fixed a real Delta Chi ambiguous-school case where `denver-chapter-denver` could still surface a generic `msudenver.edu` organization directory as the active review outcome.
+
+## [0.10.1] - 2026-04-01
+
+### Added
+- Added website-precision regressions covering:
+  - nationals-directory chapter mismatch rejection
+  - stricter Greek-letter fraternity identity matching
+  - safer handling of ambiguous external website candidates
+- Added `docs/reports/VALIDATION_REPORT_2026-04-01_PRECISION_HARDENING.md` documenting the live before/after validation pass for AGR, Delta Chi, and ADP control chapters.
+
+### Changed
+- Website enrichment now requires stronger school/chapter evidence before using nationals-directory entries for a target chapter.
+- Fraternity identity matching is stricter for multi-token Greek organizations, reducing false positives such as `Alpha Gamma Rho` vs `Sigma Gamma Rho`.
+- Generic chapter slug tokens such as `chapter`, `colony`, `active`, and `provisional` no longer count as chapter identity evidence in website matching.
+- Short fraternity aliases/initialisms are handled more conservatively so they do not match arbitrary URL substrings.
+
+### Fixed
+- Fixed unsafe website auto-writes from over-broad nationals-directory matches, including the Delta Chi Canada misassignment pattern.
+- Fixed website false positives caused by partial Greek-token overlap across different organizations.
+- Fixed chapter matching leakage from generic slug tokens that could inflate relevance scoring on wrong school pages.
+
 ## [0.10.0] - 2026-03-31
 
 ### Added
@@ -221,6 +421,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
 
 
 
