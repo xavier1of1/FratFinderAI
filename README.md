@@ -13,7 +13,7 @@ It ingests chapter data from national fraternity websites, normalizes records in
 
 Separation rules:
 
-- No crawling/parsing/db business logic in React components.
+- No crawling/parsig/db business logic in React components.
 - No low-level HTML parsing inside LangGraph nodes.
 - No scattered raw SQL writes; use repository modules.
 

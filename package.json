@@ -1,7 +1,7 @@
 {
   "name": "frat-finder-ai",
   "private": true,
-  "version": "0.1.0",
+  "version": "2.0.0",
   "packageManager": "pnpm@9.12.3",
   "scripts": {
     "dev:web": "pnpm --filter @fratfinder/web dev",
@@ -20,3 +20,4 @@
     "db:smoke": "docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/tests/schema_smoke.sql"
   }
 }
+

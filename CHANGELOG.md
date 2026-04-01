@@ -1,4 +1,4 @@
-## [0.10.10] - 2026-04-01
+## [2.0.0] - 2026-04-01
 
 ### Added
 - Added `infra/supabase/migrations/0013_adaptive_crawl_runtime.sql` introducing adaptive crawl sessions, frontier storage, page observations, reward events, template profiles, and policy snapshots.
@@ -443,6 +443,7 @@
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
 
 
 
