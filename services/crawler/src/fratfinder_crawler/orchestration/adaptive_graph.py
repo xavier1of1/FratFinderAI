@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from langgraph.graph import END, StateGraph
 
-from fratfinder_crawler.adaptive import AdaptivePolicy, canonicalize_url, compute_template_signature, discover_frontier_links, evaluate_stop_conditions, host_family, score_frontier_item, score_reward
+from fratfinder_crawler.adaptive import AdaptivePolicy, build_delayed_credit_events, canonicalize_url, compute_structural_template_signature, compute_template_signature, discover_frontier_links, evaluate_stop_conditions, host_family, score_frontier_item, score_reward, score_terminal_reward
 from fratfinder_crawler.analysis import analyze_page, classify_source, detect_embedded_data, select_extraction_plan
 from fratfinder_crawler.adapters.registry import AdapterRegistry
 from fratfinder_crawler.config import Settings, get_settings
@@ -21,26 +21,52 @@ from fratfinder_crawler.orchestration.state import AdaptiveCrawlState
 
 LOGGER = logging.getLogger(__name__)
 
+_VALID_MISSING_SNIPPET_MARKERS = (
+    "suspended",
+    "disbanded",
+    "inactive chapter",
+    "no longer active",
+    "charter revoked",
+)
+
 
 class AdaptiveCrawlOrchestrator:
-    def __init__(self, repository: CrawlerRepository, http_client: HttpClient, registry: AdapterRegistry, *, settings: Settings | None = None, runtime_mode: str = "adaptive_shadow"):
+    def __init__(
+        self,
+        repository: CrawlerRepository,
+        http_client: HttpClient,
+        registry: AdapterRegistry,
+        *,
+        settings: Settings | None = None,
+        runtime_mode: str = "adaptive_shadow",
+        policy_mode: str = "live",
+    ):
         self._repository = repository
         self._http = http_client
         self._registry = registry
         self._settings = settings or get_settings()
         self._runtime_mode = runtime_mode
-        self._policy = AdaptivePolicy(epsilon=self._settings.crawler_adaptive_epsilon, policy_version=self._settings.crawler_policy_version)
+        self._policy_mode = policy_mode
+        self._policy = AdaptivePolicy(
+            epsilon=self._settings.crawler_adaptive_epsilon,
+            policy_version=self._settings.crawler_policy_version,
+            live_epsilon=self._settings.crawler_adaptive_live_epsilon,
+            train_epsilon=self._settings.crawler_adaptive_train_epsilon,
+            risk_timeout_weight=self._settings.crawler_adaptive_risk_timeout_weight,
+            risk_requeue_weight=self._settings.crawler_adaptive_risk_requeue_weight,
+        )
         if self._settings.crawler_adaptive_policy_restore_enabled:
             self._restore_policy_snapshot()
         self._graph = self._build_graph()
 
-    def run_for_source(self, source) -> CrawlMetrics:
+    def run_for_source(self, source, policy_mode: str | None = None) -> CrawlMetrics:
         run_id = self._repository.start_crawl_run(source.id)
+        effective_policy_mode = (policy_mode or self._policy_mode or "live").strip().lower()
         initial_state: AdaptiveCrawlState = {
             "source": source,
             "run_id": run_id,
             "runtime_mode": self._runtime_mode,
-            "policy_mode": self._runtime_mode,
+            "policy_mode": effective_policy_mode,
             "seed_urls": [source.list_url],
             "frontier_items": [],
             "visited_urls": [],
@@ -48,6 +74,8 @@ class AdaptiveCrawlOrchestrator:
             "review_items": [],
             "metrics": CrawlMetrics(),
             "reward_events": [],
+            "observation_index": {},
+            "observation_url_index": {},
             "budget_state": {
                 "max_pages": self._settings.crawler_frontier_max_pages_per_source,
                 "max_depth": self._settings.crawler_frontier_max_depth,
@@ -57,12 +85,24 @@ class AdaptiveCrawlOrchestrator:
                 "pages_processed": 0,
                 "empty_streak": 0,
                 "low_yield_streak": 0,
+                "guardrail_hits": 0,
+                "valid_missing_total": 0,
+                "verified_website_total": 0,
             },
             "navigation_stats": {"frontier_added": 0, "frontier_visited": 0},
             "final_status": "succeeded",
         }
         final_state = self._graph.invoke(initial_state)
-        log_event(LOGGER, "adaptive_crawl_run_finished", run_id=run_id, source_slug=source.source_slug, runtime_mode=self._runtime_mode, stop_reason=final_state.get("stop_reason"), records_upserted=final_state["metrics"].records_upserted)
+        log_event(
+            LOGGER,
+            "adaptive_crawl_run_finished",
+            run_id=run_id,
+            source_slug=source.source_slug,
+            runtime_mode=self._runtime_mode,
+            policy_mode=effective_policy_mode,
+            stop_reason=final_state.get("stop_reason"),
+            records_upserted=final_state["metrics"].records_upserted,
+        )
         return final_state["metrics"]
 
     def _with_error_boundary(self, func: Callable[[AdaptiveCrawlState], dict[str, Any]]) -> Callable[[AdaptiveCrawlState], dict[str, Any]]:
@@ -184,10 +224,15 @@ class AdaptiveCrawlOrchestrator:
     def _compute_template_signature(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         analysis = state["page_analysis"]
         template_signature = compute_template_signature(state["current_page_url"], analysis)
+        structural_signature = compute_structural_template_signature(state["current_page_url"], analysis)
         raw_tokens = [token for token in state["current_page_url"].split("?")[0].lower().split("/") if token]
         raw_fragment = "-".join(raw_tokens[:3]) or "root"
         template_signature_raw = f"{host_family(state['current_page_url'])}|{analysis.probable_page_role}|t{min(analysis.table_count, 3)}|r{min(analysis.repeated_block_count, 4)}|{raw_fragment}"
-        return {"template_signature": template_signature, "template_signature_raw": template_signature_raw}
+        return {
+            "template_signature": template_signature,
+            "structural_template_signature": structural_signature,
+            "template_signature_raw": template_signature_raw,
+        }
 
     def _propose_actions(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         plan = select_extraction_plan(page_analysis=state["page_analysis"], classification=state["classification"], embedded_data=state["embedded_data"], llm_enabled=False, source_metadata=state["source"].metadata)
@@ -214,7 +259,14 @@ class AdaptiveCrawlOrchestrator:
 
     def _score_actions(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         current = state["current_frontier_item"]
-        profile = self._repository.get_template_profile(state["template_signature"], host_family(state["current_page_url"]))
+        host_profile = self._repository.get_template_profile(state["template_signature"], host_family(state["current_page_url"]))
+        structural_profile = self._repository.get_template_profile(state["structural_template_signature"], "__structural__")
+        profile = host_profile or structural_profile
+
+        budget_state = dict(state.get("budget_state") or {})
+        timeout_risk = min(max((profile.timeout_rate if profile else 0.0), 0.0), 1.0)
+        requeue_risk = min(max(float(budget_state.get("low_yield_streak", 0)) / max(float(budget_state.get("saturation_threshold", 4)), 1.0), 0.0), 1.0)
+
         context = {
             "page_type": state["classification"].page_type,
             "probable_page_role": state["page_analysis"].probable_page_role,
@@ -223,19 +275,64 @@ class AdaptiveCrawlOrchestrator:
             "table_count": state["page_analysis"].table_count,
             "repeated_block_count": state["page_analysis"].repeated_block_count,
             "keyword_score": float(current.score_components.get("keyword", 0.0)),
+            "timeout_risk": timeout_risk,
+            "requeue_risk": requeue_risk,
+            "policy_mode": state.get("policy_mode", self._policy_mode),
         }
-        decisions = self._policy.choose_action(state.get("candidate_actions", []), context=context, template_profile=profile, mode=state.get("runtime_mode", self._runtime_mode))
+        decisions = self._policy.choose_action(
+            state.get("candidate_actions", []),
+            context=context,
+            template_profile=profile,
+            mode=state.get("runtime_mode", self._runtime_mode),
+        )
         if not decisions:
-            return {"selected_action": "review_branch", "selected_action_score": 0.0, "selected_action_score_components": {}, "policy_features": context}
+            return {
+                "candidate_actions": [],
+                "selected_action": "review_branch",
+                "selected_action_score": 0.0,
+                "selected_action_score_components": {},
+                "policy_features": context,
+                "current_guardrail_flags": ["no_candidate_actions"],
+                "current_risk_score": 0.0,
+                "context_bucket": self._context_bucket(state),
+            }
         selected = self._select_shadow_action(state, decisions) if state.get("runtime_mode") == "adaptive_shadow" else decisions[0]
-        return {"candidate_actions": decisions, "selected_action": selected.action_type, "selected_action_score": selected.score, "selected_action_score_components": selected.score_components, "policy_features": context}
+        guardrail_flags = selected.context.get("guardrailFlags", []) if isinstance(selected.context, dict) else []
+        risk_score = min(max(timeout_risk + requeue_risk, 0.0), 2.0)
+        return {
+            "candidate_actions": decisions,
+            "selected_action": selected.action_type,
+            "selected_action_score": selected.score,
+            "selected_action_score_components": selected.score_components,
+            "policy_features": context,
+            "current_guardrail_flags": guardrail_flags,
+            "current_risk_score": risk_score,
+            "context_bucket": self._context_bucket(state),
+        }
 
     def _execute_action(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         action = state.get("selected_action") or "review_branch"
         review_items = list(state.get("review_items", []))
         if action == "review_branch":
-            review_items.append(ReviewItemCandidate(item_type="adaptive_review_branch", reason="Adaptive runtime could not identify a confident extraction path", source_slug=state["source"].source_slug, chapter_slug=None, payload={"source_url": state["current_page_url"], "templateSignature": state.get("template_signature"), "candidateActions": [d.action_type for d in state.get("candidate_actions", [])]}))
-        return {"review_items": review_items, "extraction_notes": action}
+            review_items.append(
+                ReviewItemCandidate(
+                    item_type="adaptive_review_branch",
+                    reason="Adaptive runtime could not identify a confident extraction path",
+                    source_slug=state["source"].source_slug,
+                    chapter_slug=None,
+                    payload={
+                        "source_url": state["current_page_url"],
+                        "templateSignature": state.get("template_signature"),
+                        "candidateActions": [d.action_type for d in state.get("candidate_actions", [])],
+                        "guardrailFlags": state.get("current_guardrail_flags", []),
+                    },
+                )
+            )
+        budget_state = dict(state.get("budget_state") or {})
+        guardrails = state.get("current_guardrail_flags") or []
+        if guardrails:
+            budget_state["guardrail_hits"] = int(budget_state.get("guardrail_hits", 0)) + 1
+        return {"review_items": review_items, "extraction_notes": action, "budget_state": budget_state}
 
     def _extract_records_or_stubs(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         action = state.get("selected_action") or "review_branch"
@@ -247,19 +344,66 @@ class AdaptiveCrawlOrchestrator:
             adapter = self._registry.get(strategy)
             if adapter is not None:
                 if action == "extract_stubs_only":
-                    stubs = adapter.parse_stubs(state["current_page_html"], state["current_page_url"], api_url=state["embedded_data"].api_url, http_client=self._http, source_metadata=state["source"].metadata)
+                    stubs = adapter.parse_stubs(
+                        state["current_page_html"],
+                        state["current_page_url"],
+                        api_url=state["embedded_data"].api_url,
+                        http_client=self._http,
+                        source_metadata=state["source"].metadata,
+                    )
                     for stub in stubs[: self._settings.crawler_frontier_max_pages_per_template]:
                         target_url = stub.detail_url or stub.outbound_chapter_url_candidate
                         if not target_url:
                             continue
                         canonical = canonicalize_url(target_url, state["current_page_url"])
-                        score, components = score_frontier_item(canonical, anchor_text=stub.chapter_name, depth=state["current_frontier_item"].depth + 1, source_url=state["source"].list_url, page_analysis=state["page_analysis"], template_bonus=0.7, parent_success_bonus=0.4)
-                        seeded_frontier.append(FrontierItem(id=None, url=canonical, canonical_url=canonical, parent_url=state["current_page_url"], depth=state["current_frontier_item"].depth + 1, anchor_text=stub.chapter_name, discovered_from="chapter_stub", score_total=score, score_components=components))
+                        score, components = score_frontier_item(
+                            canonical,
+                            anchor_text=stub.chapter_name,
+                            depth=state["current_frontier_item"].depth + 1,
+                            source_url=state["source"].list_url,
+                            page_analysis=state["page_analysis"],
+                            template_bonus=0.7,
+                            parent_success_bonus=0.4,
+                        )
+                        seeded_frontier.append(
+                            FrontierItem(
+                                id=None,
+                                url=canonical,
+                                canonical_url=canonical,
+                                parent_url=state["current_page_url"],
+                                depth=state["current_frontier_item"].depth + 1,
+                                anchor_text=stub.chapter_name,
+                                discovered_from="chapter_stub",
+                                score_total=score,
+                                score_components=components,
+                            )
+                        )
                 else:
-                    extracted = adapter.parse(state["current_page_html"], state["current_page_url"], api_url=state["embedded_data"].api_url, http_client=self._http, source_metadata=state["source"].metadata)
+                    extracted = adapter.parse(
+                        state["current_page_html"],
+                        state["current_page_url"],
+                        api_url=state["embedded_data"].api_url,
+                        http_client=self._http,
+                        source_metadata=state["source"].metadata,
+                    )
                     extracted = self._dedupe_extracted_records(extracted)
                     metrics.records_seen += len(extracted)
-        return {"extracted": self._merge_extracted_records(state.get("extracted", []), extracted), "extracted_from_current": extracted, "frontier_items": seeded_frontier, "metrics": metrics}
+
+        valid_missing_count = self._count_valid_missing_records(extracted)
+        verified_website_count = self._count_verified_websites(extracted, state["current_page_url"], state["source"].list_url)
+        budget_state = dict(state.get("budget_state") or {})
+        budget_state["valid_missing_total"] = int(budget_state.get("valid_missing_total", 0)) + valid_missing_count
+        budget_state["verified_website_total"] = int(budget_state.get("verified_website_total", 0)) + verified_website_count
+
+        return {
+            "extracted": self._merge_extracted_records(state.get("extracted", []), extracted),
+            "extracted_from_current": extracted,
+            "frontier_items": seeded_frontier,
+            "metrics": metrics,
+            "valid_missing_count_current": valid_missing_count,
+            "verified_website_count_current": verified_website_count,
+            "budget_state": budget_state,
+        }
 
     def _expand_frontier(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         current = state["current_frontier_item"]
@@ -294,9 +438,17 @@ class AdaptiveCrawlOrchestrator:
         return {"current_links": current_links, "navigation_stats": navigation_stats}
     def _score_reward(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         extracted_current = state.get("extracted_from_current", [])
-        reward = score_reward(action_type=state.get("selected_action") or "review_branch", extracted=extracted_current, links_added=len(state.get("current_links", [])), review_created=state.get("selected_action") == "review_branch")
+        reward = score_reward(
+            action_type=state.get("selected_action") or "review_branch",
+            extracted=extracted_current,
+            links_added=len(state.get("current_links", [])),
+            review_created=state.get("selected_action") == "review_branch",
+            valid_missing_count=int(state.get("valid_missing_count_current", 0) or 0),
+            verified_website_count=int(state.get("verified_website_count_current", 0) or 0),
+            reward_stage="immediate",
+        )
         budget_state = dict(state.get("budget_state") or {})
-        if extracted_current:
+        if extracted_current or state.get("valid_missing_count_current", 0):
             budget_state["empty_streak"] = 0
             budget_state["low_yield_streak"] = 0
         else:
@@ -308,19 +460,135 @@ class AdaptiveCrawlOrchestrator:
     def _update_template_memory(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         extracted_current = state.get("extracted_from_current", [])
         contact_yield = sum(1 for record in extracted_current if record.website_url or record.contact_email or record.instagram_url)
-        self._repository.upsert_template_profile(template_signature=state["template_signature"], host_family=host_family(state["current_page_url"]), page_role_guess=state["page_analysis"].probable_page_role, action_type=state.get("selected_action") or "review_branch", extraction_family=self._action_to_strategy(state.get("selected_action") or "review_branch", state), chapter_yield=len(extracted_current), contact_yield=contact_yield, timeout=False, empty=len(extracted_current) == 0)
+        selected_action = state.get("selected_action") or "review_branch"
+        extraction_family = self._action_to_strategy(selected_action, state)
+
+        self._repository.upsert_template_profile(
+            template_signature=state["template_signature"],
+            host_family=host_family(state["current_page_url"]),
+            page_role_guess=state["page_analysis"].probable_page_role,
+            action_type=selected_action,
+            extraction_family=extraction_family,
+            chapter_yield=len(extracted_current),
+            contact_yield=contact_yield,
+            timeout=False,
+            empty=len(extracted_current) == 0,
+        )
+        self._repository.upsert_template_profile(
+            template_signature=state["structural_template_signature"],
+            host_family="__structural__",
+            page_role_guess=state["page_analysis"].probable_page_role,
+            action_type=selected_action,
+            extraction_family=extraction_family,
+            chapter_yield=len(extracted_current),
+            contact_yield=contact_yield,
+            timeout=False,
+            empty=len(extracted_current) == 0,
+        )
         return {}
 
     def _update_policy_state(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         return {"policy_features": self._policy.snapshot()}
 
     def _persist_checkpoint(self, state: AdaptiveCrawlState) -> dict[str, Any]:
-        candidate_actions = [{"actionType": d.action_type, "score": d.score, "scoreComponents": d.score_components, "predictedReward": d.predicted_reward} for d in state.get("candidate_actions", [])]
-        observation_id = self._repository.append_page_observation(PageObservation(id=None, crawl_session_id=state["crawl_session_id"], url=state["current_page_url"], template_signature=state["template_signature"], http_status=state.get("current_page_status"), latency_ms=state.get("current_fetch_latency_ms", 0), page_analysis=_to_serializable(state.get("page_analysis")) or {}, classification=_to_serializable(state.get("classification")) or {}, embedded_data=_to_serializable(state.get("embedded_data")) or {}, candidate_actions=candidate_actions, selected_action=state.get("selected_action"), selected_action_score=state.get("selected_action_score"), selected_action_score_components=state.get("selected_action_score_components") or {}, outcome={"recordsExtracted": len(state.get("extracted_from_current", [])), "linksQueued": len(state.get("current_links", [])), "stopReason": state.get("stop_reason"), "templateSignatureRaw": state.get("template_signature_raw")}))
-        for event in state.get("reward_events", []):
+        candidate_actions: list[dict[str, Any]] = []
+        for decision in state.get("candidate_actions", []):
+            if isinstance(decision, PolicyDecision):
+                candidate_actions.append(
+                    {
+                        "actionType": decision.action_type,
+                        "score": decision.score,
+                        "scoreComponents": decision.score_components,
+                        "predictedReward": decision.predicted_reward,
+                    }
+                )
+            elif isinstance(decision, str):
+                candidate_actions.append({"actionType": decision, "score": 0.0, "scoreComponents": {}, "predictedReward": 0.0})
+
+        parent_observation_id = None
+        parent_url = state.get("current_frontier_item").parent_url if state.get("current_frontier_item") else None
+        if parent_url:
+            parent_observation_id = (state.get("observation_url_index") or {}).get(canonicalize_url(parent_url))
+
+        observation_id = self._repository.append_page_observation(
+            PageObservation(
+                id=None,
+                crawl_session_id=state["crawl_session_id"],
+                url=state["current_page_url"],
+                template_signature=state["template_signature"],
+                structural_template_signature=state.get("structural_template_signature"),
+                http_status=state.get("current_page_status"),
+                latency_ms=state.get("current_fetch_latency_ms", 0),
+                page_analysis=_to_serializable(state.get("page_analysis")) or {},
+                classification=_to_serializable(state.get("classification")) or {},
+                embedded_data=_to_serializable(state.get("embedded_data")) or {},
+                candidate_actions=candidate_actions,
+                selected_action=state.get("selected_action"),
+                selected_action_score=state.get("selected_action_score"),
+                selected_action_score_components=state.get("selected_action_score_components") or {},
+                parent_observation_id=parent_observation_id,
+                path_depth=int(state.get("current_frontier_item").depth if state.get("current_frontier_item") else 0),
+                risk_score=float(state.get("current_risk_score", 0.0) or 0.0),
+                guardrail_flags=[str(flag) for flag in state.get("current_guardrail_flags", [])],
+                context_bucket=state.get("context_bucket"),
+                outcome={
+                    "recordsExtracted": len(state.get("extracted_from_current", [])),
+                    "linksQueued": len(state.get("current_links", [])),
+                    "stopReason": state.get("stop_reason"),
+                    "templateSignatureRaw": state.get("template_signature_raw"),
+                    "validMissingCount": int(state.get("valid_missing_count_current", 0) or 0),
+                    "verifiedWebsiteCount": int(state.get("verified_website_count_current", 0) or 0),
+                },
+            )
+        )
+
+        immediate_events = list(state.get("reward_events", []))
+        for event in immediate_events:
+            event.attributed_observation_id = observation_id
             self._repository.append_reward_event(state["crawl_session_id"], observation_id, event)
-        self._repository.save_policy_snapshot(policy_version=self._policy.policy_version, runtime_mode=state.get("runtime_mode", self._runtime_mode), feature_schema_version="adaptive-v1", model_payload=self._policy.snapshot(), metrics={"runId": state["run_id"], "sourceSlug": state["source"].source_slug, "templateSignature": state.get("template_signature")})
-        return {"persisted_observation_id": observation_id}
+
+        observation_index = dict(state.get("observation_index") or {})
+        observation_index[str(observation_id)] = {
+            "action": state.get("selected_action") or "review_branch",
+            "parent": parent_observation_id,
+        }
+        observation_url_index = dict(state.get("observation_url_index") or {})
+        observation_url_index[canonicalize_url(state["current_page_url"])] = observation_id
+
+        delayed_seed = float(state.get("verified_website_count_current", 0) or 0) * 1.2 + float(
+            sum(1 for record in state.get("extracted_from_current", []) if record.contact_email or record.instagram_url)
+        )
+        ancestors = self._ancestor_actions(parent_observation_id, observation_index)
+        delayed_events = build_delayed_credit_events(
+            ancestor_actions=ancestors,
+            base_reward=delayed_seed,
+            gamma=self._settings.crawler_adaptive_reward_gamma,
+            attributed_observation_id=observation_id,
+            max_hops=self._settings.crawler_adaptive_trace_hops,
+        )
+        for hop, event in enumerate(delayed_events, start=1):
+            ancestor_observation_id = ancestors[hop - 1][0] if hop - 1 < len(ancestors) else None
+            if ancestor_observation_id is not None:
+                self._repository.append_reward_event(state["crawl_session_id"], ancestor_observation_id, event)
+                self._policy.observe(event.action_type, event.reward_value)
+
+        self._repository.save_policy_snapshot(
+            policy_version=self._policy.policy_version,
+            runtime_mode=state.get("runtime_mode", self._runtime_mode),
+            feature_schema_version="adaptive-v2.1",
+            model_payload=self._policy.snapshot(),
+            metrics={
+                "runId": state["run_id"],
+                "sourceSlug": state["source"].source_slug,
+                "templateSignature": state.get("template_signature"),
+                "policyMode": state.get("policy_mode", self._policy_mode),
+            },
+        )
+        return {
+            "persisted_observation_id": observation_id,
+            "observation_index": observation_index,
+            "observation_url_index": observation_url_index,
+        }
 
     def _evaluate_stop_conditions(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         frontier_remaining = self._repository.count_frontier_items(state["crawl_session_id"], state="queued")
@@ -367,7 +635,31 @@ class AdaptiveCrawlOrchestrator:
             status = "partial"
         self._repository.finish_crawl_run(run_id=run_id, status=status, metrics=metrics, page_analysis=page_analysis_payload, classification=classification_payload, extraction_metadata=extraction_metadata)
         if session_id:
-            self._repository.finish_crawl_session(session_id, status=status, stop_reason=state.get("stop_reason"), summary={"recordsUpserted": metrics.records_upserted, "pagesProcessed": metrics.pages_processed, "reviewItemsCreated": metrics.review_items_created, "fieldJobsCreated": metrics.field_jobs_created})
+            self._repository.finish_crawl_session(
+                session_id,
+                status=status,
+                stop_reason=state.get("stop_reason"),
+                summary={
+                    "recordsUpserted": metrics.records_upserted,
+                    "pagesProcessed": metrics.pages_processed,
+                    "reviewItemsCreated": metrics.review_items_created,
+                    "fieldJobsCreated": metrics.field_jobs_created,
+                    "guardrailHits": int((state.get("budget_state") or {}).get("guardrail_hits", 0)),
+                    "validMissing": int((state.get("budget_state") or {}).get("valid_missing_total", 0)),
+                    "verifiedWebsites": int((state.get("budget_state") or {}).get("verified_website_total", 0)),
+                },
+            )
+
+        queue_efficiency = self._queue_efficiency(metrics=metrics, budget_state=state.get("budget_state") or {})
+        terminal_event = score_terminal_reward(
+            status=status,
+            stop_reason=state.get("stop_reason"),
+            queue_efficiency=queue_efficiency,
+        )
+        if session_id:
+            self._repository.append_reward_event(session_id, None, terminal_event)
+        self._policy.observe(terminal_event.action_type, terminal_event.reward_value)
+
         return {"metrics": metrics, "final_status": status, "stop_reason": state.get("stop_reason")}
 
     def _restore_policy_snapshot(self) -> None:
@@ -425,6 +717,59 @@ class AdaptiveCrawlOrchestrator:
 
     def _merge_extracted_records(self, existing: list[ExtractedChapter], new_records: list[ExtractedChapter]) -> list[ExtractedChapter]:
         return self._dedupe_extracted_records([*existing, *new_records])
+
+    def _count_valid_missing_records(self, records: list[ExtractedChapter]) -> int:
+        count = 0
+        for record in records:
+            snippet = (record.source_snippet or "").lower()
+            has_missing_contact = not record.contact_email and not record.instagram_url
+            if has_missing_contact and any(marker in snippet for marker in _VALID_MISSING_SNIPPET_MARKERS):
+                count += 1
+        return count
+
+    def _count_verified_websites(self, records: list[ExtractedChapter], page_url: str, source_list_url: str) -> int:
+        trusted_host = host_family(source_list_url)
+        current_host = host_family(page_url)
+        if trusted_host != current_host:
+            return 0
+        return sum(1 for record in records if record.website_url)
+
+    def _context_bucket(self, state: AdaptiveCrawlState) -> str:
+        analysis = state.get("page_analysis")
+        classification = state.get("classification")
+        if not analysis or not classification:
+            return "unknown"
+        role = str(getattr(analysis, "probable_page_role", "unknown") or "unknown")
+        page_type = str(getattr(classification, "page_type", "unknown") or "unknown")
+        has_map = "map" if getattr(analysis, "has_map_widget", False) else "nomap"
+        has_table = "table" if int(getattr(analysis, "table_count", 0) or 0) > 0 else "notable"
+        return f"{page_type}:{role}:{has_map}:{has_table}"
+
+    def _ancestor_actions(
+        self,
+        parent_observation_id: int | None,
+        observation_index: dict[str, dict[str, Any]],
+    ) -> list[tuple[int, str]]:
+        ancestors: list[tuple[int, str]] = []
+        current = parent_observation_id
+        hops = 0
+        max_hops = max(1, int(self._settings.crawler_adaptive_trace_hops))
+        while current is not None and hops < max_hops:
+            entry = observation_index.get(str(current))
+            if not entry:
+                break
+            ancestors.append((current, str(entry.get("action") or "review_branch")))
+            parent = entry.get("parent")
+            current = int(parent) if isinstance(parent, int) else None
+            hops += 1
+        return ancestors
+
+    def _queue_efficiency(self, *, metrics: CrawlMetrics, budget_state: dict[str, Any]) -> float:
+        pages = max(float(metrics.pages_processed), 1.0)
+        records = float(metrics.records_seen)
+        burn = records / pages
+        penalties = float(budget_state.get("low_yield_streak", 0)) * 0.05 + float(budget_state.get("guardrail_hits", 0)) * 0.01
+        return max(-1.0, min(1.0, burn - penalties))
 
 
 def _to_serializable(value: Any) -> dict[str, Any] | None:

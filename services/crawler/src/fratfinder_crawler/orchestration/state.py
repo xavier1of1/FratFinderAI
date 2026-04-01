@@ -50,6 +50,7 @@ class AdaptiveCrawlState(TypedDict, total=False):
     run_id: int
     crawl_session_id: str
     runtime_mode: str
+    policy_mode: str
     seed_urls: list[str]
     frontier_items: list[FrontierItem]
     visited_urls: list[str]
@@ -62,12 +63,12 @@ class AdaptiveCrawlState(TypedDict, total=False):
     classification: SourceClassification
     embedded_data: EmbeddedDataResult
     template_signature: str
+    structural_template_signature: str
     template_signature_raw: str
-    candidate_actions: list[PolicyDecision]
+    candidate_actions: list[Any]
     selected_action: str
     selected_action_score: float
     selected_action_score_components: dict[str, float]
-    policy_mode: str
     policy_features: dict[str, Any]
     reward_events: list[RewardEvent]
     saturation_state: dict[str, Any]
@@ -85,3 +86,10 @@ class AdaptiveCrawlState(TypedDict, total=False):
     navigation_stats: dict[str, int]
     page_level_confidence: float
     extraction_notes: str
+    current_guardrail_flags: list[str]
+    current_risk_score: float
+    context_bucket: str
+    valid_missing_count_current: int
+    verified_website_count_current: int
+    observation_index: dict[str, dict[str, Any]]
+    observation_url_index: dict[str, int]

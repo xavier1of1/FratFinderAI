@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -88,11 +88,79 @@ class Settings(BaseSettings):
     crawler_adaptive_stop_saturation_threshold: int = Field(default=4, alias="CRAWLER_ADAPTIVE_STOP_SATURATION_THRESHOLD")
     crawler_policy_version: str = Field(default="adaptive-v1", alias="CRAWLER_POLICY_VERSION")
     crawler_replay_export_limit: int = Field(default=500, alias="CRAWLER_REPLAY_EXPORT_LIMIT")
-    crawler_adaptive_policy_restore_enabled: bool = Field(default=True, alias="Agent:ADAPTIVE_POLICY_RESTORE_ENABLED")
-    crawler_adaptive_train_default_epochs: int = Field(default=3, alias="Agent:ADAPTIVE_TRAIN_DEFAULT_EPOCHS")
-    crawler_adaptive_train_default_runtime_mode: str = Field(default="adaptive_assisted", alias="Agent:ADAPTIVE_TRAIN_DEFAULT_RUNTIME_MODE")
-    crawler_adaptive_train_source_slugs: str = Field(default="", alias="Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS")
-    crawler_adaptive_eval_source_slugs: str = Field(default="", alias="Agent:ADAPTIVE_EVAL_SOURCE_SLUGS")
+
+    crawler_adaptive_policy_restore_enabled: bool = Field(
+        default=True,
+        alias="Agent:ADAPTIVE_POLICY_RESTORE_ENABLED",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_POLICY_RESTORE_ENABLED", "CRAWLER_ADAPTIVE_POLICY_RESTORE_ENABLED"),
+    )
+    crawler_adaptive_train_default_epochs: int = Field(
+        default=3,
+        alias="Agent:ADAPTIVE_TRAIN_DEFAULT_EPOCHS",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_TRAIN_DEFAULT_EPOCHS", "CRAWLER_ADAPTIVE_TRAIN_DEFAULT_EPOCHS"),
+    )
+    crawler_adaptive_train_default_runtime_mode: str = Field(
+        default="adaptive_assisted",
+        alias="Agent:ADAPTIVE_TRAIN_DEFAULT_RUNTIME_MODE",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_TRAIN_DEFAULT_RUNTIME_MODE", "CRAWLER_ADAPTIVE_TRAIN_DEFAULT_RUNTIME_MODE"),
+    )
+    crawler_adaptive_train_source_slugs: str = Field(
+        default="",
+        alias="Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS", "CRAWLER_ADAPTIVE_TRAIN_SOURCE_SLUGS"),
+    )
+    crawler_adaptive_eval_source_slugs: str = Field(
+        default="",
+        alias="Agent:ADAPTIVE_EVAL_SOURCE_SLUGS",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_EVAL_SOURCE_SLUGS", "CRAWLER_ADAPTIVE_EVAL_SOURCE_SLUGS"),
+    )
+
+    crawler_adaptive_live_epsilon: float = Field(
+        default=0.02,
+        alias="Agent:ADAPTIVE_LIVE_EPSILON",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_LIVE_EPSILON", "CRAWLER_ADAPTIVE_LIVE_EPSILON", "CRAWLER_ADAPTIVE_EPSILON"),
+    )
+    crawler_adaptive_train_epsilon: float = Field(
+        default=0.12,
+        alias="Agent:ADAPTIVE_TRAIN_EPSILON",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_TRAIN_EPSILON", "CRAWLER_ADAPTIVE_TRAIN_EPSILON"),
+    )
+    crawler_adaptive_reward_gamma: float = Field(
+        default=0.85,
+        alias="Agent:ADAPTIVE_REWARD_GAMMA",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_REWARD_GAMMA", "CRAWLER_ADAPTIVE_REWARD_GAMMA"),
+    )
+    crawler_adaptive_trace_hops: int = Field(
+        default=4,
+        alias="Agent:ADAPTIVE_TRACE_HOPS",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_TRACE_HOPS", "CRAWLER_ADAPTIVE_TRACE_HOPS"),
+    )
+    crawler_adaptive_replay_window_days: int = Field(
+        default=7,
+        alias="Agent:ADAPTIVE_REPLAY_WINDOW_DAYS",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_REPLAY_WINDOW_DAYS", "CRAWLER_ADAPTIVE_REPLAY_WINDOW_DAYS"),
+    )
+    crawler_adaptive_replay_batch_size: int = Field(
+        default=500,
+        alias="Agent:ADAPTIVE_REPLAY_BATCH_SIZE",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_REPLAY_BATCH_SIZE", "CRAWLER_ADAPTIVE_REPLAY_BATCH_SIZE"),
+    )
+    crawler_adaptive_risk_timeout_weight: float = Field(
+        default=0.75,
+        alias="Agent:ADAPTIVE_RISK_TIMEOUT_WEIGHT",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_RISK_TIMEOUT_WEIGHT", "CRAWLER_ADAPTIVE_RISK_TIMEOUT_WEIGHT"),
+    )
+    crawler_adaptive_risk_requeue_weight: float = Field(
+        default=0.35,
+        alias="Agent:ADAPTIVE_RISK_REQUEUE_WEIGHT",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_RISK_REQUEUE_WEIGHT", "CRAWLER_ADAPTIVE_RISK_REQUEUE_WEIGHT"),
+    )
+    crawler_adaptive_balanced_kpi_weights: str = Field(
+        default='{"coverage":0.45,"throughput":0.2,"queue":0.2,"reliability":0.15}',
+        alias="Agent:ADAPTIVE_BALANCED_KPI_WEIGHTS",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_BALANCED_KPI_WEIGHTS", "CRAWLER_ADAPTIVE_BALANCED_KPI_WEIGHTS"),
+    )
+
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
 
 

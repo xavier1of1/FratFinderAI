@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import argparse
@@ -24,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override runtime mode for this batch",
     )
+    run_parser.add_argument("--policy-mode", choices=["live", "train"], default="live")
 
     legacy_parser = subparsers.add_parser("run-legacy", help="Run the legacy crawl runtime explicitly")
     legacy_parser.add_argument("--source-slug", help="Only crawl one source slug", default=None)
@@ -36,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="adaptive_shadow",
         help="Adaptive runtime mode to execute",
     )
+    adaptive_parser.add_argument("--policy-mode", choices=["live", "train"], default="live")
 
     jobs_parser = subparsers.add_parser("process-field-jobs", help="Process queued field jobs")
     jobs_parser.add_argument("--limit", type=int, default=25)
@@ -85,10 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser = subparsers.add_parser("crawl-export-observations", help="Export adaptive crawl observations")
     export_parser.add_argument("--source-slug", default=None)
     export_parser.add_argument("--crawl-session-id", default=None)
+    export_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    export_parser.add_argument("--window-days", type=int, default=None)
     export_parser.add_argument("--limit", type=int, default=None)
 
     replay_parser = subparsers.add_parser("crawl-replay-policy", help="Summarize observed adaptive policy outcomes")
     replay_parser.add_argument("--source-slug", default=None)
+    replay_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    replay_parser.add_argument("--window-days", type=int, default=None)
     replay_parser.add_argument("--limit", type=int, default=None)
 
     policy_report_parser = subparsers.add_parser("crawl-policy-report", help="Show adaptive template/profile policy report")
@@ -99,7 +106,30 @@ def build_parser() -> argparse.ArgumentParser:
     epoch_parser.add_argument("--train-sources", default=None, help="Comma-separated source slugs for train epochs")
     epoch_parser.add_argument("--eval-sources", default=None, help="Comma-separated source slugs for eval epochs")
     epoch_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    epoch_parser.add_argument("--cohort-label", default="target-cohort")
+    epoch_parser.add_argument("--policy-version", default=None)
+    epoch_parser.add_argument("--replay-window-days", type=int, default=None)
+    epoch_parser.add_argument("--replay-batch-size", type=int, default=None)
     epoch_parser.add_argument("--report-path", default=None)
+
+    loop_parser = subparsers.add_parser("adaptive-train-loop", help="Run multiple train/eval rounds")
+    loop_parser.add_argument("--rounds", type=int, default=2)
+    loop_parser.add_argument("--epochs-per-round", type=int, default=None)
+    loop_parser.add_argument("--train-sources", default=None)
+    loop_parser.add_argument("--eval-sources", default=None)
+    loop_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    loop_parser.add_argument("--cohort-label", default="target-cohort")
+    loop_parser.add_argument("--report-dir", default="docs/reports")
+
+    replay_window_parser = subparsers.add_parser("adaptive-replay-window", help="Export adaptive replay window observations and rewards")
+    replay_window_parser.add_argument("--source-slugs", required=True, help="Comma-separated source slugs")
+    replay_window_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    replay_window_parser.add_argument("--window-days", type=int, default=None)
+    replay_window_parser.add_argument("--limit", type=int, default=None)
+
+    policy_diff_parser = subparsers.add_parser("adaptive-policy-diff", help="Compare two policy snapshots")
+    policy_diff_parser.add_argument("--snapshot-a", required=True, type=int)
+    policy_diff_parser.add_argument("--snapshot-b", required=True, type=int)
 
     return parser
 
@@ -114,7 +144,7 @@ def main() -> None:
     service = CrawlService(settings)
 
     if args.command == "run":
-        result = service.run(source_slug=args.source_slug, runtime_mode=args.runtime_mode)
+        result = service.run(source_slug=args.source_slug, runtime_mode=args.runtime_mode, policy_mode=args.policy_mode)
         print(json.dumps(result, indent=2))
         return
 
@@ -124,7 +154,7 @@ def main() -> None:
         return
 
     if args.command == "run-adaptive":
-        result = service.run_adaptive(source_slug=args.source_slug, runtime_mode=args.runtime_mode)
+        result = service.run_adaptive(source_slug=args.source_slug, runtime_mode=args.runtime_mode, policy_mode=args.policy_mode)
         print(json.dumps(result, indent=2))
         return
 
@@ -174,18 +204,42 @@ def main() -> None:
         result = service.export_crawl_observations(
             source_slug=args.source_slug,
             crawl_session_id=args.crawl_session_id,
+            runtime_mode=args.runtime_mode,
+            window_days=args.window_days,
             limit=args.limit,
         )
         print(json.dumps(result, indent=2, default=str))
         return
 
     if args.command == "crawl-replay-policy":
-        result = service.crawl_replay_policy(source_slug=args.source_slug, limit=args.limit)
+        result = service.crawl_replay_policy(
+            source_slug=args.source_slug,
+            runtime_mode=args.runtime_mode,
+            window_days=args.window_days,
+            limit=args.limit,
+        )
         print(json.dumps(result, indent=2, default=str))
         return
 
     if args.command == "crawl-policy-report":
         result = service.crawl_policy_report(limit=args.limit)
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "adaptive-replay-window":
+        runtime_mode = args.runtime_mode or settings.crawler_adaptive_train_default_runtime_mode
+        source_slugs = [value.strip() for value in str(args.source_slugs).split(",") if value.strip()]
+        result = service.adaptive_replay_window(
+            source_slugs=source_slugs,
+            runtime_mode=runtime_mode,
+            window_days=args.window_days,
+            limit=args.limit,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "adaptive-policy-diff":
+        result = service.adaptive_policy_diff(snapshot_id_a=args.snapshot_a, snapshot_id_b=args.snapshot_b)
         print(json.dumps(result, indent=2, default=str))
         return
 
@@ -205,7 +259,34 @@ def main() -> None:
             train_source_slugs=train_source_slugs,
             eval_source_slugs=eval_source_slugs,
             runtime_mode=runtime_mode,
+            cohort_label=args.cohort_label,
+            policy_version=args.policy_version,
+            replay_window_days=args.replay_window_days,
+            replay_batch_size=args.replay_batch_size,
             report_path=args.report_path,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "adaptive-train-loop":
+        runtime_mode = args.runtime_mode or settings.crawler_adaptive_train_default_runtime_mode
+        epochs_per_round = args.epochs_per_round if args.epochs_per_round is not None else settings.crawler_adaptive_train_default_epochs
+        train_raw = args.train_sources if args.train_sources is not None else settings.crawler_adaptive_train_source_slugs
+        eval_raw = args.eval_sources if args.eval_sources is not None else settings.crawler_adaptive_eval_source_slugs
+        train_source_slugs = [value.strip() for value in str(train_raw).split(",") if value.strip()]
+        eval_source_slugs = [value.strip() for value in str(eval_raw).split(",") if value.strip()]
+        if not train_source_slugs:
+            raise ValueError("adaptive-train-loop requires train sources via --train-sources or Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS")
+        if not eval_source_slugs:
+            raise ValueError("adaptive-train-loop requires eval sources via --eval-sources or Agent:ADAPTIVE_EVAL_SOURCE_SLUGS")
+        result = service.adaptive_train_loop(
+            rounds=args.rounds,
+            epochs_per_round=epochs_per_round,
+            train_source_slugs=train_source_slugs,
+            eval_source_slugs=eval_source_slugs,
+            runtime_mode=runtime_mode,
+            cohort_label=args.cohort_label,
+            report_dir=args.report_dir,
         )
         print(json.dumps(result, indent=2, default=str))
         return

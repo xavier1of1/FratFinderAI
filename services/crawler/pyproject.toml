@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fratfinder-crawler"
-version = "2.0.1"
+version = "2.1.0"
 description = "Frat Finder AI crawler service"
 requires-python = ">=3.11"
 dependencies = [
@@ -33,4 +33,5 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 addopts = "-q"
+
 

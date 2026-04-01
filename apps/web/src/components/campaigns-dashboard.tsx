@@ -7,7 +7,7 @@ import { MetricCard } from "@/components/metric-card";
 import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
 import { computeRuntimeComparison } from "@/lib/runtime-comparison";
-import type { CampaignRun, CampaignRunConfig, CrawlRunListItem } from "@/lib/types";
+import type { AdaptiveInsights, CampaignRun, CampaignRunConfig, CrawlRunListItem } from "@/lib/types";
 
 interface ApiSuccess<T> {
   success: true;
@@ -106,6 +106,25 @@ async function fetchCrawlRuns(): Promise<CrawlRunListItem[]> {
   return payload.data;
 }
 
+async function fetchAdaptiveInsights(sourceSlugs: string[]): Promise<AdaptiveInsights> {
+  const query = new URLSearchParams();
+  if (sourceSlugs.length > 0) {
+    query.set("sourceSlugs", sourceSlugs.join(","));
+  }
+  query.set("windowDays", "14");
+  query.set("limit", "25");
+
+  const response = await fetch(`/api/adaptive/insights?${query.toString()}`, { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<AdaptiveInsights>;
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch adaptive insights: ${response.status}`);
+  }
+  return payload.data;
+}
+
 function extractCampaignSourceSlugs(campaign: CampaignRun): string[] {
   const sourceSlugs = new Set<string>();
 
@@ -141,6 +160,7 @@ export function CampaignsDashboard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [adaptiveInsights, setAdaptiveInsights] = useState<AdaptiveInsights | null>(null);
   const [form, setForm] = useState<CampaignFormState>({
     name: "",
     targetCount: 20,
@@ -302,6 +322,16 @@ export function CampaignsDashboard({
       }),
     [crawlRuns, campaignSourceSlugs]
   );
+
+  useEffect(() => {
+    if (!selectedCampaign) {
+      setAdaptiveInsights(null);
+      return;
+    }
+    void fetchAdaptiveInsights(campaignSourceSlugs)
+      .then((data) => setAdaptiveInsights(data))
+      .catch((error) => setErrorMessage(error instanceof Error ? error.message : String(error)));
+  }, [selectedCampaign?.id, campaignSourceSlugs.join(",")]);
 
   return (
     <div className="sectionStack">
@@ -670,6 +700,88 @@ export function CampaignsDashboard({
                 </div>
               )}
 
+              <h3>Adaptive Attribution Insights</h3>
+              {adaptiveInsights ? (
+                <>
+                  <div className="comparisonGrid">
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Guardrail Hit Rate</strong>
+                        <span className="cellHint">adaptive pages only</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">Hit Rate</span>
+                          <strong>{formatPercent(adaptiveInsights.guardrailHitRate)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Guardrail Pages</span>
+                          <strong>{formatNumber(adaptiveInsights.guardrailPages)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Valid Missing</span>
+                          <strong>{formatNumber(adaptiveInsights.validMissingCount)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Verified Websites</span>
+                          <strong>{formatNumber(adaptiveInsights.verifiedWebsiteCount)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Action Family</th>
+                          <th>Count</th>
+                          <th>Avg Score</th>
+                          <th>Avg Risk</th>
+                          <th>Records Extracted</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adaptiveInsights.actionLeaderboard.slice(0, 8).map((row) => (
+                          <tr key={row.actionType}>
+                            <td>{row.actionType}</td>
+                            <td>{formatNumber(row.count)}</td>
+                            <td>{formatNumber(row.avgScore, 3)}</td>
+                            <td>{formatNumber(row.avgRisk, 3)}</td>
+                            <td>{formatNumber(row.recordsExtracted)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Delayed Credit Action</th>
+                          <th>Count</th>
+                          <th>Avg Reward</th>
+                          <th>Total Reward</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adaptiveInsights.delayedAttribution.slice(0, 8).map((row) => (
+                          <tr key={row.actionType}>
+                            <td>{row.actionType}</td>
+                            <td>{formatNumber(row.count)}</td>
+                            <td>{formatNumber(row.avgReward, 3)}</td>
+                            <td>{formatNumber(row.totalReward, 3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <p className="muted">Adaptive insights are loading for this campaign scope.</p>
+              )}
+
               <h3>Fraternity Items</h3>
               <div className="tableWrap">
                 <table>
@@ -779,6 +891,11 @@ export function CampaignsDashboard({
     </div>
   );
 }
+
+
+
+
+
 
 
 

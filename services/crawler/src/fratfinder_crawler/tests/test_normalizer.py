@@ -138,3 +138,40 @@ def test_normalizer_routes_mailto_website_into_email_field():
     assert normalized.contact_email == "admin@chapter.org"
     assert normalized.field_states["website_url"] == "missing"
     assert normalized.field_states["contact_email"] == "found"
+
+def test_normalizer_marks_valid_missing_when_conservative_evidence_exists():
+    extracted = ExtractedChapter(
+        name="Gamma Chapter",
+        university_name="Inactive Chapter",
+        source_url="https://example.org/chapters",
+        source_confidence=0.95,
+        source_snippet="This chapter is currently suspended and no longer active.",
+    )
+
+    normalized, _ = normalize_record(_source(), extracted)
+
+    assert normalized.field_states["website_url"] == "valid_missing"
+    assert normalized.field_states["instagram_url"] == "valid_missing"
+    assert normalized.field_states["contact_email"] == "valid_missing"
+    assert "find_website" not in normalized.missing_optional_fields
+    assert "find_instagram" not in normalized.missing_optional_fields
+    assert "find_email" not in normalized.missing_optional_fields
+
+
+def test_normalizer_does_not_mark_valid_missing_when_any_contact_is_present():
+    extracted = ExtractedChapter(
+        name="Gamma Chapter",
+        university_name="Inactive Chapter",
+        website_url="https://gamma.example.edu",
+        source_url="https://example.org/chapters",
+        source_confidence=0.95,
+        source_snippet="This chapter is currently suspended and no longer active.",
+    )
+
+    normalized, _ = normalize_record(_source(), extracted)
+
+    assert normalized.field_states["website_url"] == "found"
+    assert normalized.field_states["instagram_url"] == "missing"
+    assert normalized.field_states["contact_email"] == "missing"
+    assert "find_instagram" in normalized.missing_optional_fields
+    assert "find_email" in normalized.missing_optional_fields

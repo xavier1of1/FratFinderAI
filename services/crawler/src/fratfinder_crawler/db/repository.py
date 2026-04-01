@@ -10,6 +10,7 @@ from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_a
 from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
     CrawlMetrics,
+    EpochMetric,
     ExistingSourceCandidate,
     FrontierItem,
     FieldJob,
@@ -1338,6 +1339,7 @@ class CrawlerRepository:
                     crawl_session_id,
                     url,
                     template_signature,
+                    structural_template_signature,
                     http_status,
                     latency_ms,
                     page_analysis,
@@ -1347,15 +1349,21 @@ class CrawlerRepository:
                     selected_action,
                     selected_action_score,
                     selected_action_score_components,
+                    parent_observation_id,
+                    path_depth,
+                    risk_score,
+                    guardrail_flags,
+                    context_bucket,
                     outcome
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     observation.crawl_session_id,
                     observation.url,
                     observation.template_signature,
+                    observation.structural_template_signature,
                     observation.http_status,
                     observation.latency_ms,
                     Jsonb(observation.page_analysis),
@@ -1365,6 +1373,11 @@ class CrawlerRepository:
                     observation.selected_action,
                     observation.selected_action_score,
                     Jsonb(observation.selected_action_score_components),
+                    observation.parent_observation_id,
+                    observation.path_depth,
+                    observation.risk_score,
+                    Jsonb(observation.guardrail_flags),
+                    observation.context_bucket,
                     Jsonb(observation.outcome),
                 ),
             )
@@ -1382,9 +1395,12 @@ class CrawlerRepository:
                     action_type,
                     reward_value,
                     reward_components,
-                    delayed
+                    delayed,
+                    reward_stage,
+                    attributed_observation_id,
+                    discount_factor
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     crawl_session_id,
@@ -1393,6 +1409,9 @@ class CrawlerRepository:
                     event.reward_value,
                     Jsonb(event.reward_components),
                     event.delayed,
+                    event.reward_stage,
+                    event.attributed_observation_id,
+                    event.discount_factor,
                 ),
             )
         self._connection.commit()
@@ -1623,16 +1642,24 @@ class CrawlerRepository:
         *,
         source_slug: str | None = None,
         crawl_session_id: str | None = None,
+        runtime_mode: str | None = None,
+        window_days: int | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         filters = []
         params: list[Any] = []
         if source_slug is not None:
             params.append(source_slug)
-            filters.append(f"s.slug = %s")
+            filters.append("s.slug = %s")
         if crawl_session_id is not None:
             params.append(crawl_session_id)
-            filters.append(f"cpo.crawl_session_id = %s")
+            filters.append("cpo.crawl_session_id = %s")
+        if runtime_mode is not None:
+            params.append(runtime_mode)
+            filters.append("cs.runtime_mode = %s")
+        if window_days is not None:
+            params.append(max(1, int(window_days)))
+            filters.append("cpo.created_at >= NOW() - (%s * INTERVAL '1 day')")
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         params.append(max(1, limit))
         with self._connection.cursor() as cursor:
@@ -1645,6 +1672,12 @@ class CrawlerRepository:
                     cs.runtime_mode,
                     cpo.url,
                     cpo.template_signature,
+                    cpo.structural_template_signature,
+                    cpo.parent_observation_id,
+                    cpo.path_depth,
+                    cpo.risk_score,
+                    cpo.guardrail_flags,
+                    cpo.context_bucket,
                     cpo.http_status,
                     cpo.latency_ms,
                     cpo.page_analysis,
@@ -1667,7 +1700,6 @@ class CrawlerRepository:
             )
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
-
     def build_policy_report(self, limit: int = 25) -> dict[str, Any]:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -1706,7 +1738,272 @@ class CrawlerRepository:
                 (max(1, limit),),
             )
             action_summary = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT
+                    reward_stage,
+                    COUNT(*)::int AS event_count,
+                    COALESCE(AVG(reward_value), 0) AS avg_reward
+                FROM crawl_reward_events
+                GROUP BY reward_stage
+                ORDER BY event_count DESC
+                """
+            )
+            reward_stage_summary = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT
+                    COALESCE(context_bucket, 'unknown') AS context_bucket,
+                    COUNT(*)::int AS visit_count,
+                    COALESCE(AVG(risk_score), 0) AS avg_risk
+                FROM crawl_page_observations
+                GROUP BY COALESCE(context_bucket, 'unknown')
+                ORDER BY visit_count DESC
+                LIMIT %s
+                """,
+                (max(1, limit),),
+            )
+            context_summary = [dict(row) for row in cursor.fetchall()]
         return {
             "templateProfiles": templates,
             "actionSummary": action_summary,
+            "rewardStageSummary": reward_stage_summary,
+            "contextSummary": context_summary,
         }
+
+
+
+
+
+    def export_reward_events(
+        self,
+        *,
+        source_slug: str | None = None,
+        runtime_mode: str | None = None,
+        window_days: int | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        filters = []
+        params: list[Any] = []
+        if source_slug is not None:
+            params.append(source_slug)
+            filters.append("s.slug = %s")
+        if runtime_mode is not None:
+            params.append(runtime_mode)
+            filters.append("cs.runtime_mode = %s")
+        if window_days is not None:
+            params.append(max(1, int(window_days)))
+            filters.append("cre.created_at >= NOW() - (%s * INTERVAL '1 day')")
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(max(1, limit))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    cre.id,
+                    cre.crawl_session_id,
+                    s.slug AS source_slug,
+                    cs.runtime_mode,
+                    cre.page_observation_id,
+                    cre.action_type,
+                    cre.reward_value,
+                    cre.reward_components,
+                    cre.delayed,
+                    cre.reward_stage,
+                    cre.attributed_observation_id,
+                    cre.discount_factor,
+                    cre.created_at
+                FROM crawl_reward_events cre
+                JOIN crawl_sessions cs ON cs.id = cre.crawl_session_id
+                JOIN sources s ON s.id = cs.source_id
+                {where_clause}
+                ORDER BY cre.created_at DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def insert_epoch_metric(self, metric: EpochMetric) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawl_epoch_metrics (
+                    epoch,
+                    policy_version,
+                    runtime_mode,
+                    train_sources,
+                    eval_sources,
+                    kpis,
+                    deltas,
+                    slopes,
+                    cohort_label,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    metric.epoch,
+                    metric.policy_version,
+                    metric.runtime_mode,
+                    Jsonb(metric.train_sources),
+                    Jsonb(metric.eval_sources),
+                    Jsonb(metric.kpis),
+                    Jsonb(metric.deltas),
+                    Jsonb(metric.slopes),
+                    metric.cohort_label,
+                    Jsonb(metric.metadata),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return int(row["id"])
+
+    def list_epoch_metrics(
+        self,
+        *,
+        policy_version: str | None = None,
+        runtime_mode: str | None = None,
+        cohort_label: str | None = None,
+        limit: int = 120,
+    ) -> list[dict[str, Any]]:
+        filters = []
+        params: list[Any] = []
+        if policy_version is not None:
+            params.append(policy_version)
+            filters.append("policy_version = %s")
+        if runtime_mode is not None:
+            params.append(runtime_mode)
+            filters.append("runtime_mode = %s")
+        if cohort_label is not None:
+            params.append(cohort_label)
+            filters.append("cohort_label = %s")
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(max(1, limit))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    id,
+                    epoch,
+                    policy_version,
+                    runtime_mode,
+                    train_sources,
+                    eval_sources,
+                    kpis,
+                    deltas,
+                    slopes,
+                    cohort_label,
+                    metadata,
+                    created_at
+                FROM crawl_epoch_metrics
+                {where_clause}
+                ORDER BY created_at DESC, epoch DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def list_policy_snapshots(
+        self,
+        *,
+        policy_version: str | None = None,
+        runtime_mode: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        filters = []
+        params: list[Any] = []
+        if policy_version is not None:
+            params.append(policy_version)
+            filters.append("policy_version = %s")
+        if runtime_mode is not None:
+            params.append(runtime_mode)
+            filters.append("runtime_mode = %s")
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(max(1, limit))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    id,
+                    policy_version,
+                    runtime_mode,
+                    feature_schema_version,
+                    model_payload,
+                    metrics,
+                    created_at
+                FROM crawl_policy_snapshots
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def adaptive_policy_diff(self, snapshot_id_a: int, snapshot_id_b: int) -> dict[str, Any]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, policy_version, runtime_mode, feature_schema_version, model_payload, metrics, created_at
+                FROM crawl_policy_snapshots
+                WHERE id IN (%s, %s)
+                """,
+                (snapshot_id_a, snapshot_id_b),
+            )
+            rows = cursor.fetchall()
+        snapshots = {int(row["id"]): dict(row) for row in rows}
+        left = snapshots.get(snapshot_id_a)
+        right = snapshots.get(snapshot_id_b)
+        if left is None or right is None:
+            return {"found": False, "left": left, "right": right}
+
+        left_payload = left.get("model_payload") or {}
+        right_payload = right.get("model_payload") or {}
+
+        def _extract_actions(payload: dict[str, Any]) -> dict[str, dict[str, float]]:
+            actions: dict[str, dict[str, float]] = {}
+            for bucket_name in ("navigationActions", "extractionActions", "actions"):
+                bucket = payload.get(bucket_name)
+                if not isinstance(bucket, dict):
+                    continue
+                for action, values in bucket.items():
+                    if not isinstance(values, dict):
+                        continue
+                    actions[str(action)] = {
+                        "count": float(values.get("count") or 0.0),
+                        "avgReward": float(values.get("avgReward") or 0.0),
+                    }
+            return actions
+
+        left_actions = _extract_actions(left_payload if isinstance(left_payload, dict) else {})
+        right_actions = _extract_actions(right_payload if isinstance(right_payload, dict) else {})
+
+        action_keys = sorted(set(left_actions.keys()) | set(right_actions.keys()))
+        action_deltas = []
+        for key in action_keys:
+            left_values = left_actions.get(key, {"count": 0.0, "avgReward": 0.0})
+            right_values = right_actions.get(key, {"count": 0.0, "avgReward": 0.0})
+            action_deltas.append(
+                {
+                    "actionType": key,
+                    "countDelta": round(right_values["count"] - left_values["count"], 4),
+                    "avgRewardDelta": round(right_values["avgReward"] - left_values["avgReward"], 4),
+                    "left": left_values,
+                    "right": right_values,
+                }
+            )
+
+        return {
+            "found": True,
+            "left": left,
+            "right": right,
+            "actionDeltas": action_deltas,
+        }
+
+

@@ -450,3 +450,43 @@ export interface CampaignRun {
 }
 
 
+
+export interface AdaptiveEpochMetric {
+  id: number;
+  epoch: number;
+  policyVersion: string;
+  runtimeMode: string;
+  trainSources: string[];
+  evalSources: string[];
+  kpis: Record<string, number>;
+  deltas: Record<string, number>;
+  slopes: Record<string, number>;
+  cohortLabel: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AdaptiveActionInsight {
+  actionType: string;
+  count: number;
+  avgScore: number;
+  avgRisk: number;
+  recordsExtracted: number;
+}
+
+export interface AdaptiveDelayedAttribution {
+  actionType: string;
+  count: number;
+  avgReward: number;
+  totalReward: number;
+}
+
+export interface AdaptiveInsights {
+  actionLeaderboard: AdaptiveActionInsight[];
+  delayedAttribution: AdaptiveDelayedAttribution[];
+  guardrailHitRate: number;
+  totalPages: number;
+  guardrailPages: number;
+  validMissingCount: number;
+  verifiedWebsiteCount: number;
+}

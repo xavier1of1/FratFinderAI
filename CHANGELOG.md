@@ -1,3 +1,35 @@
+﻿## [2.1.0] - 2026-04-01
+
+### Added
+- Added migrations:
+  - `0014_adaptive_credit_assignment.sql`
+  - `0015_adaptive_epoch_metrics.sql`
+  - `0016_adaptive_policy_indexes.sql`
+- Added adaptive replay/learning surfaces in crawler CLI:
+  - `adaptive-train-loop`
+  - `adaptive-replay-window`
+  - `adaptive-policy-diff`
+- Added delayed-credit reward plumbing with reward stages (`immediate`, `delayed`, `terminal`) and attribution metadata.
+- Added adaptive epoch metric persistence (`crawl_epoch_metrics`) and policy diff/report repository helpers.
+- Added web adaptive observability APIs:
+  - `GET /api/adaptive/epochs`
+  - `GET /api/adaptive/insights`
+- Added benchmark dashboard learning-curve panel from adaptive epoch metrics.
+- Added campaign adaptive-insights panel (action leaderboard, delayed-attribution table, guardrail hit-rate, valid-missing and verified-website counts).
+- Added focused V2.1 crawler tests for delayed-credit rewards, live/train guardrail behavior, structural signature generalization, and conservative valid-missing normalization.
+
+### Changed
+- Adaptive runtime now supports split policy behavior in live vs train usage with safer default control (`live epsilon` vs `train epsilon`) and risk-aware penalties.
+- Adaptive session observations now persist richer context (structural signatures, parent observation links, path depth, risk score, guardrail flags, context buckets).
+- Normalization now supports conservative `valid_missing` handling so jobs are not requeued when evidence indicates true absence.
+- `adaptive-train-eval` now performs train -> replay-update -> legacy/adaptive eval per epoch, computes richer KPI deltas, and stores per-epoch slope snapshots.
+- Environment examples now include the full Agentic RL variable set for V2.1 tuning.
+- Version bumped to `2.1.0` in root package, web app package, and crawler package metadata.
+
+### Fixed
+- Fixed dataclass field ordering regressions in adaptive models that could break crawler imports.
+- Fixed adaptive graph helper gaps (missing context bucket, ancestor traversal, valid-missing counting, queue-efficiency terminal reward).
+- Fixed adaptive persistence contract mismatches between runtime payloads and repository insert columns.
 ## [2.0.1] - 2026-04-01
 
 ### Added
@@ -462,6 +494,8 @@
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
+
 
 
 

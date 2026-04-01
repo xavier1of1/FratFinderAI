@@ -41,6 +41,16 @@ _BLOCKED_CHAPTER_SLUG_PREFIXES = (
     "society-chapters-",
 )
 
+_VALID_MISSING_MARKERS = (
+    "suspended",
+    "disbanded",
+    "inactive chapter",
+    "charter revoked",
+    "no longer active",
+    "closed chapter",
+    "chapter closed",
+)
+
 
 def _slugify(value: str) -> str:
     value = value.strip().lower()
@@ -78,21 +88,41 @@ def _looks_like_navigation_or_placeholder(chapter_name: str, university_name: st
     return False
 
 
-def _field_state(value: str | None, source_confidence: float) -> str:
+def _has_conservative_valid_missing_evidence(record: ExtractedChapter) -> bool:
+    if record.website_url or record.instagram_url or record.contact_email:
+        return False
+    text = " ".join(
+        value
+        for value in (
+            _normalize_label(record.source_snippet),
+            _normalize_label(record.name),
+            _normalize_label(record.university_name),
+        )
+        if value
+    )
+    if not text:
+        return False
+    return any(marker in text for marker in _VALID_MISSING_MARKERS)
+
+
+def _field_state(value: str | None, source_confidence: float, *, valid_missing: bool = False) -> str:
     if value is None:
+        if valid_missing:
+            return "valid_missing"
         return "missing"
     return "found" if source_confidence >= LOW_CONFIDENCE_THRESHOLD else "low_confidence"
 
 
 def _build_field_states(record: ExtractedChapter) -> dict[str, str]:
+    valid_missing = _has_conservative_valid_missing_evidence(record)
     return {
         "name": _field_state(_clean(record.name), record.source_confidence),
         "university_name": _field_state(_clean(record.university_name), record.source_confidence),
         "city": _field_state(_clean(record.city), record.source_confidence),
         "state": _field_state(_clean(record.state), record.source_confidence),
-        "website_url": _field_state(_clean(record.website_url), record.source_confidence),
-        "instagram_url": _field_state(_clean(record.instagram_url), record.source_confidence),
-        "contact_email": _field_state(_clean(record.contact_email), record.source_confidence),
+        "website_url": _field_state(_clean(record.website_url), record.source_confidence, valid_missing=valid_missing),
+        "instagram_url": _field_state(_clean(record.instagram_url), record.source_confidence, valid_missing=valid_missing),
+        "contact_email": _field_state(_clean(record.contact_email), record.source_confidence, valid_missing=valid_missing),
     }
 
 

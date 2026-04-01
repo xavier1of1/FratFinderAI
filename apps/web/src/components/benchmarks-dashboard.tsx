@@ -6,7 +6,7 @@ import { MetricCard } from "@/components/metric-card";
 import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
 import { computeRuntimeComparison } from "@/lib/runtime-comparison";
-import type { BenchmarkFieldName, BenchmarkRunConfig, BenchmarkRunListItem, CrawlRunListItem } from "@/lib/types";
+import type { AdaptiveEpochMetric, BenchmarkFieldName, BenchmarkRunConfig, BenchmarkRunListItem, CrawlRunListItem } from "@/lib/types";
 
 interface ApiSuccess<T> {
   success: true;
@@ -107,6 +107,19 @@ async function fetchCrawlRuns(): Promise<CrawlRunListItem[]> {
   return payload.data;
 }
 
+async function fetchAdaptiveEpochs(): Promise<AdaptiveEpochMetric[]> {
+  const response = await fetch("/api/adaptive/epochs?limit=60", { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<AdaptiveEpochMetric[]>;
+
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch adaptive epochs: ${response.status}`);
+  }
+
+  return payload.data;
+}
 
 export function BenchmarksDashboard({
   initialBenchmarks,
@@ -119,6 +132,7 @@ export function BenchmarksDashboard({
 }) {
   const [benchmarks, setBenchmarks] = useState<BenchmarkRunListItem[]>(sortBenchmarks(initialBenchmarks));
   const [crawlRuns, setCrawlRuns] = useState<CrawlRunListItem[]>(initialRuns);
+  const [adaptiveEpochs, setAdaptiveEpochs] = useState<AdaptiveEpochMetric[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialBenchmarks[0]?.id ?? null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -153,9 +167,10 @@ export function BenchmarksDashboard({
   async function refreshBenchmarkList(options?: { selectNewest?: boolean }) {
     setIsRefreshing(true);
     try {
-      const [benchmarkData, runData] = await Promise.all([fetchBenchmarks(), fetchCrawlRuns()]);
+      const [benchmarkData, runData, epochData] = await Promise.all([fetchBenchmarks(), fetchCrawlRuns(), fetchAdaptiveEpochs()]);
       setBenchmarks(benchmarkData);
       setCrawlRuns(runData);
+      setAdaptiveEpochs(epochData);
 
       const selectedStillExists = selectedId ? benchmarkData.some((item) => item.id === selectedId) : false;
       if (options?.selectNewest && benchmarkData[0]) {
@@ -183,6 +198,15 @@ export function BenchmarksDashboard({
       clearInterval(interval);
     };
   }, [runningCount]);
+
+  useEffect(() => {
+    if (adaptiveEpochs.length > 0) {
+      return;
+    }
+    void fetchAdaptiveEpochs()
+      .then((rows) => setAdaptiveEpochs(rows))
+      .catch((error) => setErrorMessage(error instanceof Error ? error.message : String(error)));
+  }, [adaptiveEpochs.length]);
 
   async function handleRunBenchmark(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -234,6 +258,7 @@ export function BenchmarksDashboard({
       }),
     [crawlRuns, selectedBenchmark?.sourceSlug]
   );
+  const epochSeries = useMemo(() => [...adaptiveEpochs].reverse(), [adaptiveEpochs]);
 
   return (
     <div className="sectionStack">
@@ -533,6 +558,34 @@ export function BenchmarksDashboard({
                 </>
               )}
 
+              <h3>Adaptive Learning Curve</h3>
+              {epochSeries.length === 0 ? (
+                <p className="muted">No adaptive epoch metrics yet.</p>
+              ) : (
+                <div className="tableWrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Epoch</th>
+                        <th>Balanced Score</th>
+                        <th>Balanced Slope</th>
+                        <th>Jobs/Min Delta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {epochSeries.slice(-10).map((epoch) => (
+                        <tr key={epoch.id}>
+                          <td>{epoch.epoch}</td>
+                          <td>{formatNumber(epoch.kpis?.balancedScore, 4)}</td>
+                          <td>{formatNumber(epoch.slopes?.balancedScoreSlope, 4)}</td>
+                          <td>{formatNumber(epoch.kpis?.jobsPerMinuteDelta, 4)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
               <div className="tableWrap">
                 <table>
                   <thead>
@@ -623,6 +676,14 @@ export function BenchmarksDashboard({
     </div>
   );
 }
+
+
+
+
+
+
+
+
 
 
 

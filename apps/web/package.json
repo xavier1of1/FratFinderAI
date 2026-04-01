@@ -1,6 +1,6 @@
 {
   "name": "@fratfinder/web",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "private": true,
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
@@ -27,5 +27,6 @@
     "vitest": "^2.1.1"
   }
 }
+
 
 

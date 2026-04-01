@@ -187,10 +187,16 @@ class PageObservation:
     page_analysis: dict[str, Any]
     classification: dict[str, Any]
     embedded_data: dict[str, Any]
+    structural_template_signature: str | None = None
     candidate_actions: list[dict[str, Any]] = field(default_factory=list)
     selected_action: str | None = None
     selected_action_score: float | None = None
     selected_action_score_components: dict[str, float] = field(default_factory=dict)
+    parent_observation_id: int | None = None
+    path_depth: int = 0
+    risk_score: float = 0.0
+    guardrail_flags: list[str] = field(default_factory=list)
+    context_bucket: str | None = None
     outcome: dict[str, Any] = field(default_factory=dict)
 
 
@@ -200,6 +206,9 @@ class RewardEvent:
     reward_value: float
     reward_components: dict[str, float] = field(default_factory=dict)
     delayed: bool = False
+    reward_stage: str = "immediate"
+    attributed_observation_id: int | None = None
+    discount_factor: float = 1.0
 
 
 @dataclass(slots=True)
@@ -290,3 +299,16 @@ class UnsupportedSourceError(Exception):
 
 class AmbiguousRecordError(Exception):
     pass
+
+@dataclass(slots=True)
+class EpochMetric:
+    epoch: int
+    policy_version: str
+    runtime_mode: str
+    train_sources: list[str]
+    eval_sources: list[str]
+    kpis: dict[str, float]
+    deltas: dict[str, float]
+    slopes: dict[str, float]
+    cohort_label: str = "default"
+    metadata: dict[str, Any] = field(default_factory=dict)
