@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import time
 from urllib.parse import urlparse
 
 import requests
