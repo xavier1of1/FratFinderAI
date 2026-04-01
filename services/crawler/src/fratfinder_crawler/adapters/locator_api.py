@@ -6,10 +6,31 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 from fratfinder_crawler.adapters.script_json import _coerce_dict_list, _payloads_to_chapters
-from fratfinder_crawler.models import ExtractedChapter
+from fratfinder_crawler.models import ChapterStub, ExtractedChapter
 
 
 class LocatorApiAdapter:
+    def parse_stubs(
+        self,
+        html: str,
+        source_url: str,
+        *,
+        api_url: str | None = None,
+        http_client: Any | None = None,
+    ) -> list[ChapterStub]:
+        chapters = self.parse(html, source_url, api_url=api_url, http_client=http_client)
+        return [
+            ChapterStub(
+                chapter_name=chapter.name,
+                university_name=chapter.university_name,
+                detail_url=chapter.website_url,
+                outbound_chapter_url_candidate=chapter.website_url,
+                confidence=chapter.source_confidence,
+                provenance=f"locator_api:{chapter.source_url}",
+            )
+            for chapter in chapters
+        ]
+
     def parse(
         self,
         html: str,

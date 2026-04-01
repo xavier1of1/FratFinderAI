@@ -3,6 +3,7 @@
 from fratfinder_crawler.adapters.locator_api import LocatorApiAdapter
 from fratfinder_crawler.adapters.registry import AdapterRegistry
 from fratfinder_crawler.adapters.script_json import ScriptJsonAdapter
+from fratfinder_crawler.adapters.directory_v1 import DirectoryV1Adapter
 from fratfinder_crawler.models import CrawlMetrics, SourceRecord
 from fratfinder_crawler.orchestration.graph import CrawlOrchestrator
 
@@ -283,6 +284,58 @@ def test_locator_api_adapter_returns_empty_list_when_request_fails():
     )
 
     assert records == []
+
+
+def test_directory_adapter_emits_stub_contract():
+    html = """
+    <li class="chapter-item" data-chapter-card>
+      <h3 class="chapter-name">Gamma Chapter</h3>
+      <div class="university">State University</div>
+      <a href="/chapters/gamma">Go To Site</a>
+    </li>
+    """
+    stubs = DirectoryV1Adapter().parse_stubs(html, "https://example.org/chapters")
+
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Gamma Chapter"
+    assert stubs[0].university_name == "State University"
+    assert stubs[0].outbound_chapter_url_candidate == "https://example.org/chapters/gamma"
+    assert stubs[0].provenance.startswith("directory_v1:")
+
+
+def test_script_json_adapter_emits_stub_contract():
+    html = """
+    <script>
+      window.chapters = [{"chapterName": "Epsilon Chapter", "schoolName": "Example College", "websiteUrl": "https://example.edu/epsilon"}];
+    </script>
+    """
+    stubs = ScriptJsonAdapter().parse_stubs(html, "https://example.org/chapters")
+
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Epsilon Chapter"
+    assert stubs[0].university_name == "Example College"
+    assert stubs[0].outbound_chapter_url_candidate == "https://example.edu/epsilon"
+
+
+def test_locator_api_adapter_emits_stub_contract():
+    http_client = RoutingHttpClient(
+        {
+            "https://example.org/api/chapters": """
+            [{"chapterName":"Zeta Chapter","schoolName":"Demo University","websiteUrl":"https://demo.edu/zeta"}]
+            """
+        }
+    )
+    stubs = LocatorApiAdapter().parse_stubs(
+        "<html><body><div class='storepoint-map'></div></body></html>",
+        "https://example.org/chapters",
+        api_url="https://example.org/api/chapters",
+        http_client=http_client,
+    )
+
+    assert len(stubs) == 1
+    assert stubs[0].chapter_name == "Zeta Chapter"
+    assert stubs[0].university_name == "Demo University"
+    assert stubs[0].outbound_chapter_url_candidate == "https://demo.edu/zeta"
 
 
 

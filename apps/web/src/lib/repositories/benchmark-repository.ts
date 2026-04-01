@@ -212,7 +212,7 @@ export async function createBenchmarkRun(params: {
         created_at AS "createdAt",
         updated_at AS "updatedAt"
     `,
-    [params.name, params.fieldName, params.sourceSlug, params.config]
+    [params.name, params.fieldName, params.sourceSlug, JSON.stringify(params.config)]
   );
 
   const row = rows[0];
@@ -256,7 +256,7 @@ export async function completeBenchmarkRun(params: {
         last_error = NULL
       WHERE id = $1
     `,
-    [params.id, params.summary, params.samples]
+    [params.id, JSON.stringify(params.summary), JSON.stringify(params.samples)]
   );
 }
 
@@ -278,7 +278,12 @@ export async function failBenchmarkRun(params: {
         last_error = $2
       WHERE id = $1
     `,
-    [params.id, params.error, params.summary, params.samples]
+    [
+      params.id,
+      params.error,
+      params.summary ? JSON.stringify(params.summary) : null,
+      JSON.stringify(params.samples),
+    ]
   );
 }
 

@@ -348,6 +348,14 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
                   <p className="benchmarkMetaValue">{formatConfidence(selectedRequest.sourceConfidence)}</p>
                 </div>
                 <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Discovery Provenance</p>
+                  <p className="benchmarkMetaValue">{selectedRequest.progress.discovery?.sourceProvenance ?? "n/a"}</p>
+                </div>
+                <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Fallback Reason</p>
+                  <p className="benchmarkMetaValue">{selectedRequest.progress.discovery?.fallbackReason ?? "n/a"}</p>
+                </div>
+                <div className="benchmarkMetaCard">
                   <p className="benchmarkMetaLabel">Source Link</p>
                   <p className="benchmarkMetaValue">
                     {selectedRequest.sourceUrl ? (
@@ -429,6 +437,32 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
                 </div>
               ) : (
                 <p className="muted">No discovery candidates were retained for this request.</p>
+              )}
+
+              <h3>Resolution Trace</h3>
+              {selectedRequest.progress.discovery?.resolutionTrace?.length ? (
+                <div className="tableWrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Step</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedRequest.progress.discovery.resolutionTrace.map((traceStep, index) => (
+                        <tr key={`${selectedRequest.id}-trace-${index}`}>
+                          <td>{String(traceStep.step ?? `step-${index + 1}`)}</td>
+                          <td>
+                            <code>{JSON.stringify(traceStep)}</code>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="muted">No resolution trace captured yet.</p>
               )}
 
               <div className="buttonRow">

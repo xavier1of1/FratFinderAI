@@ -148,6 +148,9 @@ function buildProgressSnapshot(params: {
   sourceUrl: string | null;
   sourceConfidence: number | null;
   confidenceTier: string | null;
+  sourceProvenance: "verified_registry" | "existing_source" | "search" | null;
+  fallbackReason: string | null;
+  resolutionTrace: Array<Record<string, unknown>>;
   candidates: unknown[];
   crawlRun: Awaited<ReturnType<typeof getLatestCrawlRunForSource>>;
   fieldSnapshot: Awaited<ReturnType<typeof getSourceFieldJobSnapshot>>;
@@ -179,6 +182,9 @@ function buildProgressSnapshot(params: {
       sourceUrl: params.sourceUrl,
       sourceConfidence: params.sourceConfidence ?? 0,
       confidenceTier: params.confidenceTier ?? "low",
+      sourceProvenance: params.sourceProvenance,
+      fallbackReason: params.fallbackReason,
+      resolutionTrace: params.resolutionTrace,
       candidates: params.candidates as never
     },
     crawlRun: params.crawlRun
@@ -253,6 +259,9 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
       sourceUrl: request.sourceUrl,
       sourceConfidence: request.sourceConfidence,
       confidenceTier: request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low",
+      sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
+      fallbackReason: request.progress.discovery?.fallbackReason ?? null,
+      resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
       candidates: request.progress.discovery?.candidates ?? [],
       crawlRun: crawlRunAfterIngest,
       fieldSnapshot: fieldSnapshotAfterIngest
@@ -323,6 +332,9 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
         sourceUrl: request.sourceUrl,
         sourceConfidence: request.sourceConfidence,
         confidenceTier: request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low",
+        sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
+        fallbackReason: request.progress.discovery?.fallbackReason ?? null,
+        resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
         candidates: request.progress.discovery?.candidates ?? [],
         crawlRun: latestRun,
         fieldSnapshot
@@ -375,6 +387,9 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
       sourceUrl: request.sourceUrl,
       sourceConfidence: request.sourceConfidence,
       confidenceTier: request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low",
+      sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
+      fallbackReason: request.progress.discovery?.fallbackReason ?? null,
+      resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
       candidates: request.progress.discovery?.candidates ?? [],
       crawlRun: latestRun,
       fieldSnapshot

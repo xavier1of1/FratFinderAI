@@ -55,6 +55,40 @@ class SourceRecord:
 
 
 @dataclass(slots=True)
+class VerifiedSourceRecord:
+    fraternity_slug: str
+    fraternity_name: str
+    national_url: str
+    origin: str
+    confidence: float
+    http_status: int | None
+    checked_at: str | None = None
+    is_active: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ExistingSourceCandidate:
+    source_slug: str
+    list_url: str
+    base_url: str
+    active: bool
+    last_run_status: str | None
+    last_success_at: str | None
+    confidence: float
+
+
+@dataclass(slots=True)
+class ChapterStub:
+    chapter_name: str
+    university_name: str | None
+    detail_url: str | None
+    outbound_chapter_url_candidate: str | None
+    confidence: float
+    provenance: str
+
+
+@dataclass(slots=True)
 class ExtractedChapter:
     name: str
     university_name: str | None = None

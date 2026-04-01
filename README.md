@@ -110,10 +110,35 @@ Process missing-field jobs for one source only:
 python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25
 ```
 
+Probe search-provider health before launching a large batch:
+
+```bash
+python -m fratfinder_crawler.cli search-preflight --probes 4
+python -m fratfinder_crawler.cli process-field-jobs --field-name find_website --workers 8 --limit 200 --run-preflight --require-healthy-search
+```
+
 Discover a likely national source URL for a fraternity name:
 
 ```bash
 python -m fratfinder_crawler.cli discover-source --fraternity-name "Lambda Chi Alpha"
+```
+
+Bootstrap verified registry seeds from manual research:
+
+```bash
+python -m fratfinder_crawler.cli bootstrap-nic-sources --input research_nav_21.json
+```
+
+Revalidate one verified seed (manual/operator-driven):
+
+```bash
+python -m fratfinder_crawler.cli revalidate-verified-source --fraternity-slug sigma-chi
+```
+
+Revalidate the newest N verified seeds:
+
+```bash
+python -m fratfinder_crawler.cli revalidate-verified-sources --limit 20
 ```
 
 ### Search-Backed Enrichment
@@ -123,15 +148,29 @@ When chapter website, email, or Instagram data is not present on the national so
 Relevant env settings:
 
 - `CRAWLER_SEARCH_ENABLED=true` enables search-backed enrichment for missing fields.
-- `CRAWLER_SEARCH_PROVIDER=auto` is now the recommended default: it prefers Brave Search API when `CRAWLER_SEARCH_BRAVE_API_KEY` is set and otherwise falls back to Bing HTML.
+- `CRAWLER_SEARCH_PROVIDER=auto` is now the recommended default: it starts with SearXNG (`searxng_json`) when configured, then uses the free-provider order (`tavily_api -> serper_api -> duckduckgo_html -> bing_html -> brave_html`), and inserts `brave_api` early when a Brave API key is present.
+- `CRAWLER_SEARCH_PROVIDER=auto_free` remains available for a strict free-only chain (`searxng_json -> tavily_api -> serper_api -> duckduckgo_html -> bing_html -> brave_html`) and skips providers that are not configured.
 - `CRAWLER_SEARCH_PROVIDER=bing_html` remains available for explicit local-only testing when you want to bypass Brave.
+- `CRAWLER_SEARCH_PROVIDER_ORDER_FREE` overrides the `auto_free` chain when you need custom ordering.
+- `CRAWLER_SEARCH_SEARXNG_BASE_URL` points to a SearXNG JSON endpoint (for example `http://localhost:8888`).
+- `CRAWLER_SEARCH_SEARXNG_ENGINES` optionally pins SearXNG engines per query.
+- `CRAWLER_SEARCH_TAVILY_API_KEY` and `CRAWLER_SEARCH_SERPER_API_KEY` enable free-tier API fallbacks behind SearXNG.
+- `CRAWLER_SEARCH_MIN_REQUEST_INTERVAL_MS` enables lightweight per-worker pacing between search requests (set this above `0` when providers start challenging high-frequency traffic).
+- `CRAWLER_SEARCH_PROVIDER_PACING_MS_*` applies provider-specific pacing overrides (`SEARXNG_JSON`, `TAVILY_API`, `SERPER_API`, `DUCKDUCKGO_HTML`, `BING_HTML`, `BRAVE_HTML`) without changing global pacing.
 - `CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS` controls how long Bing-backed jobs cool down after a clean no-result pass so hopeless chapters do not get reprocessed every day.
 - `CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS` controls backoff for dependency-blocked jobs (for example, Bing email jobs waiting on confident website discovery) without consuming retry budget.
+- `CRAWLER_SEARCH_TRANSIENT_SHORT_RETRIES` and `CRAWLER_SEARCH_TRANSIENT_LONG_COOLDOWN_SECONDS` split transient provider failure handling into short retries followed by long cooldowns, preventing queue hot-loop churn.
+- `CRAWLER_SEARCH_PREFLIGHT_ENABLED`, `CRAWLER_SEARCH_PREFLIGHT_PROBE_COUNT`, and `CRAWLER_SEARCH_PREFLIGHT_MIN_SUCCESS_RATE` gate batches on provider health before large runs.
+- `CRAWLER_SEARCH_DEGRADED_WORKER_CAP`, `CRAWLER_SEARCH_DEGRADED_MAX_RESULTS`, `CRAWLER_SEARCH_DEGRADED_MAX_PAGES_PER_JOB`, `CRAWLER_SEARCH_DEGRADED_EMAIL_MAX_QUERIES`, `CRAWLER_SEARCH_DEGRADED_INSTAGRAM_MAX_QUERIES`, and `CRAWLER_SEARCH_DEGRADED_DEPENDENCY_WAIT_SECONDS` tune degraded-mode behavior when preflight detects weak provider availability.
 - `CRAWLER_SEARCH_MIN_NO_CANDIDATE_BACKOFF_SECONDS` enforces a minimum retry delay for no-candidate outcomes so zero-day cooldown settings do not hot-loop the same jobs in one batch.
 - `CRAWLER_FIELD_JOB_MAX_WORKERS` controls how many field-job workers can run concurrently in one batch.
 - `CRAWLER_SEARCH_EMAIL_MAX_QUERIES` caps the email query funnel so contact-email jobs stay bounded and do not fan out unnecessarily.
+- `CRAWLER_SEARCH_REQUIRE_CONFIDENT_WEBSITE_FOR_EMAIL` keeps website-first email safety on by default, while `CRAWLER_SEARCH_EMAIL_ESCAPE_ON_PROVIDER_BLOCK` and `CRAWLER_SEARCH_EMAIL_ESCAPE_MIN_WEBSITE_FAILURES` let email jobs proceed from trusted non-website evidence after repeated provider-blocked website failures.
 - `CRAWLER_SEARCH_INSTAGRAM_MAX_QUERIES` caps the Instagram query funnel so Bing-backed Instagram jobs stay bounded by default.
 - `CRAWLER_SEARCH_ENABLE_SCHOOL_INITIALS`, `CRAWLER_SEARCH_MIN_SCHOOL_INITIAL_LENGTH`, `CRAWLER_SEARCH_ENABLE_COMPACT_FRATERNITY`, and `CRAWLER_SEARCH_INSTAGRAM_ENABLE_HANDLE_QUERIES` tune the Instagram-specific handle/query strategy without changing the broader search stack.
+- `CRAWLER_SEARCH_INSTAGRAM_DIRECT_PROBE_ENABLED` is an experimental fallback for direct Instagram handle probing when search providers are unavailable; keep this `false` unless you are actively validating probe quality.
+- `CRAWLER_DISCOVERY_VERIFIED_MIN_CONFIDENCE` is the confidence floor for using `verified_sources` before falling back to existing source rows or search.
+- `CRAWLER_NAV_MAX_HOPS_PER_STUB` and `CRAWLER_NAV_MAX_PAGES_PER_RUN` bound chapter-stub navigation so directory expansion stays fast and deterministic.
 - `GREEDY_COLLECT` controls nationals-site opportunistic ingestion: `none` keeps target-only enrichment, `passive` collects nearby chapter directory evidence with low crawl fanout, and `bfs` performs deeper same-domain traversal on nationals sites to ingest additional chapter contact signals.
 - `CRAWLER_SEARCH_PROVIDER=duckduckgo_html` remains available and now auto-falls back to Bing when DuckDuckGo returns anomaly pages or transport-level failures.
 - `CRAWLER_SEARCH_PROVIDER=brave_api` can be used explicitly if you want Brave only; when Brave errors, the crawler falls back to Bing instead of stalling jobs.
@@ -151,6 +190,18 @@ For a cost-first Bing-only run, use a conservative profile:
 - `CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS=30`
 - `CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS=300`
 - `CRAWLER_SEARCH_MIN_NO_CANDIDATE_BACKOFF_SECONDS=60`
+- `CRAWLER_SEARCH_MIN_REQUEST_INTERVAL_MS=250`
+- `CRAWLER_SEARCH_PREFLIGHT_ENABLED=true`
+- `CRAWLER_SEARCH_PREFLIGHT_MIN_SUCCESS_RATE=0.34`
+
+For a no-cost recovery profile with local SearXNG + free API fallbacks:
+
+- `CRAWLER_SEARCH_PROVIDER=auto_free`
+- `CRAWLER_SEARCH_SEARXNG_BASE_URL=http://localhost:8888`
+- `CRAWLER_SEARCH_TAVILY_API_KEY=<optional>`
+- `CRAWLER_SEARCH_SERPER_API_KEY=<optional>`
+- `CRAWLER_SEARCH_MIN_REQUEST_INTERVAL_MS=200`
+- `CRAWLER_SEARCH_PREFLIGHT_ENABLED=true`
 
 In Bing-only mode, the crawler now:
 
@@ -228,6 +279,8 @@ High-level behavior:
 
 1. Create request (`/fraternity-intake` form)
 - Backend calls `discover-source` and stores ranked candidates in `progress.discovery.candidates`.
+- Discovery now resolves in deterministic order: `verified_sources` registry -> existing configured source -> search fallback.
+- Request progress stores `sourceProvenance`, `fallbackReason`, and `resolutionTrace` so operators can audit selection decisions.
 - If discovery confidence is `high` or `medium` and a source URL is present, the request is queued automatically.
 - If discovery confidence is `low`, request stays in `draft/awaiting_confirmation`.
 
@@ -255,7 +308,10 @@ Operator notes:
 
 - Discovery is deterministic and LLM-optional.
 - Alias-aware discovery is implemented (for example `Phi Gamma Delta` also queries `fiji`).
+- Registry-first source resolution is implemented with conflict policy: health first, then recent successful crawl evidence, then confidence.
+- `verified_sources` is intentionally manual-bootstrap/revalidate only (no periodic refresh scheduler).
 - Additional fraternity-specific host/source hints can be defined in `services/crawler/src/fratfinder_crawler/discovery.py` when search providers are noisy.
+- Graph orchestration now includes navigation stages (`detect_chapter_index_mode`, `extract_chapter_stubs`, bounded follow, contact hint extraction) and then gracefully falls back to existing extraction strategies when navigation signals are weak.
 - For map-backed chapter directories (for example Google My Maps embeds), embedded-data detection can emit a KML API hint and `locator_api` can parse KML placemarks into canonical chapter records.
 
 ## Migrations and Seeds
@@ -274,6 +330,7 @@ docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supaba
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0005_crawl_run_intelligence.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0006_benchmark_runs.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0007_fraternity_crawl_requests.sql
+docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/migrations/0008_verified_sources.sql
 docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/seeds/0001_seed.sql
 ```
 

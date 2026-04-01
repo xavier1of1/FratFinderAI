@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
     CrawlMetrics,
+    ExistingSourceCandidate,
     FieldJob,
     FIELD_TO_CHAPTER_COLUMN,
     FIELD_JOB_FIND_EMAIL,
@@ -21,6 +22,7 @@ from fratfinder_crawler.models import (
     ProvenanceRecord,
     ReviewItemCandidate,
     SourceRecord,
+    VerifiedSourceRecord,
 )
 
 
@@ -73,6 +75,219 @@ class CrawlerRepository:
             )
             for row in rows
         ]
+
+    def get_verified_source_by_slug(self, fraternity_slug: str) -> VerifiedSourceRecord | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    origin,
+                    confidence,
+                    http_status,
+                    checked_at,
+                    is_active,
+                    metadata
+                FROM verified_sources
+                WHERE fraternity_slug = %s
+                LIMIT 1
+                """,
+                (fraternity_slug,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return VerifiedSourceRecord(
+            fraternity_slug=row["fraternity_slug"],
+            fraternity_name=row["fraternity_name"],
+            national_url=row["national_url"],
+            origin=row["origin"],
+            confidence=float(row["confidence"] or 0.0),
+            http_status=int(row["http_status"]) if row["http_status"] is not None else None,
+            checked_at=row["checked_at"].isoformat() if row.get("checked_at") else None,
+            is_active=bool(row["is_active"]),
+            metadata=row["metadata"] or {},
+        )
+
+    def list_verified_sources(self, limit: int = 200) -> list[VerifiedSourceRecord]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    origin,
+                    confidence,
+                    http_status,
+                    checked_at,
+                    is_active,
+                    metadata
+                FROM verified_sources
+                ORDER BY checked_at DESC, fraternity_slug ASC
+                LIMIT %s
+                """,
+                (max(1, limit),),
+            )
+            rows = cursor.fetchall()
+        return [
+            VerifiedSourceRecord(
+                fraternity_slug=row["fraternity_slug"],
+                fraternity_name=row["fraternity_name"],
+                national_url=row["national_url"],
+                origin=row["origin"],
+                confidence=float(row["confidence"] or 0.0),
+                http_status=int(row["http_status"]) if row["http_status"] is not None else None,
+                checked_at=row["checked_at"].isoformat() if row.get("checked_at") else None,
+                is_active=bool(row["is_active"]),
+                metadata=row["metadata"] or {},
+            )
+            for row in rows
+        ]
+
+    def upsert_verified_source(
+        self,
+        *,
+        fraternity_slug: str,
+        fraternity_name: str,
+        national_url: str,
+        origin: str,
+        confidence: float,
+        http_status: int | None,
+        checked_at: str | None = None,
+        is_active: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> VerifiedSourceRecord:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO verified_sources (
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    origin,
+                    confidence,
+                    http_status,
+                    checked_at,
+                    is_active,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, COALESCE(%s::timestamptz, NOW()), %s, %s)
+                ON CONFLICT (fraternity_slug)
+                DO UPDATE SET
+                    fraternity_name = EXCLUDED.fraternity_name,
+                    national_url = EXCLUDED.national_url,
+                    origin = EXCLUDED.origin,
+                    confidence = EXCLUDED.confidence,
+                    http_status = EXCLUDED.http_status,
+                    checked_at = EXCLUDED.checked_at,
+                    is_active = EXCLUDED.is_active,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = NOW()
+                RETURNING
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    origin,
+                    confidence,
+                    http_status,
+                    checked_at,
+                    is_active,
+                    metadata
+                """,
+                (
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    origin,
+                    max(0.0, min(float(confidence), 0.99)),
+                    http_status,
+                    checked_at,
+                    is_active,
+                    Jsonb(metadata or {}),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return VerifiedSourceRecord(
+            fraternity_slug=row["fraternity_slug"],
+            fraternity_name=row["fraternity_name"],
+            national_url=row["national_url"],
+            origin=row["origin"],
+            confidence=float(row["confidence"] or 0.0),
+            http_status=int(row["http_status"]) if row["http_status"] is not None else None,
+            checked_at=row["checked_at"].isoformat() if row.get("checked_at") else None,
+            is_active=bool(row["is_active"]),
+            metadata=row["metadata"] or {},
+        )
+
+    def get_existing_source_candidates(self, fraternity_slug: str) -> list[ExistingSourceCandidate]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    s.slug AS source_slug,
+                    s.base_url,
+                    s.list_path,
+                    s.active,
+                    MAX(cr.started_at) FILTER (WHERE cr.status = 'succeeded') AS last_success_at,
+                    (
+                        ARRAY_REMOVE(
+                            ARRAY_AGG(cr.status ORDER BY cr.started_at DESC),
+                            NULL
+                        )
+                    )[1] AS last_run_status
+                FROM sources s
+                JOIN fraternities f ON f.id = s.fraternity_id
+                LEFT JOIN crawl_runs cr ON cr.source_id = s.id
+                WHERE f.slug = %s
+                GROUP BY s.slug, s.base_url, s.list_path, s.active, s.updated_at
+                ORDER BY
+                    s.active DESC,
+                    MAX(cr.started_at) FILTER (WHERE cr.status = 'succeeded') DESC NULLS LAST,
+                    s.updated_at DESC,
+                    s.slug ASC
+                """,
+                (fraternity_slug,),
+            )
+            rows = cursor.fetchall()
+        candidates: list[ExistingSourceCandidate] = []
+        for row in rows:
+            list_path = row["list_path"]
+            base_url = row["base_url"]
+            if isinstance(list_path, str) and list_path.startswith("http"):
+                list_url = list_path
+            elif isinstance(list_path, str) and list_path:
+                list_url = f"{base_url.rstrip('/')}/{list_path.lstrip('/')}"
+            else:
+                list_url = base_url
+
+            last_status = row["last_run_status"]
+            health_confidence = 0.60
+            if last_status == "succeeded":
+                health_confidence = 0.90
+            elif last_status == "partial":
+                health_confidence = 0.75
+            elif last_status == "failed":
+                health_confidence = 0.50
+
+            if not row["active"]:
+                health_confidence -= 0.20
+
+            candidates.append(
+                ExistingSourceCandidate(
+                    source_slug=row["source_slug"],
+                    list_url=list_url,
+                    base_url=base_url,
+                    active=bool(row["active"]),
+                    last_run_status=last_status,
+                    last_success_at=row["last_success_at"].isoformat() if row["last_success_at"] else None,
+                    confidence=max(0.0, min(0.99, health_confidence)),
+                )
+            )
+        return candidates
 
     def upsert_fraternity(self, slug: str, name: str, nic_affiliated: bool = True) -> tuple[str, str]:
         with self._connection.cursor() as cursor:
@@ -434,7 +649,7 @@ class CrawlerRepository:
                 )
         self._connection.commit()
 
-    def create_review_item(self, source_id: str, crawl_run_id: int, candidate: ReviewItemCandidate, chapter_id: str | None = None) -> None:
+    def create_review_item(self, source_id: str | None, crawl_run_id: int | None, candidate: ReviewItemCandidate, chapter_id: str | None = None) -> None:
         review_payload = {
             "itemType": candidate.item_type,
             "reason": candidate.reason,
@@ -680,9 +895,35 @@ class CrawlerRepository:
             )
             return cursor.fetchone() is not None
 
+    def has_recent_transient_website_failures(self, chapter_id: str, min_failures: int = 2) -> bool:
+        threshold = max(1, min_failures)
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT 1
+                FROM field_jobs
+                WHERE chapter_id = %s
+                  AND field_name = 'find_website'
+                  AND (
+                      COALESCE(last_error, '') ILIKE '%%provider or network unavailable%%'
+                      OR (
+                          CASE
+                              WHEN COALESCE(payload->>'transient_provider_failures', '') ~ '^[0-9]+$'
+                              THEN (payload->>'transient_provider_failures')::int
+                              ELSE 0
+                          END
+                      ) >= %s
+                  )
+                  AND attempts >= %s
+                LIMIT 1
+                """,
+                (chapter_id, threshold, threshold),
+            )
+            return cursor.fetchone() is not None
+
     def create_field_job_review_item(self, job: FieldJob, candidate: ReviewItemCandidate) -> None:
-        source_id: str | None = None
-        if job.crawl_run_id is not None:
+        source_id: str | None = job.source_id
+        if source_id is None and job.crawl_run_id is not None:
             with self._connection.cursor() as cursor:
                 cursor.execute("SELECT source_id FROM crawl_runs WHERE id = %s", (job.crawl_run_id,))
                 row = cursor.fetchone()
@@ -781,7 +1022,15 @@ class CrawlerRepository:
                 (Jsonb(completed_payload), job.id),
             )
 
-    def requeue_field_job(self, job: FieldJob, error: str, delay_seconds: int, preserve_attempt: bool = False) -> None:
+    def requeue_field_job(
+        self,
+        job: FieldJob,
+        error: str,
+        delay_seconds: int,
+        preserve_attempt: bool = False,
+        payload_patch: dict[str, Any] | None = None,
+    ) -> None:
+        payload_patch = payload_patch or {}
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
             cursor.execute(
@@ -793,12 +1042,13 @@ class CrawlerRepository:
                     started_at = NULL,
                     finished_at = NULL,
                     last_error = %s,
+                    payload = COALESCE(payload, '{}'::jsonb) || %s,
                     claim_token = NULL,
                     terminal_failure = FALSE,
                     attempts = CASE WHEN %s THEN GREATEST(attempts - 1, 0) ELSE attempts END
                 WHERE id = %s
                 """,
-                (delay_seconds, error, preserve_attempt, job.id),
+                (delay_seconds, error, Jsonb(payload_patch), preserve_attempt, job.id),
             )
 
     def fail_field_job_terminal(self, job: FieldJob, error: str) -> None:

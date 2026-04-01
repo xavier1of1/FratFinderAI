@@ -1,6 +1,7 @@
-﻿from fratfinder_crawler.models import ExtractedChapter, SourceRecord
-from fratfinder_crawler.normalization.normalizer import normalize_record
+import pytest
 
+from fratfinder_crawler.models import AmbiguousRecordError, ExtractedChapter, SourceRecord
+from fratfinder_crawler.normalization.normalizer import normalize_record
 
 
 def _source() -> SourceRecord:
@@ -15,7 +16,6 @@ def _source() -> SourceRecord:
         list_path="/chapters",
         metadata={},
     )
-
 
 
 def test_normalizer_builds_slug_and_queues_missing_optional_fields():
@@ -38,7 +38,6 @@ def test_normalizer_builds_slug_and_queues_missing_optional_fields():
     assert any(item.field_name == "name" for item in provenance)
 
 
-
 def test_normalizer_does_not_queue_find_instagram_when_high_confidence_instagram_exists():
     extracted = ExtractedChapter(
         name="Delta Beta",
@@ -52,7 +51,6 @@ def test_normalizer_does_not_queue_find_instagram_when_high_confidence_instagram
 
     assert "find_instagram" not in normalized.missing_optional_fields
     assert normalized.field_states["instagram_url"] == "found"
-
 
 
 def test_normalizer_queues_find_instagram_when_instagram_missing():
@@ -69,7 +67,6 @@ def test_normalizer_queues_find_instagram_when_instagram_missing():
     assert normalized.field_states["instagram_url"] == "missing"
 
 
-
 def test_normalizer_queues_verify_website_when_website_is_present_but_low_confidence():
     extracted = ExtractedChapter(
         name="Alpha Phi",
@@ -84,6 +81,8 @@ def test_normalizer_queues_verify_website_when_website_is_present_but_low_confid
     assert "verify_website" in normalized.missing_optional_fields
     assert "find_website" not in normalized.missing_optional_fields
     assert normalized.field_states["website_url"] == "low_confidence"
+
+
 def test_normalizer_does_not_queue_verify_website_when_website_is_high_confidence():
     extracted = ExtractedChapter(
         name="Alpha Nu",
@@ -99,3 +98,43 @@ def test_normalizer_does_not_queue_verify_website_when_website_is_high_confidenc
     assert "find_website" not in normalized.missing_optional_fields
     assert normalized.field_states["website_url"] == "found"
 
+
+def test_normalizer_rejects_navigation_placeholder_name():
+    extracted = ExtractedChapter(
+        name="Find a Chapter",
+        university_name=None,
+        source_url="https://example.org/chapters",
+        source_confidence=0.95,
+    )
+
+    with pytest.raises(AmbiguousRecordError, match="navigation or placeholder"):
+        normalize_record(_source(), extracted)
+
+
+def test_normalizer_rejects_visit_page_placeholder_pattern():
+    extracted = ExtractedChapter(
+        name="Visit",
+        university_name="Page Active Beta St. Louis University",
+        source_url="https://example.org/chapters",
+        source_confidence=0.95,
+    )
+
+    with pytest.raises(AmbiguousRecordError, match="navigation or placeholder"):
+        normalize_record(_source(), extracted)
+
+
+def test_normalizer_routes_mailto_website_into_email_field():
+    extracted = ExtractedChapter(
+        name="Psi Chapter",
+        university_name="University of Virginia",
+        website_url="mailto:admin@chapter.org",
+        source_url="https://example.org/chapters",
+        source_confidence=0.92,
+    )
+
+    normalized, _ = normalize_record(_source(), extracted)
+
+    assert normalized.website_url is None
+    assert normalized.contact_email == "admin@chapter.org"
+    assert normalized.field_states["website_url"] == "missing"
+    assert normalized.field_states["contact_email"] == "found"

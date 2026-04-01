@@ -13,6 +13,7 @@ from fratfinder_crawler.analysis import (
     select_extraction_plan,
 )
 from fratfinder_crawler.adapters.registry import AdapterRegistry
+from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
 from fratfinder_crawler.config import get_settings
 from fratfinder_crawler.db.repository import CrawlerRepository
 from fratfinder_crawler.http.client import HttpClient
@@ -20,9 +21,15 @@ from fratfinder_crawler.llm.classifier import classify_source_with_llm
 from fratfinder_crawler.llm.client import LLMUnavailableError
 from fratfinder_crawler.llm.extractor import ExtractionValidationError, extract_records_with_metadata
 from fratfinder_crawler.logging_utils import log_event
-from fratfinder_crawler.models import AmbiguousRecordError, CrawlMetrics, ReviewItemCandidate
+from fratfinder_crawler.models import AmbiguousRecordError, CrawlMetrics, ExtractedChapter, ReviewItemCandidate
 from fratfinder_crawler.normalization import normalize_record
 from fratfinder_crawler.orchestration.state import CrawlGraphState
+from fratfinder_crawler.orchestration.navigation import (
+    detect_chapter_index_mode,
+    extract_chapter_stubs,
+    extract_contacts_from_chapter_site,
+    follow_chapter_detail_or_outbound,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +90,10 @@ class CrawlOrchestrator:
         graph.add_node("analyze_page_structure", self._with_error_boundary(self._analyze_page_structure))
         graph.add_node("classify_source_type", self._with_error_boundary(self._classify_source_type))
         graph.add_node("detect_embedded_data", self._with_error_boundary(self._detect_embedded_data))
+        graph.add_node("detect_chapter_index_mode", self._with_error_boundary(self._detect_chapter_index_mode))
+        graph.add_node("extract_chapter_stubs", self._with_error_boundary(self._extract_chapter_stubs))
+        graph.add_node("follow_chapter_detail_or_outbound", self._with_error_boundary(self._follow_chapter_detail_or_outbound))
+        graph.add_node("extract_contacts_from_chapter_site", self._with_error_boundary(self._extract_contacts_from_chapter_site))
         graph.add_node("choose_extraction_strategy", self._with_error_boundary(self._choose_extraction_strategy))
         graph.add_node("extract_records", self._with_error_boundary(self._extract_records))
         graph.add_node("validate_records", self._with_error_boundary(self._validate_records))
@@ -96,7 +107,11 @@ class CrawlOrchestrator:
         graph.add_conditional_edges("fetch_page", self._has_error, {"ok": "analyze_page_structure", "error": "finalize"})
         graph.add_conditional_edges("analyze_page_structure", self._has_error, {"ok": "classify_source_type", "error": "finalize"})
         graph.add_conditional_edges("classify_source_type", self._has_error, {"ok": "detect_embedded_data", "error": "finalize"})
-        graph.add_conditional_edges("detect_embedded_data", self._has_error, {"ok": "choose_extraction_strategy", "error": "finalize"})
+        graph.add_conditional_edges("detect_embedded_data", self._has_error, {"ok": "detect_chapter_index_mode", "error": "finalize"})
+        graph.add_conditional_edges("detect_chapter_index_mode", self._has_error, {"ok": "extract_chapter_stubs", "error": "finalize"})
+        graph.add_conditional_edges("extract_chapter_stubs", self._has_error, {"ok": "follow_chapter_detail_or_outbound", "error": "finalize"})
+        graph.add_conditional_edges("follow_chapter_detail_or_outbound", self._has_error, {"ok": "extract_contacts_from_chapter_site", "error": "finalize"})
+        graph.add_conditional_edges("extract_contacts_from_chapter_site", self._has_error, {"ok": "choose_extraction_strategy", "error": "finalize"})
         graph.add_conditional_edges("choose_extraction_strategy", self._has_error, {"ok": "extract_records", "error": "finalize"})
         graph.add_conditional_edges("extract_records", self._has_error, {"ok": "validate_records", "error": "finalize"})
         graph.add_conditional_edges("validate_records", self._has_error, {"ok": "normalize_records", "error": "finalize"})
@@ -199,6 +214,84 @@ class CrawlOrchestrator:
         )
         return {"embedded_data": embedded_data}
 
+    def _detect_chapter_index_mode(self, state: CrawlGraphState) -> dict:
+        mode, confidence, reason = detect_chapter_index_mode(
+            state["html"],
+            state["page_analysis"],
+            state["classification"],
+            state["embedded_data"],
+        )
+        log_event(
+            LOGGER,
+            "chapter_index_mode_detected",
+            run_id=state["run_id"],
+            source_slug=state["source"].source_slug,
+            mode=mode,
+            confidence=confidence,
+            reason=reason,
+        )
+        return {
+            "chapter_index_mode": mode,
+            "chapter_index_mode_confidence": confidence,
+            "chapter_index_mode_reason": reason,
+        }
+
+    def _extract_chapter_stubs(self, state: CrawlGraphState) -> dict:
+        stubs = extract_chapter_stubs(
+            registry=self._registry,
+            html=state["html"],
+            source_url=state["source"].list_url,
+            mode=state.get("chapter_index_mode", "mixed"),
+            embedded_data=state["embedded_data"],
+            http_client=self._http,
+        )
+        log_event(
+            LOGGER,
+            "chapter_stubs_extracted",
+            run_id=state["run_id"],
+            source_slug=state["source"].source_slug,
+            mode=state.get("chapter_index_mode", "mixed"),
+            stubs=len(stubs),
+        )
+        return {"chapter_stubs": stubs}
+
+    def _follow_chapter_detail_or_outbound(self, state: CrawlGraphState) -> dict:
+        settings = get_settings()
+        stubs = state.get("chapter_stubs", [])
+        pages_by_stub, nav_stats = follow_chapter_detail_or_outbound(
+            stubs=stubs,
+            source_url=state["source"].list_url,
+            http_client=self._http,
+            max_hops_per_stub=settings.crawler_navigation_max_hops_per_stub,
+            max_pages_per_run=settings.crawler_navigation_max_pages_per_run,
+        )
+        metrics = state["metrics"]
+        metrics.pages_processed += nav_stats.get("fetched_pages", 0)
+        log_event(
+            LOGGER,
+            "chapter_stub_follow_completed",
+            run_id=state["run_id"],
+            source_slug=state["source"].source_slug,
+            fetched_pages=nav_stats.get("fetched_pages", 0),
+            skipped_by_domain=nav_stats.get("skipped_by_domain", 0),
+            errors=nav_stats.get("errors", 0),
+        )
+        return {"chapter_follow_pages": pages_by_stub, "navigation_stats": nav_stats, "metrics": metrics}
+
+    def _extract_contacts_from_chapter_site(self, state: CrawlGraphState) -> dict:
+        contact_hints = extract_contacts_from_chapter_site(
+            state.get("chapter_stubs", []),
+            state.get("chapter_follow_pages", {}),
+        )
+        log_event(
+            LOGGER,
+            "chapter_contact_hints_extracted",
+            run_id=state["run_id"],
+            source_slug=state["source"].source_slug,
+            hinted_chapters=len(contact_hints),
+        )
+        return {"chapter_contact_hints": contact_hints}
+
     def _choose_extraction_strategy(self, state: CrawlGraphState) -> dict:
         settings = get_settings()
         extraction_plan = select_extraction_plan(
@@ -230,8 +323,30 @@ class CrawlOrchestrator:
         extraction_notes: str | None = None
         page_level_confidence: float | None = None
         strategy_used = plan.primary_strategy
+        stub_records = self._build_stub_records(state)
 
         if plan.primary_strategy == "review":
+            if stub_records:
+                strategy_used = "chapter_stub_navigation"
+                metrics.records_seen += len(stub_records)
+                log_event(
+                    LOGGER,
+                    "records_extracted_from_stubs",
+                    run_id=run_id,
+                    source_slug=source.source_slug,
+                    records_seen=len(stub_records),
+                    strategy=strategy_used,
+                )
+                return {
+                    "review_items": review_items,
+                    "extracted": stub_records,
+                    "final_status": state.get("final_status", "succeeded"),
+                    "metrics": metrics,
+                    "llm_calls_used": llm_calls_used,
+                    "page_level_confidence": page_level_confidence,
+                    "extraction_notes": extraction_notes,
+                    "strategy_used": strategy_used,
+                }
             review_items.append(
                 ReviewItemCandidate(
                     item_type="unsupported_or_unclear_source",
@@ -269,7 +384,7 @@ class CrawlOrchestrator:
                 )
                 return {
                     "review_items": review_items,
-                    "extracted": [],
+                    "extracted": stub_records,
                     "final_status": "partial",
                     "metrics": metrics,
                     "llm_calls_used": llm_calls_used,
@@ -289,7 +404,7 @@ class CrawlOrchestrator:
                 )
                 return {
                     "review_items": review_items,
-                    "extracted": [],
+                    "extracted": stub_records,
                     "final_status": "partial",
                     "metrics": metrics,
                     "llm_calls_used": llm_calls_used,
@@ -312,7 +427,7 @@ class CrawlOrchestrator:
                 )
                 return {
                     "review_items": review_items,
-                    "extracted": [],
+                    "extracted": stub_records,
                     "final_status": "partial",
                     "metrics": metrics,
                     "llm_calls_used": llm_calls_used,
@@ -335,7 +450,7 @@ class CrawlOrchestrator:
                 )
                 return {
                     "review_items": review_items,
-                    "extracted": [],
+                    "extracted": stub_records,
                     "final_status": "partial",
                     "metrics": metrics,
                     "llm_calls_used": llm_calls_used,
@@ -354,7 +469,7 @@ class CrawlOrchestrator:
                 )
                 return {
                     "review_items": review_items,
-                    "extracted": [],
+                    "extracted": stub_records,
                     "final_status": "partial",
                     "metrics": metrics,
                     "llm_calls_used": llm_calls_used,
@@ -399,7 +514,7 @@ class CrawlOrchestrator:
                 )
                 return {
                     "review_items": review_items,
-                    "extracted": [],
+                    "extracted": stub_records,
                     "final_status": "partial",
                     "metrics": metrics,
                     "llm_calls_used": llm_calls_used,
@@ -447,7 +562,7 @@ class CrawlOrchestrator:
                 )
                 return {
                     "review_items": review_items,
-                    "extracted": [],
+                    "extracted": stub_records,
                     "final_status": "partial",
                     "metrics": metrics,
                     "llm_calls_used": llm_calls_used,
@@ -455,6 +570,7 @@ class CrawlOrchestrator:
                     "extraction_notes": extraction_notes,
                 }
 
+        extracted = self._merge_extracted_records(extracted, stub_records)
         metrics.records_seen += len(extracted)
         log_event(
             LOGGER,
@@ -669,6 +785,11 @@ class CrawlOrchestrator:
             "llm_calls_used": state.get("llm_calls_used", 0),
             "extraction_notes": state.get("extraction_notes"),
             "strategy_attempts": state.get("strategy_attempts", 0),
+            "chapter_index_mode": state.get("chapter_index_mode"),
+            "chapter_index_mode_confidence": state.get("chapter_index_mode_confidence"),
+            "chapter_index_mode_reason": state.get("chapter_index_mode_reason"),
+            "chapter_stub_count": len(state.get("chapter_stubs", [])),
+            "navigation_stats": state.get("navigation_stats", {}),
         }
 
         if state.get("error"):
@@ -738,13 +859,81 @@ class CrawlOrchestrator:
             "llm_calls_used": state.get("llm_calls_used", 0),
         }
 
+    def _build_stub_records(self, state: CrawlGraphState) -> list:
+        source = state["source"]
+        contact_hints = state.get("chapter_contact_hints", {})
+        records: list[ExtractedChapter] = []
+        for stub in state.get("chapter_stubs", []):
+            key = _stub_key(stub.chapter_name, stub.university_name)
+            hints = contact_hints.get(key, {})
+            source_url = sanitize_as_website(stub.detail_url or stub.outbound_chapter_url_candidate, base_url=source.list_url) or source.list_url
+            outbound = stub.outbound_chapter_url_candidate or ""
+            website_hint = hints.get("website_url")
+            email_hint = hints.get("email")
+            instagram_hint = hints.get("instagram_url")
+
+            sanitized_website = sanitize_as_website(website_hint or outbound, base_url=source_url)
+            sanitized_email = sanitize_as_email(email_hint) or sanitize_as_email(outbound)
+            sanitized_instagram = sanitize_as_instagram(instagram_hint) or sanitize_as_instagram(outbound)
+
+            records.append(
+                ExtractedChapter(
+                    name=stub.chapter_name,
+                    university_name=stub.university_name,
+                    city=None,
+                    state=None,
+                    website_url=sanitized_website,
+                    instagram_url=sanitized_instagram,
+                    contact_email=sanitized_email,
+                    external_id=None,
+                    source_url=source_url,
+                    source_snippet=stub.provenance,
+                    source_confidence=stub.confidence,
+                )
+            )
+        return records
+
+    def _merge_extracted_records(self, extracted: list, fallback_records: list) -> list:
+        if not fallback_records:
+            return extracted
+        merged: dict[tuple[str, str], object] = {}
+        for record in [*extracted, *fallback_records]:
+            key = (
+                (record.name or "").strip().lower(),
+                (record.university_name or "").strip().lower(),
+            )
+            current = merged.get(key)
+            if current is None or getattr(record, "source_confidence", 0.0) > getattr(current, "source_confidence", 0.0):
+                merged[key] = record
+        return list(merged.values())
+
 
 
 def _to_serializable(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
     if is_dataclass(value):
-        return asdict(value)
+        return _sanitize_json_value(asdict(value))
     if isinstance(value, dict):
-        return value
+        return _sanitize_json_value(value)
     return None
+
+
+def _sanitize_json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _sanitize_json_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_json_value(item) for item in value]
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    return value
+
+
+def _stub_key(chapter_name: str, university_name: str | None) -> str:
+    import re
+
+    chapter = re.sub(r"[^a-z0-9]+", "-", chapter_name.lower()).strip("-")
+    school = re.sub(r"[^a-z0-9]+", "-", (university_name or "").lower()).strip("-")
+    return f"{chapter}:{school}"

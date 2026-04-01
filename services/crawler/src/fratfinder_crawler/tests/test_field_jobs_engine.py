@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import requests
 
-from fratfinder_crawler.field_jobs import FieldJobEngine
+from fratfinder_crawler.field_jobs import CandidateMatch, FieldJobEngine
 from fratfinder_crawler.models import FieldJob
 from fratfinder_crawler.search import SearchResult, SearchUnavailableError
 
@@ -27,6 +27,7 @@ class FakeRepository:
         self.requeue_preserve_attempt_flags: list[bool] = []
         self.failed: list[str] = []
         self.review_items: list[tuple[str, object]] = []
+        self.requeue_payload_patches: list[dict[str, object]] = []
         self.claimed_source_slugs: list[str | None] = []
         self.claimed_field_names: list[str | None] = []
         self.claimed_require_confident_website_for_email: list[bool] = []
@@ -50,6 +51,9 @@ class FakeRepository:
     def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
         return (chapter_id, field_name) in self.pending_field_jobs
 
+    def has_recent_transient_website_failures(self, chapter_id: str, min_failures: int = 2) -> bool:
+        return False
+
     def complete_field_job(
         self,
         job: FieldJob,
@@ -60,10 +64,18 @@ class FakeRepository:
     ) -> None:
         self.completed.append((job.id, chapter_updates, field_state_updates or {}, len(provenance_records or [])))
 
-    def requeue_field_job(self, job: FieldJob, error: str, delay_seconds: int, preserve_attempt: bool = False) -> None:
+    def requeue_field_job(
+        self,
+        job: FieldJob,
+        error: str,
+        delay_seconds: int,
+        preserve_attempt: bool = False,
+        payload_patch: dict[str, object] | None = None,
+    ) -> None:
         self.requeued.append(job.id)
         self.requeue_details.append((job.id, delay_seconds, error))
         self.requeue_preserve_attempt_flags.append(preserve_attempt)
+        self.requeue_payload_patches.append(payload_patch or {})
 
     def fail_field_job_terminal(self, job: FieldJob, error: str) -> None:
         self.failed.append(job.id)
@@ -282,7 +294,7 @@ def test_search_unavailable_preserves_attempts_for_instagram_jobs():
     assert repo.requeue_preserve_attempt_flags == [True]
     assert repo.requeue_details[0][1] == 45
     assert "search provider or network unavailable" in repo.requeue_details[0][2]
-    assert len(search_client.queries) == 1
+    assert len(search_client.queries) > 2
 
 
 
@@ -305,7 +317,7 @@ def test_search_request_exception_preserves_attempts_for_instagram_jobs():
     assert repo.requeue_preserve_attempt_flags == [True]
     assert repo.requeue_details[0][1] == 30
     assert "search provider or network unavailable" in repo.requeue_details[0][2]
-    assert len(search_client.queries) == 1
+    assert len(search_client.queries) > 2
 
 
 
@@ -328,7 +340,62 @@ def test_preserve_attempt_error_does_not_terminal_fail_at_max_attempts():
     assert repo.failed == []
     assert repo.requeue_preserve_attempt_flags == [True]
     assert repo.requeue_details[0][1] == 30
-    assert len(search_client.queries) == 1
+    assert len(search_client.queries) > 1
+
+
+def test_transient_search_failures_escalate_to_long_cooldown():
+    seeded_job = replace(
+        _job("find_instagram", university_name="Demo University"),
+        payload={
+            "candidateSchoolName": "Example University",
+            "sourceSlug": "sigma-chi-main",
+            "transient_provider_failures": 2,
+        },
+    )
+    repo = FakeRepository(jobs=[seeded_job], snippets_by_chapter={"chapter-1": ["No social links here"]})
+    search_client = FailingSearchClient(SearchUnavailableError("provider unavailable"))
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        transient_short_retries=2,
+        transient_long_cooldown_seconds=600,
+        dependency_wait_seconds=30,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.requeue_details[0][1] == 600
+    assert repo.requeue_preserve_attempt_flags == [True]
+    assert repo.requeue_payload_patches[0]["transient_provider_failures"] == 3
+
+
+def test_email_dependency_escape_allows_processing_when_website_blocked():
+    class EscapeRepo(FakeRepository):
+        def has_recent_transient_website_failures(self, chapter_id: str, min_failures: int = 2) -> bool:
+            return True
+
+    job = _job("find_email", university_name="Demo University")
+    repo = EscapeRepo(
+        jobs=[job],
+        snippets_by_chapter={"chapter-1": ["Reach us at chapter@example.edu"]},
+        pending_field_jobs={("chapter-1", "find_website")},
+    )
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_provider="bing_html",
+        email_escape_on_provider_block=True,
+        email_escape_min_website_failures=2,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.requeued == []
 
 
 def test_field_job_engine_forwards_source_filter_to_repository():
@@ -460,6 +527,38 @@ def test_field_job_engine_finds_obfuscated_email_from_chapter_website_html():
 
 
 
+def test_candidate_result_does_not_backfill_generic_source_directory_url_as_website():
+    base_job = _job(
+        "find_instagram",
+        website_url=None,
+        university_name="Mercer University",
+    )
+    job = replace(
+        base_job,
+        source_base_url="https://byx.org",
+        payload={**base_job.payload, "sourceListUrl": "https://byx.org/join-a-chapter"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine._candidate_result(
+        job,
+        CandidateMatch(
+            value="https://www.instagram.com/examplechapter/",
+            confidence=0.93,
+            source_url="https://byx.org/join-a-chapter",
+            source_snippet="Instagram profile for chapter",
+            field_name="instagram_url",
+            source_provider="provenance",
+            related_website_url="https://byx.org/join-a-chapter",
+        ),
+        "instagram_url",
+    )
+
+    assert result.chapter_updates.get("instagram_url") == "https://www.instagram.com/examplechapter"
+    assert "website_url" not in result.chapter_updates
+
+
 def test_field_job_engine_finds_instagram_from_chapter_website_html_and_normalizes_url():
     job = _job("find_instagram", website_url="https://chapter.example.edu", university_name="Demo University")
     repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["Follow the chapter online"]})
@@ -501,6 +600,66 @@ def test_field_job_engine_finds_instagram_from_handle_hint_when_no_full_url_exis
     assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
     assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/alphatestchapter"}
 
+
+def test_instagram_direct_probe_finds_handle_without_search_results():
+    job = _job("find_instagram", university_name="Florida State University")
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["No social links here"]})
+    search_client = FailingSearchClient(SearchUnavailableError("provider unavailable"))
+
+    def get_requester(url, timeout, allow_redirects):
+        if "instagram.com/fsusigmachi/" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text="<html><head><title>Sigma Chi FSU (@fsusigmachi) Instagram</title></head>"
+                "<body>Sigma Chi at Florida State University</body></html>",
+            )
+        return SimpleNamespace(status_code=404, text="")
+
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        get_requester=get_requester,
+        instagram_direct_probe_enabled=True,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/fsusigmachi"}
+    assert search_client.queries
+
+
+def test_instagram_direct_probe_rejects_missing_profile_page():
+    job = _job("find_instagram", university_name="Florida State University")
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["No social links here"]})
+    search_client = FakeSearchClient({})
+
+    def get_requester(url, timeout, allow_redirects):
+        if "instagram.com/" in url:
+            return SimpleNamespace(status_code=200, text="<html><title>Instagram</title><body>Sorry, this page isn't available.</body></html>")
+        return SimpleNamespace(status_code=404, text="")
+
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        get_requester=get_requester,
+        instagram_max_queries=1,
+        negative_result_cooldown_days=0,
+        instagram_direct_probe_enabled=True,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.completed == []
+    assert repo.requeue_details
+    assert "No candidate instagram URL found" in repo.requeue_details[0][2]
 
 
 def test_field_job_engine_prioritizes_website_jobs_before_email_and_instagram_work():

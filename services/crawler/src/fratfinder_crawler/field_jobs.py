@@ -6,8 +6,16 @@ from typing import TYPE_CHECKING, Callable
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
+from fratfinder_crawler.candidate_sanitizer import (
+    CandidateKind,
+    sanitize_as_email,
+    sanitize_as_instagram,
+    sanitize_as_website,
+    sanitize_candidate,
+)
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.models import (
     ExtractedChapter,
@@ -72,6 +80,20 @@ _NATIONALS_LINK_MARKERS = (
     "state",
     "province",
 )
+_GENERIC_DIRECTORY_PATH_MARKERS = (
+    "chapter-directory",
+    "chapter-roll",
+    "chapters",
+    "directory",
+    "find-a-chapter",
+    "findachapter",
+    "join-a-chapter",
+    "join",
+    "locations",
+    "locator",
+    "expansion",
+    "our-chapters",
+)
 _SOCIAL_LABELS = ("facebook", "instagram", "twitter", "x.com", "linkedin")
 _NATIONALS_HEADING_BLOCKLIST_MARKERS = (
     "directory",
@@ -98,6 +120,11 @@ _STATE_ABBREVIATIONS = {
     "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy",
     "ab", "bc", "mb", "nb", "nl", "ns", "nt", "nu", "on", "pe", "qc", "sk", "yt",
 }
+_DEFAULT_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/123.0.0.0 Safari/537.36"
+)
 
 
 @dataclass(slots=True)
@@ -165,6 +192,12 @@ class FieldJobEngine:
         min_school_initial_length: int = 3,
         enable_compact_fraternity: bool = True,
         instagram_enable_handle_queries: bool = True,
+        instagram_direct_probe_enabled: bool = False,
+        require_confident_website_for_email: bool = True,
+        email_escape_on_provider_block: bool = True,
+        email_escape_min_website_failures: int = 2,
+        transient_short_retries: int = 2,
+        transient_long_cooldown_seconds: int = 900,
         min_no_candidate_backoff_seconds: int = 60,
         greedy_collect_mode: str = _GREEDY_COLLECT_NONE,
         field_name: str | None = None,
@@ -174,8 +207,6 @@ class FieldJobEngine:
         self._worker_id = worker_id
         self._base_backoff_seconds = max(1, base_backoff_seconds)
         self._source_slug = source_slug
-        self._head_requester = head_requester or requests.head
-        self._get_requester = get_requester or requests.get
         self._search_client = search_client
         self._search_provider = (search_provider or self._detect_search_provider(search_client)).lower()
         self._max_search_pages = max(1, max_search_pages)
@@ -187,6 +218,12 @@ class FieldJobEngine:
         self._min_school_initial_length = max(2, min_school_initial_length)
         self._enable_compact_fraternity = enable_compact_fraternity
         self._instagram_enable_handle_queries = instagram_enable_handle_queries
+        self._instagram_direct_probe_enabled = instagram_direct_probe_enabled
+        self._require_confident_website_for_email = require_confident_website_for_email
+        self._email_escape_on_provider_block = email_escape_on_provider_block
+        self._email_escape_min_website_failures = max(1, email_escape_min_website_failures)
+        self._transient_short_retries = max(0, transient_short_retries)
+        self._transient_long_cooldown_seconds = max(0, transient_long_cooldown_seconds)
         self._min_no_candidate_backoff_seconds = max(0, min_no_candidate_backoff_seconds)
         self._greedy_collect_mode = _normalize_greedy_collect_mode(greedy_collect_mode)
         self._field_name = field_name
@@ -195,14 +232,71 @@ class FieldJobEngine:
         self._search_queries_failed = 0
         self._search_queries_succeeded = 0
         self._search_fanout_aborted = False
+        self._last_provider_attempts: list[dict[str, object]] = []
+        self._last_query_provider_attempts: list[dict[str, object]] = []
+        self._last_search_failure_kind: str | None = None
         self._search_result_cache: dict[str, list[SearchResult]] = {}
         self._search_document_cache: dict[str, SearchDocument | None] = {}
+        self._provenance_text_cache: dict[str, str] = {}
         self._candidate_rejection_counts: dict[str, int] = {}
+        self._decision_trace: list[dict[str, str | int | float | bool | None]] = []
         self._nationals_entries_cache: dict[str, list[NationalsChapterEntry]] = {}
         self._nationals_collect_attempted: set[str] = set()
         self._source_record_cache: dict[str, SourceRecord | None] = {}
         search_settings = getattr(search_client, "_settings", None)
+        configured_user_agent = str(getattr(search_settings, "crawler_http_user_agent", "") or "").strip()
+        if configured_user_agent.lower().startswith("fratfinderai/") or not configured_user_agent:
+            configured_user_agent = _DEFAULT_BROWSER_USER_AGENT
+        self._http_headers = {
+            "User-Agent": configured_user_agent,
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        self._http_verify_ssl = bool(getattr(search_settings, "crawler_http_verify_ssl", True))
+        self._http_session: requests.Session | None = None
+        if head_requester is None or get_requester is None:
+            self._http_session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
+            self._http_session.mount("http://", adapter)
+            self._http_session.mount("https://", adapter)
+        self._head_requester = head_requester or self._default_head_requester
+        self._get_requester = get_requester or self._default_get_requester
         self._cache_empty_search_results = bool(getattr(search_settings, "crawler_search_cache_empty_results", False))
+
+    def _default_head_requester(self, url: str, *, timeout: float = 10, allow_redirects: bool = True, **kwargs):
+        if self._http_session is None:
+            self._http_session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
+            self._http_session.mount("http://", adapter)
+            self._http_session.mount("https://", adapter)
+        headers = dict(kwargs.pop("headers", {}) or {})
+        for key, value in self._http_headers.items():
+            headers.setdefault(key, value)
+        kwargs.setdefault("verify", self._http_verify_ssl)
+        return self._http_session.head(
+            url,
+            timeout=timeout,
+            allow_redirects=allow_redirects,
+            headers=headers,
+            **kwargs,
+        )
+
+    def _default_get_requester(self, url: str, *, timeout: float = 10, allow_redirects: bool = True, **kwargs):
+        if self._http_session is None:
+            self._http_session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
+            self._http_session.mount("http://", adapter)
+            self._http_session.mount("https://", adapter)
+        headers = dict(kwargs.pop("headers", {}) or {})
+        for key, value in self._http_headers.items():
+            headers.setdefault(key, value)
+        kwargs.setdefault("verify", self._http_verify_ssl)
+        return self._http_session.get(
+            url,
+            timeout=timeout,
+            allow_redirects=allow_redirects,
+            headers=headers,
+            **kwargs,
+        )
 
     def process(self, limit: int = 25) -> dict[str, int]:
         processed = 0
@@ -263,11 +357,19 @@ class FieldJobEngine:
                         chapter_slug=job.chapter_slug,
                         field_name=job.field_name,
                         error=str(exc),
+                        retry_reason=exc.reason_code,
                     )
                     continue
 
                 backoff_seconds = exc.backoff_seconds if exc.backoff_seconds is not None else self._base_backoff_seconds * (2 ** (job.attempts - 1))
-                self._repository.requeue_field_job(job, str(exc), backoff_seconds, preserve_attempt=exc.preserve_attempt)
+                payload_patch = self._build_requeue_payload_patch(job, exc, backoff_seconds)
+                self._repository.requeue_field_job(
+                    job,
+                    str(exc),
+                    backoff_seconds,
+                    preserve_attempt=exc.preserve_attempt,
+                    payload_patch=payload_patch,
+                )
                 requeued += 1
                 log_event(
                     self._logger,
@@ -277,6 +379,11 @@ class FieldJobEngine:
                     field_name=job.field_name,
                     backoff_seconds=backoff_seconds,
                     error=str(exc),
+                    retry_reason=exc.reason_code,
+                    search_queries_attempted=self._search_queries_attempted,
+                    search_queries_succeeded=self._search_queries_succeeded,
+                    search_queries_failed=self._search_queries_failed,
+                    transient_provider_failures=payload_patch.get("transient_provider_failures"),
                 )
             except Exception as exc:  # pragma: no cover - guardrail path
                 self._repository.fail_field_job_terminal(job, str(exc))
@@ -302,42 +409,68 @@ class FieldJobEngine:
         self._search_queries_failed = 0
         self._search_queries_succeeded = 0
         self._search_fanout_aborted = False
+        self._last_provider_attempts = []
+        self._last_query_provider_attempts = []
+        self._last_search_failure_kind = None
         self._candidate_rejection_counts = {}
+        self._decision_trace = []
+        self._trace(
+            "job_started",
+            field_name=job.field_name,
+            chapter_slug=job.chapter_slug,
+            attempts=job.attempts,
+            max_attempts=job.max_attempts,
+            has_website=bool(job.website_url),
+            has_email=bool(job.contact_email),
+            has_instagram=bool(job.instagram_url),
+        )
 
         if job.field_name == FIELD_JOB_FIND_EMAIL:
             if job.contact_email:
+                self._trace("already_populated", target="contact_email")
                 return self._already_populated_result(job.field_name, job.contact_email)
             if self._requires_website_first(job) and not _website_is_confident(job):
+                self._trace("dependency_wait", reason="website_not_confident")
                 raise RetryableJobError(
                     "Waiting for confident website discovery before email enrichment",
                     backoff_seconds=self._dependency_wait_seconds,
                     preserve_attempt=True,
+                    reason_code="dependency_wait",
                 )
             match = self._find_email_candidate(job)
             if match is None:
+                self._trace("no_candidate", target="contact_email")
                 self._emit_candidate_rejection_summary(job, target="email")
                 raise self._no_candidate_error(job, "No candidate email found in provenance, chapter website, or search results")
+            self._trace("candidate_selected", target="contact_email", confidence=round(match.confidence, 4), provider=match.source_provider)
             return self._candidate_result(job, match, "contact_email")
 
         if job.field_name == FIELD_JOB_FIND_INSTAGRAM:
             if job.instagram_url:
+                self._trace("already_populated", target="instagram_url")
                 return self._already_populated_result(job.field_name, job.instagram_url)
             match = self._find_instagram_candidate(job)
             if match is not None:
+                self._trace("candidate_selected", target="instagram_url", confidence=round(match.confidence, 4), provider=match.source_provider)
                 return self._candidate_result(job, match, "instagram_url")
             fallback_result = self._resolve_instagram_search_miss(job)
             if fallback_result is not None:
+                self._trace("inactive_resolution", target="instagram_url")
                 return fallback_result
+            self._trace("no_candidate", target="instagram_url")
             self._emit_candidate_rejection_summary(job, target="instagram")
             raise self._no_candidate_error(job, "No candidate instagram URL found in provenance, chapter website, or search results")
 
         if job.field_name == FIELD_JOB_FIND_WEBSITE:
             if job.website_url:
+                self._trace("already_populated", target="website_url")
                 return self._already_populated_result(job.field_name, job.website_url)
             match = self._find_website_candidate(job)
             if match is None:
+                self._trace("no_candidate", target="website_url")
                 self._emit_candidate_rejection_summary(job, target="website")
                 raise self._no_candidate_error(job, "No candidate website URL available")
+            self._trace("candidate_selected", target="website_url", confidence=round(match.confidence, 4), provider=match.source_provider)
             return self._candidate_result(job, match, "website_url")
 
         if job.field_name == FIELD_JOB_VERIFY_WEBSITE:
@@ -346,9 +479,34 @@ class FieldJobEngine:
         if job.field_name == FIELD_JOB_VERIFY_SCHOOL:
             return self._verify_school_match(job)
 
-        raise RetryableJobError(f"Unsupported field job type: {job.field_name}")
+        raise RetryableJobError(f"Unsupported field job type: {job.field_name}", reason_code="dependency_wait")
 
     def _candidate_result(self, job: FieldJob, match: CandidateMatch, target_field: str) -> FieldJobResult:
+        expected_kind = {
+            "website_url": CandidateKind.WEBSITE,
+            "contact_email": CandidateKind.EMAIL,
+            "instagram_url": CandidateKind.INSTAGRAM,
+        }.get(target_field)
+        if expected_kind is None:
+            raise RuntimeError(f"Unsupported target field for candidate result: {target_field}")
+        sanitized = sanitize_candidate(
+            match.value,
+            expected=expected_kind,
+            base_url=match.source_url or job.source_base_url,
+        )
+        if sanitized is None:
+            self._trace("candidate_rejected", target=target_field, reason="sanitizer_invalid_value")
+            raise self._no_candidate_error(job, f"Candidate for {target_field} failed sanitizer validation")
+        if sanitized.kind != expected_kind:
+            self._trace(
+                "candidate_rerouted",
+                target=target_field,
+                rerouted_to=sanitized.kind.value,
+                original_kind=sanitized.original_kind.value,
+            )
+            raise self._no_candidate_error(job, f"Candidate kind mismatch for {target_field}; discovered {sanitized.kind.value}")
+        match.value = sanitized.value
+
         write_threshold = self._write_threshold(job, target_field, match)
         if match.confidence < write_threshold:
             return FieldJobResult(
@@ -358,6 +516,7 @@ class FieldJobEngine:
                     "value": match.value,
                     "confidence": f"{match.confidence:.2f}",
                     "source_url": match.source_url,
+                    "decision_trace": self._build_decision_trace_summary(),
                 },
                 review_item=ReviewItemCandidate(
                     item_type="search_candidate_review",
@@ -371,6 +530,7 @@ class FieldJobEngine:
                         "sourceUrl": match.source_url,
                         "extractionNotes": match.source_snippet,
                         "query": match.query,
+                        "decisionTrace": self._build_decision_trace_summary(),
                     },
                 ),
             )
@@ -380,8 +540,9 @@ class FieldJobEngine:
         chapter_updates = {target_field: match.value}
         field_state_updates = {target_field: field_state}
         if target_field != "website_url" and match.related_website_url and _is_safe_related_website_url(job, match.related_website_url):
-            if not job.website_url or job.website_url == match.related_website_url:
-                chapter_updates["website_url"] = match.related_website_url
+            sanitized_related_website = sanitize_as_website(match.related_website_url, base_url=match.source_url or job.source_base_url)
+            if sanitized_related_website and (not job.website_url or job.website_url == sanitized_related_website):
+                chapter_updates["website_url"] = sanitized_related_website
                 field_state_updates["website_url"] = "found" if match.confidence >= found_threshold else "low_confidence"
 
         completed_payload = {
@@ -389,6 +550,7 @@ class FieldJobEngine:
             target_field: match.value,
             "confidence": f"{match.confidence:.2f}",
             "source_url": match.source_url,
+            "decision_trace": self._build_decision_trace_summary(),
         }
         if match.query:
             completed_payload["query"] = match.query
@@ -426,27 +588,53 @@ class FieldJobEngine:
 
     def _verify_website(self, job: FieldJob) -> FieldJobResult:
         if not job.website_url:
-            raise RetryableJobError("No website URL available to verify")
+            raise RetryableJobError(
+                "No website URL available to verify",
+                backoff_seconds=self._dependency_wait_seconds,
+                preserve_attempt=True,
+                reason_code="dependency_wait",
+            )
+        sanitized_website = sanitize_as_website(job.website_url, base_url=job.source_base_url)
+        if not sanitized_website:
+            raise RuntimeError(f"Website verification received non-http candidate: {job.website_url}")
 
         try:
-            response = self._head_requester(job.website_url, timeout=10, allow_redirects=True)
+            response = self._head_requester(sanitized_website, timeout=10, allow_redirects=True)
         except requests.Timeout as exc:
-            raise RetryableJobError("Website verification timed out") from exc
+            raise RetryableJobError("Website verification timed out", reason_code="transient_network") from exc
         except requests.RequestException as exc:
-            raise RetryableJobError(f"Website verification request failed: {exc}") from exc
+            raise RetryableJobError(f"Website verification request failed: {exc}", reason_code="transient_network") from exc
 
         status_code = getattr(response, "status_code", None)
         if status_code is None:
-            raise RetryableJobError("Website verification did not return an HTTP status code")
+            raise RetryableJobError("Website verification did not return an HTTP status code", reason_code="transient_network")
+        verification_method = "head"
+        if status_code in {401, 403, 405, 406, 429}:
+            try:
+                get_response = self._get_requester(sanitized_website, timeout=10, allow_redirects=True)
+            except requests.Timeout as exc:
+                raise RetryableJobError("Website verification timed out", reason_code="transient_network") from exc
+            except requests.RequestException as exc:
+                raise RetryableJobError(f"Website verification request failed: {exc}", reason_code="transient_network") from exc
+            get_status_code = getattr(get_response, "status_code", None)
+            if get_status_code is not None:
+                status_code = get_status_code
+                verification_method = "get"
         if 200 <= status_code < 400:
             return FieldJobResult(
                 chapter_updates={},
-                completed_payload={"status": "verified", "website_url": job.website_url, "status_code": str(status_code)},
+                completed_payload={
+                    "status": "verified",
+                    "website_url": sanitized_website,
+                    "status_code": str(status_code),
+                    "verification_method": verification_method,
+                    "decision_trace": self._build_decision_trace_summary(),
+                },
                 field_state_updates={"website_url": "found"},
             )
         if 400 <= status_code < 500:
-            raise RetryableJobError(f"Website verification returned client error status {status_code}")
-        raise RetryableJobError(f"Website verification returned server error status {status_code}")
+            raise RetryableJobError(f"Website verification returned client error status {status_code}", reason_code="provider_low_signal")
+        raise RetryableJobError(f"Website verification returned server error status {status_code}", reason_code="transient_network")
 
     def _verify_school_match(self, job: FieldJob) -> FieldJobResult:
         chapter_school = _slugify(job.university_name)
@@ -476,15 +664,17 @@ class FieldJobEngine:
                     },
                 ),
             )
-        raise RetryableJobError("Insufficient school data to verify school match")
+        raise RetryableJobError("Insufficient school data to verify school match", reason_code="dependency_wait")
 
     def _find_email_candidate(self, job: FieldJob) -> CandidateMatch | None:
         matches: list[CandidateMatch] = []
 
+        self._trace("email_strategy", stage="provenance")
         provenance_match = self._find_email_candidate_from_provenance(job)
         if provenance_match is not None:
             matches.append(provenance_match)
 
+        self._trace("email_strategy", stage="chapter_website")
         website_matches = self._extract_email_matches_from_website(job)
         matches.extend(website_matches)
         best_local = _best_match(matches)
@@ -492,12 +682,14 @@ class FieldJobEngine:
             return best_local
 
         if not _website_is_confident(job):
+            self._trace("email_strategy", stage="trusted_school_pages")
             trusted_school_matches = self._extract_email_matches_from_trusted_school_pages(job)
             matches.extend(trusted_school_matches)
             best_school = _best_match(matches)
             if best_school is not None and best_school.confidence >= self._found_threshold(job, "contact_email", best_school):
                 return best_school
 
+        self._trace("email_strategy", stage="nationals")
         nationals_matches = self._find_target_candidates_from_nationals(job, target="email")
         if nationals_matches:
             matches.extend(nationals_matches)
@@ -505,6 +697,7 @@ class FieldJobEngine:
             if best_nationals is not None and best_nationals.confidence >= self._found_threshold(job, "contact_email", best_nationals):
                 return best_nationals
 
+        self._trace("email_strategy", stage="search")
         for document in self._search_documents(job, target="email", include_existing=False):
             document_matches = self._extract_email_matches(document, job)
             if not document_matches:
@@ -519,6 +712,7 @@ class FieldJobEngine:
         matches: list[CandidateMatch] = []
 
         if job.website_url and _website_trust_tier(job, job.website_url) == "tier1":
+            self._trace("instagram_strategy", stage="trusted_chapter_website")
             website_document = self._fetch_search_document(job.website_url, provider="chapter_website")
             if website_document is not None:
                 website_matches = self._extract_instagram_matches(website_document, job)
@@ -527,6 +721,7 @@ class FieldJobEngine:
                 if best_website is not None and best_website.confidence >= self._found_threshold(job, "instagram_url", best_website):
                     return best_website
 
+        self._trace("instagram_strategy", stage="nationals")
         nationals_matches = self._find_target_candidates_from_nationals(job, target="instagram")
         if nationals_matches:
             matches.extend(nationals_matches)
@@ -534,6 +729,7 @@ class FieldJobEngine:
             if best_nationals is not None and best_nationals.confidence >= self._found_threshold(job, "instagram_url", best_nationals):
                 return best_nationals
 
+        self._trace("instagram_strategy", stage="search")
         for document in self._search_documents(job, target="instagram", include_existing=False):
             document_matches = self._extract_instagram_matches(document, job)
             if not document_matches:
@@ -548,6 +744,7 @@ class FieldJobEngine:
             return best_external
 
         if job.source_base_url:
+            self._trace("instagram_strategy", stage="source_page")
             source_document = self._fetch_search_document(job.source_base_url, provider="source_page")
             if source_document is not None:
                 source_matches = self._extract_instagram_matches(source_document, job)
@@ -556,9 +753,19 @@ class FieldJobEngine:
                 if best_source is not None and best_source.confidence >= self._found_threshold(job, "instagram_url", best_source):
                     return best_source
 
+        self._trace("instagram_strategy", stage="provenance")
         provenance_match = self._find_instagram_candidate_from_provenance(job)
         if provenance_match is not None:
             matches.append(provenance_match)
+
+        if self._instagram_direct_probe_enabled and self._search_queries_succeeded == 0 and self._search_queries_failed > 0:
+            self._trace("instagram_strategy", stage="direct_handle_probe")
+            probe_matches = self._probe_instagram_handle_candidates(job)
+            if probe_matches:
+                matches.extend(probe_matches)
+                best_probe = _best_match(matches)
+                if best_probe is not None and best_probe.confidence >= self._found_threshold(job, "instagram_url", best_probe):
+                    return best_probe
 
         return _best_match(matches)
 
@@ -638,6 +845,69 @@ class FieldJobEngine:
         provenance_document = SearchDocument(text=self._source_text(job), provider="provenance", url=job.source_base_url)
         return _best_match(self._extract_instagram_matches(provenance_document, job))
 
+    def _probe_instagram_handle_candidates(self, job: FieldJob) -> list[CandidateMatch]:
+        matches: list[CandidateMatch] = []
+        school = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+        strong_school_aliases = _school_aliases(
+            school,
+            enable_school_initials=self._enable_school_initials,
+            min_school_initial_length=self._min_school_initial_length,
+        )
+        if not strong_school_aliases:
+            return []
+
+        for handle in _instagram_probe_handles(
+            job,
+            enable_school_initials=self._enable_school_initials,
+            min_school_initial_length=self._min_school_initial_length,
+            enable_compact_fraternity=self._enable_compact_fraternity,
+            max_candidates=max(4, self._instagram_max_queries),
+        ):
+            profile_url = f"https://www.instagram.com/{handle}/"
+            document = self._fetch_search_document(
+                profile_url,
+                provider="instagram_probe",
+                query=f"instagram_probe:{handle}",
+            )
+            if document is None:
+                self._record_candidate_rejection("instagram", "probe_fetch_failed")
+                continue
+            if _instagram_profile_looks_missing(document):
+                self._record_candidate_rejection("instagram", "probe_profile_missing")
+                continue
+
+            normalized = sanitize_as_instagram(profile_url)
+            if not normalized:
+                continue
+            if _instagram_looks_institutional_or_directory_account(normalized, document) and not _instagram_handle_has_fraternity_token(normalized, job):
+                self._record_candidate_rejection("instagram", "institutional_account")
+                continue
+
+            confidence = self._score_instagram_candidate(normalized, document, job, direct_url=True)
+            if confidence < 0.80:
+                self._record_candidate_rejection("instagram", "probe_low_confidence")
+                continue
+            matches.append(
+                CandidateMatch(
+                    value=normalized,
+                    confidence=confidence,
+                    source_url=document.url or normalized,
+                    source_snippet=document.text[:400],
+                    field_name="instagram_url",
+                    source_provider="instagram_probe",
+                    query=document.query,
+                )
+            )
+
+            extracted_matches = self._extract_instagram_matches(document, job)
+            if extracted_matches:
+                matches.extend(extracted_matches)
+
+            best = _best_match(matches)
+            if best is not None and best.confidence >= 0.93:
+                return [best]
+        return matches
+
     def _resolve_instagram_search_miss(self, job: FieldJob) -> FieldJobResult | None:
         inactive_document = self._find_inactive_affiliation_document(job)
         if inactive_document is None:
@@ -649,6 +919,7 @@ class FieldJobEngine:
                 "status": "inactive_by_school_validation",
                 "source_url": inactive_document.url or (job.source_base_url or "search-enrichment"),
                 "reason": "official_school_affiliation_page_does_not_list_chapter",
+                "decision_trace": self._build_decision_trace_summary(),
             },
             field_state_updates={"instagram_url": "missing"},
             provenance_records=[
@@ -682,14 +953,18 @@ class FieldJobEngine:
             provider="provenance",
             url=job.source_base_url,
         )
+        self._trace("website_strategy", stage="provenance")
         matches.extend(self._extract_website_matches(provenance_document, job))
+        self._trace("website_strategy", stage="website_school_search")
         for document in self._search_documents(job, target="website_school", include_existing=False):
             matches.extend(self._extract_website_matches(document, job))
+        self._trace("website_strategy", stage="nationals")
         nationals_matches = self._find_target_candidates_from_nationals(job, target="website")
         matches.extend(nationals_matches)
         best = _best_match(matches)
         if best is not None:
             return best
+        self._trace("website_strategy", stage="website_fallback_search")
         for document in self._search_documents(job, target="website_fallback", include_existing=False):
             matches.extend(self._extract_website_matches(document, job))
         return _best_match(matches)
@@ -936,9 +1211,8 @@ class FieldJobEngine:
         matches: list[CandidateMatch] = []
         query = document.query
         for link in document.links:
-            mailto_match = _MAILTO_RE.search(link)
-            if mailto_match:
-                email = unquote(mailto_match.group(1))
+            email = sanitize_as_email(link)
+            if email:
                 confidence = self._score_email_candidate(email, document, job, from_mailto=True)
                 if not self._email_search_candidate_passes_gate(email, document, job):
                     continue
@@ -955,12 +1229,15 @@ class FieldJobEngine:
                     )
                 )
         for email in _EMAIL_RE.findall(document.text):
-            confidence = self._score_email_candidate(email, document, job, from_mailto=False)
-            if not self._email_search_candidate_passes_gate(email, document, job):
+            sanitized_email = sanitize_as_email(email)
+            if not sanitized_email:
+                continue
+            confidence = self._score_email_candidate(sanitized_email, document, job, from_mailto=False)
+            if not self._email_search_candidate_passes_gate(sanitized_email, document, job):
                 continue
             matches.append(
                 CandidateMatch(
-                    value=email,
+                    value=sanitized_email,
                     confidence=confidence,
                     source_url=document.url or (job.website_url or job.source_base_url or "search-enrichment"),
                     source_snippet=document.text[:400],
@@ -972,12 +1249,15 @@ class FieldJobEngine:
             )
         deobfuscated = _deobfuscate_emails(document.text)
         for email in _EMAIL_RE.findall(deobfuscated):
-            confidence = self._score_email_candidate(email, document, job, from_mailto=False, obfuscated=True)
-            if not self._email_search_candidate_passes_gate(email, document, job):
+            sanitized_email = sanitize_as_email(email)
+            if not sanitized_email:
+                continue
+            confidence = self._score_email_candidate(sanitized_email, document, job, from_mailto=False, obfuscated=True)
+            if not self._email_search_candidate_passes_gate(sanitized_email, document, job):
                 continue
             matches.append(
                 CandidateMatch(
-                    value=email,
+                    value=sanitized_email,
                     confidence=confidence,
                     source_url=document.url or (job.website_url or job.source_base_url or "search-enrichment"),
                     source_snippet=document.text[:400],
@@ -995,7 +1275,7 @@ class FieldJobEngine:
         matches: list[CandidateMatch] = []
         query = document.query
         for link in document.links:
-            normalized = _normalize_instagram_candidate(link)
+            normalized = sanitize_as_instagram(link)
             if normalized:
                 if _instagram_looks_institutional_or_directory_account(normalized, document) and not _instagram_handle_has_fraternity_token(normalized, job):
                     self._record_candidate_rejection("instagram", "institutional_account")
@@ -1016,7 +1296,7 @@ class FieldJobEngine:
                     )
                 )
         for match in _INSTAGRAM_RE.findall(document.text):
-            normalized = _normalize_instagram_candidate(match)
+            normalized = sanitize_as_instagram(match)
             if normalized:
                 if _instagram_looks_institutional_or_directory_account(normalized, document) and not _instagram_handle_has_fraternity_token(normalized, job):
                     self._record_candidate_rejection("instagram", "institutional_account")
@@ -1037,7 +1317,7 @@ class FieldJobEngine:
                     )
                 )
         for handle_match in _INSTAGRAM_HANDLE_HINT_RE.finditer(document.text):
-            normalized = _normalize_instagram_candidate(handle_match.group(1))
+            normalized = sanitize_as_instagram(handle_match.group(1))
             if normalized:
                 if _instagram_looks_institutional_or_directory_account(normalized, document) and not _instagram_handle_has_fraternity_token(normalized, job):
                     self._record_candidate_rejection("instagram", "institutional_account")
@@ -1058,7 +1338,7 @@ class FieldJobEngine:
                     )
                 )
         for nearby_match in _INSTAGRAM_NEARBY_HANDLE_RE.finditer(document.text):
-            normalized = _normalize_instagram_candidate(nearby_match.group(1))
+            normalized = sanitize_as_instagram(nearby_match.group(1))
             if normalized:
                 if _instagram_looks_institutional_or_directory_account(normalized, document) and not _instagram_handle_has_fraternity_token(normalized, job):
                     self._record_candidate_rejection("instagram", "institutional_account")
@@ -1134,6 +1414,7 @@ class FieldJobEngine:
             "chapter_website": 0.9,
             "source_page": 0.85,
             "nationals_directory": 0.88,
+            "instagram_probe": 0.84,
             "search_result": 0.8,
             "search_page": 0.82,
         }.get(document.provider, 0.68)
@@ -1162,24 +1443,11 @@ class FieldJobEngine:
                 if website_document is not None:
                     documents.append(website_document)
 
-        if self._search_fanout_aborted:
-            return documents
-
         seen_urls: set[str] = set()
         fetched_pages = 0
-        for query in self._build_search_queries(job, target):
+        queries = self._build_search_queries(job, target)
+        for query in queries:
             query_results = self._run_search(query)
-            if self._search_queries_succeeded == 0 and self._search_queries_failed > 0:
-                self._search_fanout_aborted = True
-                log_event(
-                    self._logger,
-                    "search_query_fanout_aborted",
-                    chapter_slug=job.chapter_slug,
-                    field_name=job.field_name,
-                    reason="provider_unavailable",
-                    attempted_queries=self._search_queries_attempted,
-                )
-                break
 
             for result in query_results:
                 if not _search_result_is_useful(job, result, target):
@@ -1203,6 +1471,26 @@ class FieldJobEngine:
                 if fetched is not None:
                     documents.append(fetched)
                 fetched_pages += 1
+        if (
+            queries
+            and self._search_queries_succeeded == 0
+            and self._search_queries_failed >= len(queries)
+            and self._search_errors_encountered
+        ):
+            reason = "provider_unavailable" if self._last_search_failure_kind == "unavailable" else "request_exception"
+            self._trace(
+                "search_query_fanout_exhausted",
+                attempted_queries=self._search_queries_attempted,
+                reason=reason,
+            )
+            log_event(
+                self._logger,
+                "search_query_fanout_exhausted",
+                chapter_slug=job.chapter_slug,
+                field_name=job.field_name,
+                attempted_queries=self._search_queries_attempted,
+                reason=reason,
+            )
         return documents
 
     def _build_search_queries(self, job: FieldJob, target: str) -> list[str]:
@@ -1318,6 +1606,21 @@ class FieldJobEngine:
             if include_chapter_for_instagram:
                 query_parts.append([quoted_fraternity or fraternity, university, chapter, "instagram"])
 
+        fraternity_aliases = _fraternity_query_aliases(fraternity, job.fraternity_slug)
+        alias_variant = next((alias for alias in fraternity_aliases if alias and _normalized_match_text(alias) != _normalized_match_text(fraternity)), None)
+        if alias_variant:
+            if target == "instagram":
+                query_parts.extend(
+                    [
+                        [alias_variant, university, "instagram"],
+                        ["site:instagram.com", f'"{university}"' if university else "", alias_variant],
+                    ]
+                )
+            elif target == "email":
+                query_parts.append([alias_variant, university, "contact email"])
+            elif target == "website_fallback":
+                query_parts.append([alias_variant, university, "chapter website"])
+
         queries = [" ".join(part for part in parts if part).strip() for parts in query_parts]
         if self._search_provider == "bing_html":
             negative_terms = self._bing_negative_terms(job)
@@ -1337,27 +1640,67 @@ class FieldJobEngine:
 
         cached_results = self._search_result_cache.get(query)
         if cached_results is not None:
+            self._last_query_provider_attempts = []
+            self._last_search_failure_kind = None
+            self._trace("search_cache_hit", query=query, result_count=len(cached_results))
             log_event(self._logger, "search_query_cache_hit", query=query, result_count=len(cached_results))
             return list(cached_results)
 
         self._search_queries_attempted += 1
+        self._last_query_provider_attempts = []
+        self._last_search_failure_kind = None
         try:
             results = self._search_client.search(query)
+            provider_attempts = self._consume_provider_attempts()
+            self._last_query_provider_attempts = provider_attempts
+            self._last_provider_attempts.extend(provider_attempts)
         except SearchUnavailableError as exc:
             self._search_errors_encountered = True
             self._search_queries_failed += 1
-            log_event(self._logger, "search_unavailable", level=30, query=query, error=str(exc))
+            provider_attempts = self._consume_provider_attempts()
+            self._last_query_provider_attempts = provider_attempts
+            self._last_search_failure_kind = "unavailable"
+            self._last_provider_attempts.extend(provider_attempts)
+            self._trace("search_failed", query=query, error_type="unavailable")
+            log_event(
+                self._logger,
+                "search_unavailable",
+                level=30,
+                query=query,
+                error=str(exc),
+                provider_attempts=provider_attempts,
+            )
             return []
         except requests.RequestException as exc:
             self._search_errors_encountered = True
             self._search_queries_failed += 1
-            log_event(self._logger, "search_request_failed", level=30, query=query, error=str(exc))
+            provider_attempts = self._consume_provider_attempts()
+            self._last_query_provider_attempts = provider_attempts
+            self._last_search_failure_kind = "request_exception"
+            self._last_provider_attempts.extend(provider_attempts)
+            self._trace("search_failed", query=query, error_type="request_exception")
+            log_event(
+                self._logger,
+                "search_request_failed",
+                level=30,
+                query=query,
+                error=str(exc),
+                provider_attempts=provider_attempts,
+            )
             return []
 
         self._search_queries_succeeded += 1
+        self._last_search_failure_kind = None
         if results or self._cache_empty_search_results:
             self._search_result_cache[query] = list(results)
-        log_event(self._logger, "search_query_executed", query=query, result_count=len(results))
+        self._trace("search_executed", query=query, result_count=len(results))
+        log_event(
+            self._logger,
+            "search_query_executed",
+            query=query,
+            result_count=len(results),
+            provider_attempts=provider_attempts,
+        )
         return results
 
     def _fetch_search_document(self, url: str, provider: str, query: str | None = None) -> SearchDocument | None:
@@ -1410,20 +1753,37 @@ class FieldJobEngine:
         state_key = FIELD_JOB_TO_STATE_KEY[field_name]
         return FieldJobResult(
             chapter_updates={},
-            completed_payload={"status": "already_populated", "value": value},
+            completed_payload={"status": "already_populated", "value": value, "decision_trace": self._build_decision_trace_summary()},
             field_state_updates={state_key: "found"},
         )
 
     def _source_text(self, job: FieldJob) -> str:
+        cached = self._provenance_text_cache.get(job.chapter_id)
+        if cached is not None:
+            return cached
         snippets = self._repository.fetch_provenance_snippets(job.chapter_id)
-        return "\n".join(snippets)
+        source_text = "\n".join(snippets)
+        self._provenance_text_cache[job.chapter_id] = source_text
+        return source_text
 
     def _requires_website_first(self, job: FieldJob) -> bool:
         if job.field_name != FIELD_JOB_FIND_EMAIL:
             return False
-        if self._search_provider != "bing_html":
+        if not self._require_confident_website_for_email:
             return False
-        return self._repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE)
+        if not self._repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE):
+            return False
+        if self._email_escape_on_provider_block and self._repository.has_recent_transient_website_failures(
+            job.chapter_id,
+            min_failures=self._email_escape_min_website_failures,
+        ):
+            self._trace(
+                "dependency_escaped",
+                reason="website_provider_blocked",
+                min_failures=self._email_escape_min_website_failures,
+            )
+            return False
+        return True
 
     def _write_threshold(self, job: FieldJob, target_field: str, match: CandidateMatch) -> float:
         if target_field == "website_url":
@@ -1465,12 +1825,27 @@ class FieldJobEngine:
         if self._search_errors_encountered:
             all_queries_failed = self._search_queries_attempted > 0 and self._search_queries_failed >= self._search_queries_attempted
             if all_queries_failed:
+                previous_transient_failures = self._payload_int(job.payload.get("transient_provider_failures"))
+                next_transient_failures = previous_transient_failures + 1
+                if next_transient_failures > self._transient_short_retries:
+                    cooldown_seconds = max(
+                        self._transient_long_cooldown_seconds,
+                        self._dependency_wait_seconds,
+                        self._base_backoff_seconds,
+                    )
+                    return RetryableJobError(
+                        f"{message}; search provider or network unavailable",
+                        backoff_seconds=cooldown_seconds,
+                        preserve_attempt=True,
+                        reason_code="transient_network",
+                    )
                 return RetryableJobError(
                     f"{message}; search provider or network unavailable",
                     backoff_seconds=max(self._dependency_wait_seconds, self._base_backoff_seconds),
                     preserve_attempt=True,
+                    reason_code="transient_network",
                 )
-            return RetryableJobError(message, backoff_seconds=self._base_backoff_seconds)
+            return RetryableJobError(message, backoff_seconds=self._base_backoff_seconds, reason_code="provider_low_signal")
 
         low_signal = self._search_provider == "bing_html" and job.field_name == FIELD_JOB_FIND_WEBSITE
         if low_signal:
@@ -1485,16 +1860,72 @@ class FieldJobEngine:
                 ),
                 low_signal=True,
                 preserve_attempt=False,
+                reason_code="provider_low_signal",
             )
         return RetryableJobError(
             message,
             backoff_seconds=max(self._negative_result_cooldown_seconds, self._min_no_candidate_backoff_seconds),
             low_signal=False,
+            reason_code="terminal_no_candidate",
         )
 
     def _record_candidate_rejection(self, target: str, reason: str) -> None:
         key = f"{target}:{reason}"
         self._candidate_rejection_counts[key] = self._candidate_rejection_counts.get(key, 0) + 1
+
+    def _trace(self, event: str, **payload: str | int | float | bool | None) -> None:
+        entry: dict[str, str | int | float | bool | None] = {"event": event}
+        entry.update(payload)
+        self._decision_trace.append(entry)
+
+    def _consume_provider_attempts(self) -> list[dict[str, object]]:
+        if self._search_client is None:
+            return []
+        consume = getattr(self._search_client, "consume_last_provider_attempts", None)
+        if not callable(consume):
+            return []
+        attempts = consume()
+        return attempts if isinstance(attempts, list) else []
+
+    def _build_requeue_payload_patch(self, job: FieldJob, exc: "RetryableJobError", backoff_seconds: int) -> dict[str, object]:
+        patch: dict[str, object] = {}
+        if exc.reason_code == "transient_network":
+            previous_transient_failures = self._payload_int(job.payload.get("transient_provider_failures"))
+            patch["transient_provider_failures"] = previous_transient_failures + 1
+            patch["transient_provider_last_error"] = str(exc)
+            patch["transient_provider_last_reason"] = exc.reason_code
+            patch["transient_provider_last_backoff_seconds"] = backoff_seconds
+        if self._last_provider_attempts:
+            patch["provider_attempts"] = self._last_provider_attempts[-8:]
+        return patch
+
+    def _should_abort_search_fanout(self, query_results: list[SearchResult]) -> bool:
+        # Fanout abort is disabled so field jobs can exhaust bounded query budgets
+        # before classifying provider outages.
+        return False
+
+    def _payload_int(self, raw_value: object) -> int:
+        try:
+            return int(raw_value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _build_decision_trace_summary(self) -> dict[str, object]:
+        rejection_histogram = [
+            {"reason": reason, "count": count}
+            for reason, count in sorted(self._candidate_rejection_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+        ]
+        return {
+            "trace": self._decision_trace[-30:],
+            "search": {
+                "attempted": self._search_queries_attempted,
+                "succeeded": self._search_queries_succeeded,
+                "failed": self._search_queries_failed,
+                "fanoutAborted": self._search_fanout_aborted,
+                "providerAttempts": self._last_provider_attempts[-8:],
+            },
+            "rejections": rejection_histogram,
+        }
 
     def _emit_candidate_rejection_summary(self, job: FieldJob, *, target: str) -> None:
         if not self._candidate_rejection_counts:
@@ -1571,6 +2002,9 @@ class FieldJobEngine:
             return False
         if _chapter_designation_signal(job, combined) < 0:
             self._record_candidate_rejection("instagram", "chapter_designation_mismatch")
+            return False
+        if not _instagram_handle_has_fraternity_token(instagram_url, job) and _chapter_designation_signal(job, combined) <= 0:
+            self._record_candidate_rejection("instagram", "missing_handle_fraternity_token")
             return False
         if handle_score >= 4 and (school_match or fraternity_match):
             return True
@@ -1667,8 +2101,11 @@ class FieldJobEngine:
         candidates.extend(_URL_RE.findall(document.text))
         seen: set[str] = set()
         for candidate in candidates:
-            url = candidate.strip().rstrip('.,;)')
-            if not url.lower().startswith("http"):
+            raw_url = candidate.strip().rstrip('.,;)')
+            url = sanitize_as_website(raw_url, base_url=document.url or job.source_base_url)
+            if not url:
+                if raw_url.lower().startswith("mailto:"):
+                    self._record_candidate_rejection("website", "kind_mismatch_mailto")
                 continue
             if _is_disallowed_website_candidate(url):
                 self._record_candidate_rejection("website", "blocked_host")
@@ -1711,31 +2148,21 @@ def _deobfuscate_emails(value: str) -> str:
 
 
 def _normalize_instagram_candidate(value: str | None) -> str | None:
-    if value is None:
-        return None
-    candidate = value.strip()
-    if not candidate:
-        return None
-    if candidate.startswith("@"):
-        candidate = candidate[1:]
-    if not candidate.lower().startswith("http"):
-        if "instagram.com/" in candidate.lower():
-            candidate = f"https://{candidate.lstrip('/')}"
-        else:
-            candidate = f"https://www.instagram.com/{candidate}"
-
-    match = _INSTAGRAM_PATH_RE.search(candidate)
-    if not match:
-        return None
-    handle = match.group(1).strip("/")
-    handle = handle.split("/")[0].split("?")[0].split("#")[0]
-    handle = handle.lstrip("@")
-    if not handle or handle.lower() in _IGNORED_INSTAGRAM_SEGMENTS:
-        return None
-    return f"https://www.instagram.com/{handle}"
+    return sanitize_as_instagram(value)
 
 
-
+def _instagram_profile_looks_missing(document: SearchDocument) -> bool:
+    combined = _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:2400], document.url or ""] if part))
+    return any(
+        marker in combined
+        for marker in (
+            "sorry this page isn t available",
+            "the link you followed may be broken",
+            "page isn t available",
+            "page not found",
+            "user not found",
+        )
+    )
 
 
 def _is_generic_greek_letter_chapter_name(value: str | None) -> bool:
@@ -1775,6 +2202,56 @@ def _school_aliases(
     return list(dict.fromkeys(alias.lower() for alias in aliases if alias))
 
 
+def _school_query_aliases(
+    value: str | None,
+    *,
+    enable_school_initials: bool = True,
+    min_school_initial_length: int = 3,
+) -> list[str]:
+    normalized = " ".join((value or "").split()).strip()
+    aliases: list[str] = []
+    if normalized:
+        aliases.append(normalized)
+    compact = _compact_text(normalized)
+    if len(compact) >= 6:
+        aliases.append(compact)
+    aliases.extend(
+        _school_aliases(
+            normalized,
+            enable_school_initials=enable_school_initials,
+            min_school_initial_length=min_school_initial_length,
+        )
+    )
+    return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _fraternity_query_aliases(display_name: str | None, fraternity_slug: str | None) -> list[str]:
+    display = " ".join((display_name or "").split()).strip()
+    aliases: list[str] = []
+    if display:
+        aliases.append(display)
+    compact = _compact_text(display)
+    if len(compact) >= 6:
+        aliases.append(compact)
+    initials = _initialism(display)
+    if len(initials) >= 2:
+        aliases.append(initials)
+    slug_tokens = " ".join(token for token in _normalized_match_text(fraternity_slug).split() if token not in {"main", "national"})
+    if slug_tokens and slug_tokens not in [token.lower() for token in aliases]:
+        aliases.append(slug_tokens)
+    alias_map = {
+        "phi gamma delta": ["fiji"],
+        "alpha tau omega": ["ato"],
+        "sigma alpha epsilon": ["sae"],
+        "beta upsilon chi": ["byx"],
+        "pi kappa alpha": ["pike"],
+    }
+    canonical = _normalized_match_text(display)
+    for mapped_alias in alias_map.get(canonical, []):
+        aliases.append(mapped_alias)
+    return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
 def _instagram_handle_queries(
     job: FieldJob,
     *,
@@ -1802,6 +2279,75 @@ def _instagram_handle_queries(
             ]
         )
     return list(dict.fromkeys(candidate for candidate in candidates if len(candidate) >= 6))[:4]
+
+
+def _school_handle_aliases(
+    value: str | None,
+    *,
+    enable_school_initials: bool = True,
+    min_school_initial_length: int = 3,
+) -> list[str]:
+    normalized = " ".join((value or "").split()).strip()
+    aliases: list[str] = []
+    aliases.extend(
+        _school_aliases(
+            normalized,
+            enable_school_initials=enable_school_initials,
+            min_school_initial_length=min_school_initial_length,
+        )
+    )
+    for token in _significant_tokens(normalized):
+        compact = _compact_text(token)
+        if len(compact) >= 4:
+            aliases.append(compact)
+    return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _instagram_probe_handles(
+    job: FieldJob,
+    *,
+    enable_school_initials: bool = True,
+    min_school_initial_length: int = 3,
+    enable_compact_fraternity: bool = True,
+    max_candidates: int = 6,
+) -> list[str]:
+    fraternity_display = _display_name(job.fraternity_slug)
+    fraternity_aliases = _fraternity_query_aliases(fraternity_display, job.fraternity_slug)
+    fraternity_compacts = [
+        _compact_text(alias)
+        for alias in fraternity_aliases
+        if len(_compact_text(alias)) >= 3
+    ]
+    fraternity_compacts = list(dict.fromkeys(fraternity_compacts))
+    if enable_compact_fraternity:
+        base_compact = _compact_text(fraternity_display)
+        if len(base_compact) >= 5 and base_compact not in fraternity_compacts:
+            fraternity_compacts.insert(0, base_compact)
+
+    school = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+    school_aliases = _school_handle_aliases(
+        school,
+        enable_school_initials=enable_school_initials,
+        min_school_initial_length=min_school_initial_length,
+    )
+
+    handles: list[str] = []
+    for school_alias in school_aliases[:3]:
+        compact_school = _compact_text(school_alias)
+        if not compact_school:
+            continue
+        for fraternity_compact in fraternity_compacts[:4]:
+            if not fraternity_compact:
+                continue
+            handles.extend(
+                [
+                    f"{compact_school}{fraternity_compact}",
+                    f"{fraternity_compact}{compact_school}",
+                    f"{compact_school}_{fraternity_compact}",
+                    f"{fraternity_compact}_{compact_school}",
+                ]
+            )
+    return list(dict.fromkeys(handle for handle in handles if 6 <= len(handle) <= 30))[: max(1, max_candidates)]
 
 
 def _email_followup_links(document: SearchDocument, website_url: str, *, limit: int) -> list[str]:
@@ -2217,7 +2763,7 @@ def _instagram_looks_relevant_to_job(instagram_url: str, job: FieldJob, *, docum
     handle_score = _instagram_handle_match_score(instagram_url, job)
     if handle_score >= 4:
         return True
-    if handle_score >= 3 and _has_nongeneric_chapter_signal(job):
+    if handle_score >= 3 and _has_nongeneric_chapter_signal(job) and _instagram_handle_has_fraternity_token(instagram_url, job):
         return True
     if document is None:
         return False
@@ -2301,7 +2847,30 @@ def _trusted_directory_external_candidate(job: FieldJob, candidate_url: str, doc
 def _is_safe_related_website_url(job: FieldJob, url: str) -> bool:
     if job.website_url and _normalize_url(job.website_url) == _normalize_url(url):
         return True
-    return not _is_disallowed_website_candidate(url) and _search_result_is_relevant(job, SearchResult(title="", url=url, snippet=url, provider="derived", rank=0))
+    if _is_disallowed_website_candidate(url):
+        return False
+
+    normalized_candidate = _normalize_url(url)
+    source_base_url = (job.source_base_url or "").strip()
+    source_list_url = str(job.payload.get("sourceListUrl") or "").strip()
+    if source_base_url and _normalize_url(source_base_url) == normalized_candidate:
+        return False
+    if source_list_url and _normalize_url(source_list_url) == normalized_candidate:
+        return False
+
+    parsed_candidate = urlparse(url)
+    candidate_path = (parsed_candidate.path or "").lower().strip("/")
+    if any(marker in candidate_path for marker in _GENERIC_DIRECTORY_PATH_MARKERS):
+        return False
+
+    source_host = (urlparse(source_base_url).netloc or "").lower()
+    candidate_host = (parsed_candidate.netloc or "").lower()
+    if source_host and candidate_host and (candidate_host == source_host or candidate_host.endswith(f".{source_host}")):
+        path_parts = [part for part in candidate_path.split("/") if part]
+        if len(path_parts) <= 1:
+            return False
+
+    return _search_result_is_relevant(job, SearchResult(title="", url=url, snippet=url, provider="derived", rank=0))
 
 def _is_disallowed_website_candidate(url: str) -> bool:
     parsed = urlparse(url)
@@ -2777,11 +3346,13 @@ class RetryableJobError(Exception):
         backoff_seconds: int | None = None,
         low_signal: bool = False,
         preserve_attempt: bool = False,
+        reason_code: str = "retryable",
     ):
         super().__init__(message)
         self.backoff_seconds = backoff_seconds
         self.low_signal = low_signal
         self.preserve_attempt = preserve_attempt
+        self.reason_code = reason_code
 
 
 def _website_is_confident(job: FieldJob) -> bool:

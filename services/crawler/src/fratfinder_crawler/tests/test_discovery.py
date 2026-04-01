@@ -1,4 +1,5 @@
 from fratfinder_crawler.discovery import discover_source
+from fratfinder_crawler.models import ExistingSourceCandidate, VerifiedSourceRecord
 from fratfinder_crawler.search.client import SearchResult
 
 
@@ -18,6 +19,26 @@ class CapturingStubSearchClient(StubSearchClient):
     def search(self, query: str, max_results: int | None = None):
         self.queries.append(query)
         return super().search(query, max_results=max_results)
+
+
+class StubDiscoveryRepository:
+    def __init__(
+        self,
+        verified_source: VerifiedSourceRecord | None = None,
+        existing_sources: list[ExistingSourceCandidate] | None = None,
+    ):
+        self._verified_source = verified_source
+        self._existing_sources = existing_sources or []
+
+    def get_verified_source_by_slug(self, fraternity_slug: str) -> VerifiedSourceRecord | None:
+        if self._verified_source is None:
+            return None
+        if self._verified_source.fraternity_slug != fraternity_slug:
+            return None
+        return self._verified_source
+
+    def get_existing_source_candidates(self, fraternity_slug: str) -> list[ExistingSourceCandidate]:
+        return [candidate for candidate in self._existing_sources if fraternity_slug in candidate.source_slug]
 
 
 def test_discover_source_prefers_official_directory_host():
@@ -213,3 +234,95 @@ def test_discover_source_uses_curated_source_hint_when_search_is_noisy():
     assert result.selected_url == "https://phigam.org/about/overview/our-chapters/"
     assert result.selected_confidence >= 0.8
     assert result.confidence_tier == "high"
+
+
+def test_discover_source_uses_verified_registry_before_search():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="lambda-chi-alpha",
+            fraternity_name="Lambda Chi Alpha",
+            national_url="https://www.lambdachialpha.org/chapters/",
+            origin="nic_bootstrap",
+            confidence=0.92,
+            http_status=200,
+            checked_at="2026-03-31T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        )
+    )
+    client = CapturingStubSearchClient({})
+
+    result = discover_source("Lambda Chi Alpha", client, repository=repository)
+
+    assert result.selected_url == "https://www.lambdachialpha.org/chapters/"
+    assert result.source_provenance == "verified_registry"
+    assert result.confidence_tier == "high"
+    assert client.queries == []
+
+
+def test_discover_source_falls_back_to_existing_source_when_registry_unhealthy():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="lambda-chi-alpha",
+            fraternity_name="Lambda Chi Alpha",
+            national_url="https://www.lambdachialpha.org/chapters/",
+            origin="nic_bootstrap",
+            confidence=0.55,
+            http_status=503,
+            checked_at="2026-03-31T00:00:00+00:00",
+            is_active=False,
+            metadata={},
+        ),
+        existing_sources=[
+            ExistingSourceCandidate(
+                source_slug="lambda-chi-alpha-main",
+                list_url="https://chapterbuilder.lambdachialpha.org/chapters",
+                base_url="https://chapterbuilder.lambdachialpha.org",
+                active=True,
+                last_run_status="succeeded",
+                last_success_at="2026-03-30T00:00:00+00:00",
+                confidence=0.9,
+            )
+        ],
+    )
+    client = CapturingStubSearchClient({})
+
+    result = discover_source("Lambda Chi Alpha", client, repository=repository)
+
+    assert result.selected_url == "https://chapterbuilder.lambdachialpha.org/chapters"
+    assert result.source_provenance == "existing_source"
+    assert client.queries == []
+
+
+def test_discover_source_conflict_policy_prefers_existing_when_healthier():
+    repository = StubDiscoveryRepository(
+        verified_source=VerifiedSourceRecord(
+            fraternity_slug="phi-gamma-delta",
+            fraternity_name="Phi Gamma Delta",
+            national_url="https://phigam.org/about/overview/our-chapters/",
+            origin="nic_bootstrap",
+            confidence=0.83,
+            http_status=200,
+            checked_at="2026-01-01T00:00:00+00:00",
+            is_active=True,
+            metadata={},
+        ),
+        existing_sources=[
+            ExistingSourceCandidate(
+                source_slug="phi-gamma-delta-main",
+                list_url="https://phigam.org/chapter-directory/",
+                base_url="https://phigam.org",
+                active=True,
+                last_run_status="succeeded",
+                last_success_at="2026-03-30T00:00:00+00:00",
+                confidence=0.95,
+            )
+        ],
+    )
+    client = CapturingStubSearchClient({})
+
+    result = discover_source("Phi Gamma Delta", client, repository=repository)
+
+    assert result.selected_url == "https://phigam.org/chapter-directory/"
+    assert result.source_provenance == "existing_source"
+    assert result.fallback_reason == "registry_disagreed_preferred_existing_source"

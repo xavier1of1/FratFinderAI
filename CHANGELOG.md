@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-03-31
+
+### Added
+- Added `0008_verified_sources.sql` with a dedicated `verified_sources` registry table (health/provenance metadata, active flag, timestamps, indexes, updated-at trigger).
+- Added manual operator CLI commands for registry lifecycle:
+  - `bootstrap-nic-sources --input <json> [--dry-run]`
+  - `revalidate-verified-source --fraternity-slug <slug>`
+  - `revalidate-verified-sources --limit <n>`
+- Added discovery provenance metadata end-to-end:
+  - `sourceProvenance`
+  - `fallbackReason`
+  - `resolutionTrace`
+- Added orchestration navigation stages before extraction:
+  - `detect_chapter_index_mode`
+  - `extract_chapter_stubs`
+  - `follow_chapter_detail_or_outbound` (bounded)
+  - `extract_contacts_from_chapter_site`
+- Added shared chapter-link scoring utility and adapter stub contract support (`parse_stubs`) across `directory_v1`, `script_json`, and `locator_api`.
+- Added crawler tests for registry-first discovery and navigation/stub/contact extraction behaviors.
+- Added no-cost search provider support:
+  - `searxng_json`
+  - `tavily_api`
+  - `serper_api`
+  - `auto_free` provider routing mode.
+- Added provider-order and provider-specific pacing settings for free-provider orchestration.
+- Added search preflight provider-health snapshots (`provider_health`) with per-provider attempt/success metrics.
+
+### Changed
+- Discovery resolution is now registry-first: `verified_sources` -> existing configured sources -> search fallback.
+- Discovery now applies stronger identity normalization (including alias handling such as `fiji -> phi-gamma-delta`) and deterministic conflict resolution when registry and existing sources disagree.
+- Fraternity Intake now surfaces discovery provenance and decision trace in request details for operator auditability.
+- Crawl finalization metadata now includes navigation mode, stub counts, and navigation stats.
+- Bing-first free fallback routing now uses a provider-chain execution path that can continue across provider failures without aborting on the first failed query.
+- Field-job search fanout no longer aborts after the first provider-unavailable query; jobs now exhaust bounded query budgets before classifying provider outage outcomes.
+
 ## [0.9.1] - 2026-03-27
 
 ### Added

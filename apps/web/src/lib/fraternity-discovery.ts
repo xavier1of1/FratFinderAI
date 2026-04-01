@@ -11,6 +11,9 @@ export interface FraternitySourceDiscoveryResult {
   selectedConfidence: number;
   confidenceTier: "high" | "medium" | "low";
   candidates: FraternityDiscoveryCandidate[];
+  sourceProvenance: "verified_registry" | "existing_source" | "search" | null;
+  fallbackReason: string | null;
+  resolutionTrace: Array<Record<string, unknown>>;
 }
 
 function findRepositoryRoot(): string {
@@ -42,6 +45,9 @@ function parseDiscoveryOutput(output: string): FraternitySourceDiscoveryResult {
     selected_confidence: number;
     confidence_tier: "high" | "medium" | "low";
     candidates: FraternityDiscoveryCandidate[];
+    source_provenance?: "verified_registry" | "existing_source" | "search" | null;
+    fallback_reason?: string | null;
+    resolution_trace?: Array<Record<string, unknown>>;
   };
 
   return {
@@ -50,7 +56,10 @@ function parseDiscoveryOutput(output: string): FraternitySourceDiscoveryResult {
     selectedUrl: payload.selected_url,
     selectedConfidence: Number(payload.selected_confidence ?? 0),
     confidenceTier: payload.confidence_tier,
-    candidates: Array.isArray(payload.candidates) ? payload.candidates : []
+    candidates: Array.isArray(payload.candidates) ? payload.candidates : [],
+    sourceProvenance: payload.source_provenance ?? null,
+    fallbackReason: payload.fallback_reason ?? null,
+    resolutionTrace: Array.isArray(payload.resolution_trace) ? payload.resolution_trace : []
   };
 }
 

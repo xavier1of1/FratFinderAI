@@ -1,0 +1,734 @@
+[
+  {
+    "name": "Acacia",
+    "base": "https://www.acacia.org/",
+    "status": 200,
+    "final_url": "https://acacia.org/",
+    "chapterish_links": [
+      {
+        "text": "Find a Chapter",
+        "url": "https://acacia.org/chapters"
+      },
+      {
+        "text": "Start A Chapter",
+        "url": "https://acacia.org/join#start-a-chapter"
+      },
+      {
+        "text": "Chapter Resources",
+        "url": "https://acacia.org/chapter-resources"
+      },
+      {
+        "text": "Managing Acacia's Chapter Houses",
+        "url": "https://acacia.org/managing-acacias-chapter-houses"
+      },
+      {
+        "text": "Start a Chapter",
+        "url": "https://acacia-fraternity.squarespace.com/join#start-a-chapter"
+      },
+      {
+        "text": "Managing Chapter Houses",
+        "url": "https://acacia.org/managing-acacias-chapter-houses"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Alpha Chi Rho",
+    "base": "http://www.alphachirho.org/",
+    "status": 200,
+    "final_url": "https://www.alphachirho.org/",
+    "chapterish_links": [
+      {
+        "text": "Chapter Map",
+        "url": "https://www.alphachirho.org/about/map/"
+      },
+      {
+        "text": "How to start a Chapter",
+        "url": "https://www.alphachirho.org/about/expansion/"
+      },
+      {
+        "text": "Chapter/Colony Reporting",
+        "url": "https://www.alphachirho.org/about/chapter_reporting/"
+      },
+      {
+        "text": "FAQ Page",
+        "url": "https://www.alphachirho.org/pci-directory-faq/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Alpha Delta Gamma",
+    "base": "http://www.alphadeltagamma.org/",
+    "status": 200,
+    "final_url": "https://www.alphadeltagamma.org/",
+    "chapterish_links": [
+      {
+        "text": "Our Chapters",
+        "url": "https://www.alphadeltagamma.org/chapters"
+      },
+      {
+        "text": "Become an Alpha Delt",
+        "url": "https://www.alphadeltagamma.org/chapters"
+      },
+      {
+        "text": "Start a Chapter",
+        "url": "https://www.alphadeltagamma.org/expansion"
+      },
+      {
+        "text": "Join Alpha Delta Gamma",
+        "url": "https://www.alphadeltagamma.org/chapters"
+      },
+      {
+        "text": "Exploring Lambda Chapter: 10 Must-See Sights and Activities",
+        "url": "https://www.alphadeltagamma.org/post/exploring-lambda-chapter-10-must-see-sights-and-activities"
+      },
+      {
+        "text": "Find A Chapter",
+        "url": "https://www.alphadeltagamma.org/chapters1"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Alpha Delta Phi",
+    "base": "https://www.alphadeltaphi.org/",
+    "status": 200,
+    "final_url": "https://www.alphadeltaphi.org/",
+    "chapterish_links": [
+      {
+        "text": "DIRECTORY",
+        "url": "https://auth.togetherwork.com/auth/realms/omegafi/protocol/openid-connect/auth?client_id=my-omegafi&redirect_uri=https%3A%2F%2Flogin.omegafi.com%2Fiam%2Flogin%3FloginName%3Dmy-omegafi%26service%3Dhttps%253A%252F%252Fmy.omegafi.com%252Fapps%252Fmyomegafi%252Flogin%252Flogin_post.php%253FUserName%253D%252A%252A%252A%2526Password%253D%252A%252A%252A%26orgName%3Dadp&state=9bf3c7dc-b4b5-43dd-8d4d-8bbc313a1ce9&response_mode=fragment&response_type=code&scope=openid&nonce=f505dc27-4d36-4167-8892-4b1a7fd760c4"
+      },
+      {
+        "text": "Chapter Roll",
+        "url": "https://www.alphadeltaphi.org/chapter-roll"
+      },
+      {
+        "text": "Start A Chapter",
+        "url": "https://www.alphadeltaphi.org/expansion"
+      },
+      {
+        "text": "Chapter Conduct",
+        "url": "https://www.alphadeltaphi.org/chapterconduct"
+      },
+      {
+        "text": "Chapter Toolkit",
+        "url": "https://www.alphadeltaphi.org/toolkit"
+      },
+      {
+        "text": "Recruitment",
+        "url": "https://www.alphadeltaphi.org/chapterbuilder"
+      },
+      {
+        "text": "STATEMENT REGARDING THE LAMBDA PHI CHAPTER & ALUMNI ASSOCIATION",
+        "url": "https://www.alphadeltaphi.org/post/statement-regarding-the-lambda-phi-chapter-alumni-association"
+      },
+      {
+        "text": "CHAPTERS",
+        "url": "https://www.alphadeltaphi.org/chapter-roll"
+      },
+      {
+        "text": "CHAPTER TOOLKIT",
+        "url": "https://www.alphadeltaphi.org/toolkit"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Alpha Gamma Rho",
+    "base": "https://www.alphagammarho.org/",
+    "status": 200,
+    "final_url": "https://www.alphagammarho.org/",
+    "chapterish_links": [
+      {
+        "text": "CHAPTERS",
+        "url": "https://www.alphagammarho.org/chapters"
+      },
+      {
+        "text": "Chapters",
+        "url": "https://www.alphagammarho.org/chapters"
+      },
+      {
+        "text": "Local Chapter Excellence",
+        "url": "https://www.alphagammarho.org/"
+      },
+      {
+        "text": "LOCAL CHAPTER EXCELLENCE",
+        "url": "https://www.alphagammarho.org/local-chapter-excellence"
+      },
+      {
+        "text": "PROGRESS & OUTCOMES",
+        "url": "https://www.alphagammarho.org/local-chapter-excellence-progress-and-outcomes"
+      },
+      {
+        "text": "Local Chapter Excellence",
+        "url": "https://www.alphagammarho.org/#mmenu-local-chapter-excellence"
+      },
+      {
+        "text": "Learn More",
+        "url": "https://www.alphagammarho.org/making-better-men-through-local-chapter-excellence"
+      },
+      {
+        "text": "Philanthropy and Service Brings Kappa Chapter Together with its Campus & Community",
+        "url": "https://www.alphagammarho.org/news/philanthropy-and-service-brings-kappa-chapter-together-its-campus-community"
+      },
+      {
+        "text": "Read More",
+        "url": "https://www.alphagammarho.org/news/philanthropy-and-service-brings-kappa-chapter-together-its-campus-community"
+      },
+      {
+        "text": "AGRconnect Transition",
+        "url": "https://www.alphagammarho.org/agr-transitions-chapterspot"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Alpha Tau Omega",
+    "base": "https://ato.org/",
+    "status": 200,
+    "final_url": "https://ato.org/",
+    "chapterish_links": [
+      {
+        "text": "Additional Chapter Information",
+        "url": "https://ato.org/cs/"
+      },
+      {
+        "text": "Search Chapters",
+        "url": "https://ato.org/home/ato-map/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Beta Theta Pi",
+    "base": "https://beta.org/",
+    "status": 200,
+    "final_url": "https://www.beta.org/",
+    "chapterish_links": [
+      {
+        "text": "Join Beta Theta Pi With chapters on campuses across North America, Beta is always looking to meet potential new members ",
+        "url": "https://www.beta.org/join/"
+      },
+      {
+        "text": "Chapter Directory",
+        "url": "https://my.beta.org/"
+      },
+      {
+        "text": "Resources Whether you\u2019re leading a chapter, looking to reconnect with old brothers or pitch in on an advisory team or ho",
+        "url": "https://www.beta.org/resources/"
+      },
+      {
+        "text": "Chapter Awards",
+        "url": "https://www.beta.org/collegiate-resources/#awards"
+      },
+      {
+        "text": "Chapter Status Changes",
+        "url": "https://www.beta.org/chapterstatuschanges"
+      },
+      {
+        "text": "Events Throughout the year, alumni, undergraduates, Friends of Beta and Sweethearts gather at events hosted across North",
+        "url": "https://www.beta.org/programs/"
+      },
+      {
+        "text": "Contact Whether you\u2019re an undergraduate brother, alumnus or prospective member, we look forward to connecting you with B",
+        "url": "https://www.beta.org/contact/"
+      },
+      {
+        "text": "Chapter Directory",
+        "url": "https://www.beta.org/chapterdirectory"
+      },
+      {
+        "text": "Staff Directory",
+        "url": "https://www.beta.org/staff-directory"
+      },
+      {
+        "text": "Member Directory",
+        "url": "https://my.beta.org"
+      },
+      {
+        "text": "Alumni Association Directory",
+        "url": "https://www.beta.org/aadirectory"
+      },
+      {
+        "text": "[no-text]",
+        "url": "https://www.beta.org/wp-content/uploads/2022/09/Chapter-Services-2021-22.jpg"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Beta Upsilon Chi",
+    "base": "https://betaupsilonchi.org/",
+    "status": 200,
+    "final_url": "https://byx.org/",
+    "chapterish_links": [
+      {
+        "text": "Join a Chapter",
+        "url": "https://byx.org/join-a-chapter/"
+      },
+      {
+        "text": "Start a Chapter",
+        "url": "https://byx.org/start-a-chapter/"
+      },
+      {
+        "text": "Find Your Alumni Chapter",
+        "url": "https://byx.org/find-your-alumni-chapter/"
+      },
+      {
+        "text": "Chapter Designated Giving",
+        "url": "https://byx.org/excellence/"
+      },
+      {
+        "text": "FIND YOUR CHAPTER",
+        "url": "https://byx.org/join-a-chapter"
+      },
+      {
+        "text": "FIND YOUR CHAPTER",
+        "url": "https://byx.org/"
+      },
+      {
+        "text": "Find Your Chapter",
+        "url": "https://byx.org/join-a-chapter/"
+      },
+      {
+        "text": "LEARN MORE",
+        "url": "https://byx.org/join-a-chapter/"
+      },
+      {
+        "text": "LEARN MORE",
+        "url": "https://byx.org/start-a-chapter/"
+      },
+      {
+        "text": "Learn More",
+        "url": "https://byx.org/find-your-alumni-chapter/"
+      },
+      {
+        "text": "Find a Chapter",
+        "url": "https://byx.org/join-a-chapter/"
+      },
+      {
+        "text": "FIND YOUR CHAPTER",
+        "url": "https://byx.org/join-a-chapter/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Chi Phi",
+    "base": "https://chiphi.dynamic.omegafi.com/",
+    "status": 410,
+    "final_url": "https://chiphi.dynamic.omegafi.com/",
+    "chapterish_links": [],
+    "error": null
+  },
+  {
+    "name": "Chi Psi",
+    "base": "https://www.chipsi.org/",
+    "status": 200,
+    "final_url": "https://chipsi.org/",
+    "chapterish_links": [
+      {
+        "text": "Brother Directory",
+        "url": "https://brother.chipsi.org/search"
+      },
+      {
+        "text": "Furman: Refer a Recruit",
+        "url": "https://app.chapterbuilder.com/forms/12591/view/?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1MjY4MzU1MSwianRpIjoiMWRlNWY0ZTAtM2ZmMy00MmMzLTk5NTctYWM0N2M2Yzk2ZTM3IiwidHlwZSI6ImFjY2VzcyIsInN1YiI6MTI1OTEsIm5iZiI6MTc1MjY4MzU1MSwiY2xhaW1zX3R5cGUiOiJmb3JtIn0.39XTgJsgz-npTeTawmDmG1dSE8EOgwFe-uklTAGMGL0"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Delta Chi",
+    "base": "https://deltachi.org/",
+    "status": 200,
+    "final_url": "https://deltachi.org/",
+    "chapterish_links": [
+      {
+        "text": "Staff Directory",
+        "url": "https://deltachi.org/staff-directory/"
+      },
+      {
+        "text": "Chapter Leader",
+        "url": "https://deltachi.org/"
+      },
+      {
+        "text": "Make a Chapter Donation to the V Foundation",
+        "url": "https://vfoundation.donordrive.com/index.cfm?fuseaction=donorDrive.event&eventID=542"
+      },
+      {
+        "text": "Chapter Meeting Report",
+        "url": "https://deltachi.org/chapter-meeting-report/"
+      },
+      {
+        "text": "Alumni Chapters",
+        "url": "https://deltachi.org/alumni-chapters/"
+      },
+      {
+        "text": "Alumni Chapter Scene",
+        "url": "https://deltachi.org/alumni-scene-2/"
+      },
+      {
+        "text": "Chapter Directory",
+        "url": "https://deltachi.org/chapter-directory/"
+      },
+      {
+        "text": "[no-text]",
+        "url": "https://deltachi.org/charlotte-area-alumni-chapter-and-virginia-blue-ridge-alumni-chapter-eventcharlotte-area-alumni-chapter-and-virginia-blue-ridge-alumni-chapter-eventdr-lori-hart-headlines-adam-oakes-hazing-prevention/"
+      },
+      {
+        "text": "Charlotte Area Alumni Chapter and Virginia Blue Ridge Alumni Chapter Event",
+        "url": "https://deltachi.org/charlotte-area-alumni-chapter-and-virginia-blue-ridge-alumni-chapter-eventcharlotte-area-alumni-chapter-and-virginia-blue-ridge-alumni-chapter-eventdr-lori-hart-headlines-adam-oakes-hazing-prevention/"
+      },
+      {
+        "text": "Contact",
+        "url": "https://deltachi.org/staff-directory/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Delta Kappa Epsilon",
+    "base": "https://dke.org/",
+    "status": 200,
+    "final_url": "https://dke.org/",
+    "chapterish_links": [
+      {
+        "text": "Report Misconduct",
+        "url": "https://dke.org/request-support/chapter-conduct-reporting/"
+      },
+      {
+        "text": "Calculate Your Chapter Bill",
+        "url": "https://dke.org/finance-and-insurance/"
+      },
+      {
+        "text": "Chapter Experience",
+        "url": "https://dke.org/"
+      },
+      {
+        "text": "Consultant Model",
+        "url": "https://dke.org/chapter-experience/consultant-model/"
+      },
+      {
+        "text": "Chapters",
+        "url": "https://dke.org/chapter-experience/chapters/"
+      },
+      {
+        "text": "Expansion & Growth",
+        "url": "https://dke.org/chapter-experience/expansion-growth/"
+      },
+      {
+        "text": "Chapter Training",
+        "url": "https://dke.org/request-support/chapter-training/"
+      },
+      {
+        "text": "SGM | Custom Chapter Merch",
+        "url": "https://www.shopgreekmerch.com/"
+      },
+      {
+        "text": "DKE Life",
+        "url": "https://dke.org/chapter-experience/the-standards/"
+      },
+      {
+        "text": "Chapters",
+        "url": "https://dke.org/chapter/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Delta Sigma Phi",
+    "base": "https://www.deltasig.org/",
+    "status": 200,
+    "final_url": "https://deltasig.org/",
+    "chapterish_links": [
+      {
+        "text": "View All Chapters",
+        "url": "https://deltasig.org/groups?type=collegiate_chapters"
+      },
+      {
+        "text": "[no-text]",
+        "url": "https://deltasig.org/groups?type=collegiate_chapter"
+      },
+      {
+        "text": "[no-text]",
+        "url": "https://deltasig.org/news/epsilon-chapter-annual-philanthropy"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Delta Tau Delta",
+    "base": "https://www.delts.org/",
+    "status": 200,
+    "final_url": "https://www.delts.org/",
+    "chapterish_links": [
+      {
+        "text": "Find a Chapter",
+        "url": "https://www.delts.org/find-a-chapter"
+      },
+      {
+        "text": "Start a Chapter",
+        "url": "https://www.delts.org/start-a-chapter"
+      },
+      {
+        "text": "Alumni Chapters",
+        "url": "https://www.delts.org/alumni-chapters"
+      },
+      {
+        "text": "Chapter Leadership Consultants",
+        "url": "https://www.delts.org/leadership-consultants"
+      },
+      {
+        "text": "Chapter Education Funds",
+        "url": "https://www.delts.org/cef"
+      },
+      {
+        "text": "DATES, TRIP LOCATIONS, & MORE INFORMATION",
+        "url": "https://www.delts.org/outward-bound"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Delta Upsilon",
+    "base": "https://www.deltau.org/",
+    "status": 200,
+    "final_url": "https://www.deltau.org/",
+    "chapterish_links": [
+      {
+        "text": "Staff Directory",
+        "url": "https://www.deltau.org/staff"
+      },
+      {
+        "text": "Chapters",
+        "url": "https://www.deltau.org/chapters"
+      },
+      {
+        "text": "Undergraduate Chapters",
+        "url": "https://www.deltau.org/chapters"
+      },
+      {
+        "text": "Chapter Excellence Plan",
+        "url": "https://www.deltau.org/chapter-excellence-plan"
+      },
+      {
+        "text": "Chapter Reporting",
+        "url": "https://www.deltau.org/chapter-reporting"
+      },
+      {
+        "text": "Chapter Grants and Campaigns",
+        "url": "https://www.deltau.org/chapter-grants-and-campaigns"
+      },
+      {
+        "text": "Start a Chapter",
+        "url": "https://www.deltau.org/start-a-chapter"
+      },
+      {
+        "text": "Chapter Resources",
+        "url": "https://www.deltau.org/chapter-resources"
+      },
+      {
+        "text": "Cep",
+        "url": "https://www.deltau.org/chapter-excellence-plan"
+      },
+      {
+        "text": "[no-text]",
+        "url": "https://www.deltau.org/associate-chapter-ceremony-held-for-wilmington"
+      },
+      {
+        "text": "Associate Chapter Ceremony Held for Wilmington",
+        "url": "https://www.deltau.org/associate-chapter-ceremony-held-for-wilmington"
+      },
+      {
+        "text": "Read More",
+        "url": "https://www.deltau.org/associate-chapter-ceremony-held-for-wilmington"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Kappa Delta Rho",
+    "base": "https://www.kdr.com/",
+    "status": 200,
+    "final_url": "https://www.kdr.com/",
+    "chapterish_links": [
+      {
+        "text": "Chapters",
+        "url": "https://www.kdr.com/chapters"
+      },
+      {
+        "text": "Chapter Awards Application",
+        "url": "https://www.kdr.com/resources/chapter-awards/"
+      },
+      {
+        "text": "Start Your Own Chapter",
+        "url": "https://www.kdr.com/join/start-your-own-chapter/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Lambda Chi Alpha",
+    "base": "https://www.lambdachi.org/",
+    "status": 200,
+    "final_url": "https://www.lambdachi.org/",
+    "chapterish_links": [
+      {
+        "text": "Chapters",
+        "url": "https://www.lambdachi.org/chapters/"
+      },
+      {
+        "text": "Chapter Officers",
+        "url": "https://www.lambdachi.org/advisor-hub/officer-hub/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Phi Gamma Delta",
+    "base": "https://www.phigam.org/",
+    "status": 200,
+    "final_url": "https://phigam.org/",
+    "chapterish_links": [
+      {
+        "text": "Our Chapters",
+        "url": "https://phigam.org/about/overview/our-chapters/"
+      },
+      {
+        "text": "Undergraduate Recruitment Referral",
+        "url": "https://app.chapterbuilder.com/forms/6428/view/?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc2NTQwMjc2NCwianRpIjoiZGM3NTc4Y2MtYTBmMy00ZjNhLWE0OWEtZDMzM2NjYjkzZDQwIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6NjQyOCwibmJmIjoxNzY1NDAyNzY0LCJjbGFpbXNfdHlwZSI6ImZvcm0ifQ.KaqX8mocXxKhkojtMbKoh4A1Zqao9WYws7DtjB56iG8"
+      },
+      {
+        "text": "Staff Directory",
+        "url": "https://phigam.org/about/ihq/staff/"
+      },
+      {
+        "text": "Chapter Resources & Reporting Forms",
+        "url": "https://phigam.org/undergraduates/general-resources/chapter-resources-reporting-forms/"
+      },
+      {
+        "text": "Field Secretary Evaluation Form",
+        "url": "https://phigam.org/undergraduates/general-resources/chapter-resources-reporting-forms/field-secretary-evaluation-form/"
+      },
+      {
+        "text": "Purple Pilgrim",
+        "url": "https://phigam.org/undergraduates/general-resources/chapter-resources-reporting-forms/purple-pilgrim/"
+      },
+      {
+        "text": "Report of Affiliation Form",
+        "url": "https://phigam.org/undergraduates/general-resources/chapter-resources-reporting-forms/report-of-affiliation-form/"
+      },
+      {
+        "text": "Suspension of Membership",
+        "url": "https://phigam.org/undergraduates/general-resources/chapter-resources-reporting-forms/suspension-of-membership/"
+      },
+      {
+        "text": "Social Media & Website Report Form",
+        "url": "https://phigam.org/undergraduates/general-resources/chapter-resources-reporting-forms/social-media-website-report-form/"
+      },
+      {
+        "text": "Chapter Payment",
+        "url": "https://phigam.org/undergraduates/officers-chairmen/chapter-payment/"
+      },
+      {
+        "text": "Provisional Chapter Resources",
+        "url": "https://phigam.org/undergraduates/recruitment/provisional-chapter-resources/"
+      },
+      {
+        "text": "Chartering",
+        "url": "https://phigam.org/undergraduates/recruitment/provisional-chapter-resources/chartering/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Sigma Chi",
+    "base": "https://sigmachi.org/",
+    "status": 200,
+    "final_url": "https://sigmachi.org/",
+    "chapterish_links": [
+      {
+        "text": "Directory",
+        "url": "https://memberhub.sigmachi.org/home"
+      },
+      {
+        "text": "Directory",
+        "url": "https://members.sigmachi.org"
+      },
+      {
+        "text": "Chapter Listing",
+        "url": "https://sigmachi.org/"
+      },
+      {
+        "text": "International Officers",
+        "url": "https://sigmachi.org/home/contact/directory/international-officers/"
+      },
+      {
+        "text": "Clubs and Chapters",
+        "url": "https://members.sigmachi.org/alumnigroups"
+      },
+      {
+        "text": "Grand Chapter",
+        "url": "https://grandchapter.sigmachi.org/"
+      },
+      {
+        "text": "Chapter System",
+        "url": "https://chaptersystem.sigmachi.org"
+      },
+      {
+        "text": "Request a Program",
+        "url": "https://chaptersystem.sigmachi.org/"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Sigma Phi Society",
+    "base": "https://www.sigmaphi.org/",
+    "status": 200,
+    "final_url": "https://www.sigmaphi.org/",
+    "chapterish_links": [
+      {
+        "text": "Chapters",
+        "url": "https://www.sigmaphi.org/chapters"
+      }
+    ],
+    "error": null
+  },
+  {
+    "name": "Tau Kappa Epsilon",
+    "base": "https://www.tke.org/",
+    "status": 200,
+    "final_url": "https://tke.org/",
+    "chapterish_links": [
+      {
+        "text": "Chapter Module Login",
+        "url": "http://module.tke.org"
+      },
+      {
+        "text": "Chapter Rankings",
+        "url": "https://tke.org/about-us/tke-today/chapter-rankings/"
+      },
+      {
+        "text": "Find a Chapter/Alumni Association",
+        "url": "https://tke.org/join-tke/find-a-chapter/"
+      },
+      {
+        "text": "Start a Chapter",
+        "url": "https://tke.org/join-tke/find-a-chapter/start-a-chapter/"
+      },
+      {
+        "text": "Chapter Module Login",
+        "url": "http://module.tke.org/"
+      },
+      {
+        "text": "Find A Chapter",
+        "url": "https://tke.org/join-tke/find-a-chapter/"
+      }
+    ],
+    "error": null
+  }
+]

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from urllib.parse import urlparse
+
+import requests
 
 from fratfinder_crawler.adapters import AdapterRegistry
 from fratfinder_crawler.config import Settings
@@ -11,7 +16,7 @@ from fratfinder_crawler.db.repository import CrawlerRepository
 from fratfinder_crawler.field_jobs import FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
-from fratfinder_crawler.search import SearchClient
+from fratfinder_crawler.search import SearchClient, SearchUnavailableError
 from fratfinder_crawler.models import CrawlMetrics
 from fratfinder_crawler.orchestration import CrawlOrchestrator
 
@@ -72,8 +77,34 @@ class CrawlService:
         source_slug: str | None = None,
         field_name: str | None = None,
         workers: int | None = None,
+        require_healthy_search: bool = False,
+        run_preflight: bool | None = None,
     ) -> dict[str, int]:
-        worker_limits = _distribute_limit(limit, workers or self._settings.crawler_field_job_max_workers)
+        effective_workers = workers or self._settings.crawler_field_job_max_workers
+        degraded_mode = False
+        preflight_enabled = self._settings.crawler_search_preflight_enabled if run_preflight is None else run_preflight
+        preflight_snapshot: dict[str, object] | None = None
+
+        if preflight_enabled and self._settings.crawler_search_enabled:
+            preflight_snapshot = self.search_preflight()
+            healthy = bool(preflight_snapshot.get("healthy", False))
+            if not healthy:
+                if require_healthy_search:
+                    result = {"processed": 0, "requeued": 0, "failed_terminal": 0}
+                    log_event(
+                        LOGGER,
+                        "field_job_batch_skipped_provider_degraded",
+                        limit=limit,
+                        source_slug=source_slug,
+                        field_name=field_name,
+                        workers=effective_workers,
+                        preflight=preflight_snapshot,
+                    )
+                    return result
+                degraded_mode = True
+                effective_workers = max(1, min(effective_workers, self._settings.crawler_search_degraded_worker_cap))
+
+        worker_limits = _distribute_limit(limit, effective_workers)
         if not worker_limits:
             result = {"processed": 0, "requeued": 0, "failed_terminal": 0}
             log_event(
@@ -83,6 +114,8 @@ class CrawlService:
                 source_slug=source_slug,
                 field_name=field_name,
                 workers=0,
+                degraded_mode=degraded_mode,
+                preflight=preflight_snapshot,
                 **result,
             )
             return result
@@ -94,6 +127,7 @@ class CrawlService:
                 field_name=field_name,
                 worker_index=1,
                 total_workers=1,
+                degraded_mode=degraded_mode,
             )
             log_event(
                 LOGGER,
@@ -102,6 +136,8 @@ class CrawlService:
                 source_slug=source_slug,
                 field_name=field_name,
                 workers=1,
+                degraded_mode=degraded_mode,
+                preflight=preflight_snapshot,
                 **result,
             )
             return result
@@ -115,6 +151,7 @@ class CrawlService:
                     field_name,
                     index,
                     len(worker_limits),
+                    degraded_mode,
                 )
                 for index, worker_limit in enumerate(worker_limits, start=1)
             ]
@@ -132,6 +169,8 @@ class CrawlService:
             source_slug=source_slug,
             field_name=field_name,
             workers=len(worker_limits),
+            degraded_mode=degraded_mode,
+            preflight=preflight_snapshot,
             **aggregate,
         )
         return aggregate
@@ -143,7 +182,25 @@ class CrawlService:
         field_name: str | None,
         worker_index: int,
         total_workers: int,
+        degraded_mode: bool = False,
     ) -> dict[str, int]:
+        search_settings = self._settings
+        max_search_pages = self._settings.crawler_search_max_pages_per_job
+        dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
+        email_max_queries = self._settings.crawler_search_email_max_queries
+        instagram_max_queries = self._settings.crawler_search_instagram_max_queries
+        if degraded_mode:
+            search_settings = self._settings.model_copy(
+                update={"crawler_search_max_results": self._settings.crawler_search_degraded_max_results}
+            )
+            max_search_pages = max(1, self._settings.crawler_search_degraded_max_pages_per_job)
+            dependency_wait_seconds = max(
+                self._settings.crawler_search_degraded_dependency_wait_seconds,
+                self._settings.crawler_search_dependency_wait_seconds,
+            )
+            email_max_queries = max(1, self._settings.crawler_search_degraded_email_max_queries)
+            instagram_max_queries = max(1, self._settings.crawler_search_degraded_instagram_max_queries)
+
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
             engine = FieldJobEngine(
@@ -153,26 +210,143 @@ class CrawlService:
                 base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
                 source_slug=source_slug,
                 field_name=field_name,
-                search_client=SearchClient(self._settings),
+                search_client=SearchClient(search_settings),
                 search_provider=self._settings.crawler_search_provider,
-                max_search_pages=self._settings.crawler_search_max_pages_per_job,
+                max_search_pages=max_search_pages,
                 negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
-                dependency_wait_seconds=self._settings.crawler_search_dependency_wait_seconds,
+                dependency_wait_seconds=dependency_wait_seconds,
+                require_confident_website_for_email=self._settings.crawler_search_require_confident_website_for_email,
+                email_escape_on_provider_block=self._settings.crawler_search_email_escape_on_provider_block,
+                email_escape_min_website_failures=self._settings.crawler_search_email_escape_min_website_failures,
+                transient_short_retries=self._settings.crawler_search_transient_short_retries,
+                transient_long_cooldown_seconds=self._settings.crawler_search_transient_long_cooldown_seconds,
                 min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
-                email_max_queries=self._settings.crawler_search_email_max_queries,
-                instagram_max_queries=self._settings.crawler_search_instagram_max_queries,
+                email_max_queries=email_max_queries,
+                instagram_max_queries=instagram_max_queries,
                 enable_school_initials=self._settings.crawler_search_enable_school_initials,
                 min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
                 enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
                 instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
+                instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
                 greedy_collect_mode=self._settings.crawler_greedy_collect,
             )
             return engine.process(limit=limit)
 
+    def search_preflight(self, probes: int | None = None) -> dict[str, object]:
+        if not self._settings.crawler_search_enabled:
+            return {
+                "healthy": True,
+                "success_rate": 1.0,
+                "successes": 0,
+                "probes": 0,
+                "probe_outcomes": [],
+                "reason": "search_disabled",
+            }
+
+        query_pool = _SEARCH_PREFLIGHT_QUERIES
+        probe_count = max(1, min(len(query_pool), probes or self._settings.crawler_search_preflight_probe_count))
+        selected_queries = query_pool[:probe_count]
+        search_client = SearchClient(self._settings)
+
+        successes = 0
+        probe_outcomes: list[dict[str, object]] = []
+        provider_health: dict[str, dict[str, object]] = {}
+        for query in selected_queries:
+            try:
+                results = search_client.search(query, max_results=min(3, self._settings.crawler_search_max_results))
+                provider_attempts = search_client.consume_last_provider_attempts()
+                success = len(results) > 0
+                if success:
+                    successes += 1
+                probe_outcomes.append(
+                    {
+                        "query": query,
+                        "success": success,
+                        "result_count": len(results),
+                        "provider_attempts": provider_attempts,
+                    }
+                )
+                for attempt in provider_attempts:
+                    provider = str(attempt.get("provider") or "unknown")
+                    bucket = provider_health.setdefault(
+                        provider,
+                        {"attempts": 0, "successes": 0, "unavailable": 0, "request_error": 0, "skipped": 0},
+                    )
+                    bucket["attempts"] = int(bucket["attempts"]) + 1
+                    status = str(attempt.get("status") or "")
+                    if status == "success":
+                        bucket["successes"] = int(bucket["successes"]) + 1
+                    elif status == "unavailable":
+                        bucket["unavailable"] = int(bucket["unavailable"]) + 1
+                    elif status == "request_error":
+                        bucket["request_error"] = int(bucket["request_error"]) + 1
+                    elif status == "skipped":
+                        bucket["skipped"] = int(bucket["skipped"]) + 1
+            except (SearchUnavailableError, requests.RequestException) as exc:
+                provider_attempts = search_client.consume_last_provider_attempts()
+                probe_outcomes.append(
+                    {
+                        "query": query,
+                        "success": False,
+                        "result_count": 0,
+                        "error": str(exc),
+                        "provider_attempts": provider_attempts,
+                    }
+                )
+                for attempt in provider_attempts:
+                    provider = str(attempt.get("provider") or "unknown")
+                    bucket = provider_health.setdefault(
+                        provider,
+                        {"attempts": 0, "successes": 0, "unavailable": 0, "request_error": 0, "skipped": 0},
+                    )
+                    bucket["attempts"] = int(bucket["attempts"]) + 1
+                    status = str(attempt.get("status") or "")
+                    if status == "success":
+                        bucket["successes"] = int(bucket["successes"]) + 1
+                    elif status == "unavailable":
+                        bucket["unavailable"] = int(bucket["unavailable"]) + 1
+                    elif status == "request_error":
+                        bucket["request_error"] = int(bucket["request_error"]) + 1
+                    elif status == "skipped":
+                        bucket["skipped"] = int(bucket["skipped"]) + 1
+
+        success_rate = successes / probe_count if probe_count else 0.0
+        for provider, bucket in provider_health.items():
+            attempts = max(1, int(bucket["attempts"]))
+            bucket["success_rate"] = round(float(bucket["successes"]) / attempts, 4)
+
+        provider_mode = self._settings.crawler_search_provider.lower()
+        primary_provider_success = any(
+            int(provider_health.get(provider, {}).get("successes", 0)) > 0
+            for provider in ("searxng_json", "tavily_api", "serper_api")
+        )
+        healthy = success_rate >= self._settings.crawler_search_preflight_min_success_rate
+        if provider_mode in {"auto_free", "searxng_json", "tavily_api", "serper_api"}:
+            if any(provider in provider_health for provider in ("searxng_json", "tavily_api", "serper_api")):
+                healthy = healthy and primary_provider_success
+        snapshot = {
+            "healthy": healthy,
+            "success_rate": round(success_rate, 4),
+            "successes": successes,
+            "probes": probe_count,
+            "min_success_rate": self._settings.crawler_search_preflight_min_success_rate,
+            "provider_health": provider_health,
+            "probe_outcomes": probe_outcomes,
+        }
+        log_event(LOGGER, "search_preflight_completed", **snapshot)
+        return snapshot
+
     def discover_source(self, fraternity_name: str) -> dict[str, object]:
         search_client = SearchClient(self._settings)
         try:
-            result = discover_source(fraternity_name, search_client)
+            with get_connection(self._settings) as connection:
+                repository = CrawlerRepository(connection)
+                result = discover_source(
+                    fraternity_name,
+                    search_client,
+                    repository=repository,
+                    verified_min_confidence=self._settings.crawler_discovery_verified_min_confidence,
+                )
             return result.as_dict()
         except Exception as exc:
             log_event(
@@ -190,7 +364,137 @@ class CrawlService:
                 "selected_confidence": 0.0,
                 "confidence_tier": "low",
                 "candidates": [],
+                "source_provenance": None,
+                "fallback_reason": "source_discovery_exception",
+                "resolution_trace": [
+                    {
+                        "step": "source_discovery_exception",
+                        "error": str(exc),
+                    }
+                ],
             }
+
+    def bootstrap_verified_sources(self, input_path: str, dry_run: bool = False) -> dict[str, int]:
+        payload = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError("Bootstrap input must be a JSON array")
+
+        inserted = 0
+        skipped = 0
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            for row in payload:
+                if not isinstance(row, dict):
+                    skipped += 1
+                    continue
+
+                fraternity_name = str(row.get("name") or "").strip()
+                if not fraternity_name:
+                    skipped += 1
+                    continue
+                fraternity_slug = _slugify(fraternity_name)
+                candidate_url, selected_reason = _select_registry_url(row)
+                if not candidate_url:
+                    skipped += 1
+                    continue
+
+                http_status = _coerce_int(row.get("status"))
+                is_active = http_status is not None and 200 <= http_status < 400
+                confidence = _bootstrap_confidence(http_status, selected_reason)
+                metadata = {
+                    "bootstrap_input": Path(input_path).name,
+                    "selected_reason": selected_reason,
+                    "base_url": row.get("base"),
+                    "final_url": row.get("final_url"),
+                    "error": row.get("error"),
+                }
+
+                if dry_run:
+                    inserted += 1
+                    continue
+
+                repository.upsert_verified_source(
+                    fraternity_slug=fraternity_slug,
+                    fraternity_name=fraternity_name,
+                    national_url=candidate_url,
+                    origin="nic_bootstrap",
+                    confidence=confidence,
+                    http_status=http_status,
+                    is_active=is_active,
+                    metadata=metadata,
+                )
+                inserted += 1
+
+        log_event(
+            LOGGER,
+            "verified_sources_bootstrap_finished",
+            input_path=input_path,
+            dry_run=dry_run,
+            inserted=inserted,
+            skipped=skipped,
+        )
+        return {"inserted": inserted, "skipped": skipped}
+
+    def revalidate_verified_source(self, fraternity_slug: str) -> dict[str, object]:
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            record = repository.get_verified_source_by_slug(fraternity_slug)
+            if record is None:
+                raise ValueError(f"verified source not found for slug={fraternity_slug}")
+
+            http_status, final_url, error = _probe_url(record.national_url, self._settings)
+            is_active = http_status is not None and 200 <= http_status < 400
+            confidence = record.confidence
+            if http_status is not None and 200 <= http_status < 400:
+                confidence = max(confidence, 0.75)
+            elif http_status is not None and http_status >= 400:
+                confidence = min(confidence, 0.49)
+
+            metadata = dict(record.metadata or {})
+            metadata["revalidated_at"] = _utc_now_iso()
+            if error:
+                metadata["revalidate_error"] = error
+
+            updated = repository.upsert_verified_source(
+                fraternity_slug=record.fraternity_slug,
+                fraternity_name=record.fraternity_name,
+                national_url=final_url or record.national_url,
+                origin=record.origin,
+                confidence=confidence,
+                http_status=http_status if http_status is not None else record.http_status,
+                is_active=is_active,
+                metadata=metadata,
+            )
+
+        result = {
+            "fraternity_slug": updated.fraternity_slug,
+            "national_url": updated.national_url,
+            "http_status": updated.http_status,
+            "is_active": updated.is_active,
+            "confidence": updated.confidence,
+        }
+        log_event(LOGGER, "verified_source_revalidated", **result)
+        return result
+
+    def revalidate_verified_sources(self, limit: int = 20) -> dict[str, int]:
+        revalidated = 0
+        failed = 0
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            records = repository.list_verified_sources(limit=limit)
+            slugs = [row.fraternity_slug for row in records]
+
+        for slug in slugs:
+            try:
+                self.revalidate_verified_source(slug)
+                revalidated += 1
+            except Exception:
+                failed += 1
+
+        result = {"revalidated": revalidated, "failed": failed}
+        log_event(LOGGER, "verified_sources_bulk_revalidated", **result, limit=limit)
+        return result
 
     def liveness(self) -> dict[str, object]:
         return {"ok": True, "service": "crawler", "probe": "liveness"}
@@ -218,3 +522,90 @@ def _worker_id(base_worker_id: str, worker_index: int, total_workers: int) -> st
     if total_workers <= 1:
         return base_worker_id
     return f"{base_worker_id}-{worker_index}"
+
+
+_SEARCH_PREFLIGHT_QUERIES = (
+    '"sigma chi" University of Virginia instagram',
+    '"delta chi" Mississippi State chapter website',
+    '"lambda chi alpha" Purdue contact email',
+    '"phi gamma delta" chapter directory',
+)
+
+
+def _slugify(value: str) -> str:
+    return "-".join(token for token in "".join(ch if ch.isalnum() else " " for ch in value.lower()).split())
+
+
+def _coerce_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bootstrap_confidence(http_status: int | None, selected_reason: str) -> float:
+    confidence = 0.65
+    if http_status is not None:
+        if 200 <= http_status < 400:
+            confidence += 0.2
+        elif http_status >= 400:
+            confidence -= 0.2
+    if selected_reason == "chapterish_link":
+        confidence += 0.1
+    return max(0.0, min(0.99, confidence))
+
+
+def _select_registry_url(payload: dict[str, object]) -> tuple[str | None, str]:
+    chapterish_links = payload.get("chapterish_links")
+    if isinstance(chapterish_links, list):
+        best_score = -1.0
+        best_url: str | None = None
+        for entry in chapterish_links:
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get("url") or "").strip()
+            if not url.startswith("http"):
+                continue
+            label = str(entry.get("text") or "").lower()
+            score = 0.0
+            if any(marker in label for marker in ("chapter directory", "find a chapter", "our chapters", "chapter roll", "chapter map", "chapters")):
+                score += 1.0
+            if any(marker in label for marker in ("toolkit", "news", "award", "staff", "resource")):
+                score -= 0.7
+            if score > best_score:
+                best_score = score
+                best_url = url
+        if best_url is not None and best_score >= 0.6:
+            return best_url, "chapterish_link"
+
+    final_url = str(payload.get("final_url") or "").strip()
+    if final_url.startswith("http"):
+        return final_url, "final_url"
+    base_url = str(payload.get("base") or "").strip()
+    if base_url.startswith("http"):
+        return base_url, "base_url"
+    return None, "none"
+
+
+def _probe_url(url: str, settings: Settings) -> tuple[int | None, str | None, str | None]:
+    try:
+        response = requests.get(
+            url,
+            timeout=settings.crawler_http_timeout_seconds,
+            verify=settings.crawler_http_verify_ssl,
+            headers={"User-Agent": settings.crawler_http_user_agent},
+            allow_redirects=True,
+        )
+        return response.status_code, response.url, None
+    except Exception as exc:
+        parsed = urlparse(url)
+        fallback_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.scheme and parsed.netloc else url
+        return None, fallback_url, str(exc)
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()

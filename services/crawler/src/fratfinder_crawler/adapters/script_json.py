@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
-from urllib.parse import urljoin
 
-from fratfinder_crawler.models import ExtractedChapter
+from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
+from fratfinder_crawler.models import ChapterStub, ExtractedChapter
 
 _JSON_LD_TYPES = {"educationalorganization"}
 _SCRIPT_ARRAY_PATTERNS = (
@@ -19,6 +19,23 @@ _SCRIPT_ARRAY_PATTERNS = (
 
 
 class ScriptJsonAdapter:
+    def parse_stubs(
+        self,
+        html: str,
+        source_url: str,
+        *,
+        api_url: str | None = None,
+        http_client: Any | None = None,
+    ) -> list[ChapterStub]:
+        payloads = _extract_json_ld_payloads(html)
+        payloads.extend(_extract_inline_array_payloads(html))
+        stubs: list[ChapterStub] = []
+        for payload in payloads:
+            stub = _payload_to_stub(payload, source_url)
+            if stub is not None:
+                stubs.append(stub)
+        return stubs
+
     def parse(
         self,
         html: str,
@@ -72,12 +89,30 @@ def _payloads_to_chapters(payloads: list[dict[str, Any]], source_url: str) -> li
     return records
 
 
+def _payload_to_stub(payload: dict[str, Any], source_url: str) -> ChapterStub | None:
+    chapter = _payload_to_chapter(payload, source_url)
+    if chapter is None:
+        return None
+    return ChapterStub(
+        chapter_name=chapter.name,
+        university_name=chapter.university_name,
+        detail_url=chapter.website_url,
+        outbound_chapter_url_candidate=chapter.website_url,
+        confidence=chapter.source_confidence,
+        provenance=f"script_json:{chapter.source_url}",
+    )
+
+
 def _payload_to_chapter(payload: dict[str, Any], source_url: str) -> ExtractedChapter | None:
     name = _get_first_string(payload, ["chapter_name", "chapterName", "name", "title"])
     university_name = _get_first_string(payload, ["school_name", "schoolName", "university_name", "universityName", "college", "institution"])
     city = _get_first_string(payload, ["city", "town"])
     state = _get_first_string(payload, ["state", "stateProvince", "province", "region"])
-    website_url = _normalize_url(_get_first_string(payload, ["website_url", "websiteUrl", "website", "url"]), source_url)
+    website_url = sanitize_as_website(_get_first_string(payload, ["website_url", "websiteUrl", "website", "url"]), base_url=source_url)
+    contact_email = sanitize_as_email(_get_first_string(payload, ["email", "contact_email", "contactEmail", "mail", "mailto"]))
+    instagram_url = sanitize_as_instagram(
+        _get_first_string(payload, ["instagram_url", "instagramUrl", "instagram", "instagram_handle", "instagramHandle"])
+    )
     external_id = _get_first_string(payload, ["chapter_id", "chapterId", "external_id", "externalId", "slug", "id", "@id"])
 
     address = payload.get("address")
@@ -96,6 +131,8 @@ def _payload_to_chapter(payload: dict[str, Any], source_url: str) -> ExtractedCh
         city=city,
         state=state,
         website_url=website_url,
+        instagram_url=instagram_url,
+        contact_email=contact_email,
         external_id=external_id,
         source_url=source_url,
         source_snippet=snippet,
@@ -155,18 +192,6 @@ def _get_first_string(payload: dict[str, Any], keys: list[str]) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
-
-
-def _normalize_url(value: str | None, source_url: str) -> str | None:
-    if not value:
-        return None
-    if value.startswith("http://") or value.startswith("https://"):
-        return value
-    if value.startswith("//"):
-        return f"https:{value}"
-    if value.startswith("/"):
-        return urljoin(source_url, value)
-    return value if "." in value else None
 
 
 def _coerce_dict_list(data: object) -> list[dict[str, Any]]:

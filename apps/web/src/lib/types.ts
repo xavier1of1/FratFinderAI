@@ -170,6 +170,9 @@ export interface FraternityCrawlProgress {
     sourceUrl: string | null;
     sourceConfidence: number;
     confidenceTier: string;
+    sourceProvenance?: "verified_registry" | "existing_source" | "search" | null;
+    fallbackReason?: string | null;
+    resolutionTrace?: Array<Record<string, unknown>>;
     candidates: FraternityDiscoveryCandidate[];
   };
   crawlRun?: {

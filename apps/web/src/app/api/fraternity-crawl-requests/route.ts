@@ -58,6 +58,9 @@ export async function POST(request: NextRequest) {
     const sourceUrl = discovery.selectedUrl;
     const sourceConfidence = discovery.selectedConfidence;
     const confidenceTier = discovery.confidenceTier;
+    const sourceProvenance = discovery.sourceProvenance;
+    const fallbackReason = discovery.fallbackReason;
+    const resolutionTrace = discovery.resolutionTrace;
 
     const fraternityName = discovery.fraternityName || payload.fraternityName.trim();
     const fraternitySlug = discovery.fraternitySlug || slugify(fraternityName);
@@ -84,7 +87,10 @@ export async function POST(request: NextRequest) {
           discovery: {
             selectedUrl: sourceUrl,
             selectedConfidence: sourceConfidence,
-            confidenceTier
+            confidenceTier,
+            sourceProvenance,
+            fallbackReason,
+            resolutionTrace
           }
         }
       });
@@ -110,6 +116,9 @@ export async function POST(request: NextRequest) {
           sourceUrl,
           sourceConfidence,
           confidenceTier,
+          sourceProvenance,
+          fallbackReason,
+          resolutionTrace,
           candidates: discovery.candidates
         }
       },
@@ -122,6 +131,8 @@ export async function POST(request: NextRequest) {
       message: `Request created for ${fraternityName}`,
       payload: {
         confidenceTier,
+        sourceProvenance,
+        fallbackReason,
         sourceUrl,
         sourceSlug
       }
