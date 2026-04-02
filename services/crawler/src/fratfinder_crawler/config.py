@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     crawler_frontier_max_depth: int = Field(default=3, alias="CRAWLER_FRONTIER_MAX_DEPTH")
     crawler_frontier_max_pages_per_template: int = Field(default=8, alias="CRAWLER_FRONTIER_MAX_PAGES_PER_TEMPLATE")
     crawler_frontier_max_empty_streak: int = Field(default=5, alias="CRAWLER_FRONTIER_MAX_EMPTY_STREAK")
+    crawler_frontier_high_yield_record_threshold: int = Field(default=60, alias="CRAWLER_FRONTIER_HIGH_YIELD_RECORD_THRESHOLD")
+    crawler_frontier_min_pages_for_high_yield_stop: int = Field(default=2, alias="CRAWLER_FRONTIER_MIN_PAGES_FOR_HIGH_YIELD_STOP")
     crawler_adaptive_epsilon: float = Field(default=0.1, alias="CRAWLER_ADAPTIVE_EPSILON")
     crawler_adaptive_min_score: float = Field(default=0.1, alias="CRAWLER_ADAPTIVE_MIN_SCORE")
     crawler_adaptive_stop_saturation_threshold: int = Field(default=4, alias="CRAWLER_ADAPTIVE_STOP_SATURATION_THRESHOLD")
@@ -115,6 +117,32 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("Agent:ADAPTIVE_EVAL_SOURCE_SLUGS", "CRAWLER_ADAPTIVE_EVAL_SOURCE_SLUGS"),
     )
 
+    crawler_adaptive_eval_enrichment_limit_per_source: int = Field(
+        default=120,
+        alias="Agent:ADAPTIVE_EVAL_ENRICHMENT_LIMIT_PER_SOURCE",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_EVAL_ENRICHMENT_LIMIT_PER_SOURCE", "CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_LIMIT_PER_SOURCE"),
+    )
+    crawler_adaptive_eval_enrichment_workers: int = Field(
+        default=4,
+        alias="Agent:ADAPTIVE_EVAL_ENRICHMENT_WORKERS",
+        validation_alias=AliasChoices("Agent:ADAPTIVE_EVAL_ENRICHMENT_WORKERS", "CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_WORKERS"),
+    )
+    crawler_adaptive_eval_enrichment_run_preflight: bool = Field(
+        default=True,
+        alias="Agent:ADAPTIVE_EVAL_ENRICHMENT_RUN_PREFLIGHT",
+        validation_alias=AliasChoices(
+            "Agent:ADAPTIVE_EVAL_ENRICHMENT_RUN_PREFLIGHT",
+            "CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_RUN_PREFLIGHT",
+        ),
+    )
+    crawler_adaptive_eval_enrichment_require_healthy_search: bool = Field(
+        default=True,
+        alias="Agent:ADAPTIVE_EVAL_ENRICHMENT_REQUIRE_HEALTHY_SEARCH",
+        validation_alias=AliasChoices(
+            "Agent:ADAPTIVE_EVAL_ENRICHMENT_REQUIRE_HEALTHY_SEARCH",
+            "CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_REQUIRE_HEALTHY_SEARCH",
+        ),
+    )
     crawler_adaptive_live_epsilon: float = Field(
         default=0.02,
         alias="Agent:ADAPTIVE_LIVE_EPSILON",

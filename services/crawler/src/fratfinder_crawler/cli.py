@@ -111,6 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
     epoch_parser.add_argument("--replay-window-days", type=int, default=None)
     epoch_parser.add_argument("--replay-batch-size", type=int, default=None)
     epoch_parser.add_argument("--report-path", default=None)
+    epoch_parser.add_argument("--eval-enrichment-limit-per-source", type=int, default=None)
+    epoch_parser.add_argument("--eval-enrichment-workers", type=int, default=None)
 
     loop_parser = subparsers.add_parser("adaptive-train-loop", help="Run multiple train/eval rounds")
     loop_parser.add_argument("--rounds", type=int, default=2)
@@ -120,6 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
     loop_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
     loop_parser.add_argument("--cohort-label", default="target-cohort")
     loop_parser.add_argument("--report-dir", default="docs/reports")
+    loop_parser.add_argument("--eval-enrichment-limit-per-source", type=int, default=None)
+    loop_parser.add_argument("--eval-enrichment-workers", type=int, default=None)
 
     replay_window_parser = subparsers.add_parser("adaptive-replay-window", help="Export adaptive replay window observations and rewards")
     replay_window_parser.add_argument("--source-slugs", required=True, help="Comma-separated source slugs")
@@ -264,6 +268,8 @@ def main() -> None:
             replay_window_days=args.replay_window_days,
             replay_batch_size=args.replay_batch_size,
             report_path=args.report_path,
+            eval_enrichment_limit_per_source=args.eval_enrichment_limit_per_source,
+            eval_enrichment_workers=args.eval_enrichment_workers,
         )
         print(json.dumps(result, indent=2, default=str))
         return
@@ -287,6 +293,8 @@ def main() -> None:
             runtime_mode=runtime_mode,
             cohort_label=args.cohort_label,
             report_dir=args.report_dir,
+            eval_enrichment_limit_per_source=args.eval_enrichment_limit_per_source,
+            eval_enrichment_workers=args.eval_enrichment_workers,
         )
         print(json.dumps(result, indent=2, default=str))
         return

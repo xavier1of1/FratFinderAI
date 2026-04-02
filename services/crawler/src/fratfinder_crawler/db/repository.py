@@ -1825,6 +1825,66 @@ class CrawlerRepository:
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+    def summarize_contact_coverage_for_runs(self, *, crawl_run_ids: list[int]) -> dict[str, int]:
+        ids = [int(value) for value in crawl_run_ids if value is not None]
+        if not ids:
+            return {
+                "chapters": 0,
+                "any_contact": 0,
+                "website": 0,
+                "email": 0,
+                "instagram": 0,
+                "all_three": 0,
+            }
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH scoped_chapters AS (
+                    SELECT DISTINCT cp.chapter_id
+                    FROM chapter_provenance cp
+                    WHERE cp.crawl_run_id = ANY(%s)
+                )
+                SELECT
+                    COUNT(*)::int AS chapters,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(c.website_url, '') <> ''
+                           OR COALESCE(c.contact_email, '') <> ''
+                           OR COALESCE(c.instagram_url, '') <> ''
+                    )::int AS any_contact,
+                    COUNT(*) FILTER (WHERE COALESCE(c.website_url, '') <> '')::int AS website,
+                    COUNT(*) FILTER (WHERE COALESCE(c.contact_email, '') <> '')::int AS email,
+                    COUNT(*) FILTER (WHERE COALESCE(c.instagram_url, '') <> '')::int AS instagram,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(c.website_url, '') <> ''
+                          AND COALESCE(c.contact_email, '') <> ''
+                          AND COALESCE(c.instagram_url, '') <> ''
+                    )::int AS all_three
+                FROM scoped_chapters sc
+                JOIN chapters c ON c.id = sc.chapter_id
+                """,
+                (ids,),
+            )
+            row = cursor.fetchone()
+
+        if row is None:
+            return {
+                "chapters": 0,
+                "any_contact": 0,
+                "website": 0,
+                "email": 0,
+                "instagram": 0,
+                "all_three": 0,
+            }
+        return {
+            "chapters": int(row["chapters"] or 0),
+            "any_contact": int(row["any_contact"] or 0),
+            "website": int(row["website"] or 0),
+            "email": int(row["email"] or 0),
+            "instagram": int(row["instagram"] or 0),
+            "all_three": int(row["all_three"] or 0),
+        }
+
     def insert_epoch_metric(self, metric: EpochMetric) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(

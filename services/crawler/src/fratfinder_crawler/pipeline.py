@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -99,6 +99,8 @@ class CrawlService:
         replay_batch_size: int | None = None,
         policy_version: str | None = None,
         report_path: str | None = None,
+        eval_enrichment_limit_per_source: int | None = None,
+        eval_enrichment_workers: int | None = None,
     ) -> dict[str, object]:
         effective_runtime_mode = self._resolve_runtime_mode(runtime_mode)
         if effective_runtime_mode == "legacy":
@@ -114,6 +116,17 @@ class CrawlService:
 
         replay_days = replay_window_days if replay_window_days is not None else self._settings.crawler_adaptive_replay_window_days
         replay_size = replay_batch_size if replay_batch_size is not None else self._settings.crawler_adaptive_replay_batch_size
+        enrichment_limit = (
+            eval_enrichment_limit_per_source
+            if eval_enrichment_limit_per_source is not None
+            else self._settings.crawler_adaptive_eval_enrichment_limit_per_source
+        )
+        enrichment_workers = (
+            eval_enrichment_workers
+            if eval_enrichment_workers is not None
+            else self._settings.crawler_adaptive_eval_enrichment_workers
+        )
+
         weights = _balanced_kpi_weights(self._settings.crawler_adaptive_balanced_kpi_weights)
 
         epoch_rows: list[dict[str, object]] = []
@@ -126,19 +139,45 @@ class CrawlService:
                 window_days=replay_days,
                 batch_size=replay_size,
             )
-            eval_legacy = self._run_sources_batch(eval_sources, "legacy", policy_mode="live")
-            eval_adaptive = self._run_sources_batch(eval_sources, effective_runtime_mode, policy_mode="live")
 
-            legacy_records_per_page = _safe_ratio(eval_legacy["records_seen"], eval_legacy["pages_processed"])
-            adaptive_records_per_page = _safe_ratio(eval_adaptive["records_seen"], eval_adaptive["pages_processed"])
-            legacy_pages_per_record = _safe_ratio(eval_legacy["pages_processed"], eval_legacy["records_seen"])
-            adaptive_pages_per_record = _safe_ratio(eval_adaptive["pages_processed"], eval_adaptive["records_seen"])
-            legacy_upsert_ratio = _safe_ratio(eval_legacy["records_upserted"], eval_legacy["records_seen"])
-            adaptive_upsert_ratio = _safe_ratio(eval_adaptive["records_upserted"], eval_adaptive["records_seen"])
+            skip_eval_enrichment, eval_enrichment_preflight = self._should_skip_eval_enrichment(eval_sources)
+
+            eval_legacy = self._run_sources_batch(eval_sources, "legacy", policy_mode="live")
+            eval_legacy_enrichment = self._run_eval_enrichment_for_sources(
+                eval_sources,
+                limit_per_source=enrichment_limit,
+                workers=enrichment_workers,
+                skip_provider_degraded=skip_eval_enrichment,
+                preflight_snapshot=eval_enrichment_preflight,
+            )
+            legacy_coverage = self._summarize_batch_contact_coverage(eval_legacy.get("run_ids", []))
+            if eval_legacy_enrichment.get("processed", 0) or eval_legacy_enrichment.get("requeued", 0) or eval_legacy_enrichment.get("failed_terminal", 0) or eval_legacy_enrichment.get("skipped_provider_degraded", 0):
+                eval_legacy["enrichment"] = eval_legacy_enrichment
+            eval_legacy["coverage"] = legacy_coverage
+
+            eval_adaptive = self._run_sources_batch(eval_sources, effective_runtime_mode, policy_mode="live")
+            eval_adaptive_enrichment = self._run_eval_enrichment_for_sources(
+                eval_sources,
+                limit_per_source=enrichment_limit,
+                workers=enrichment_workers,
+                skip_provider_degraded=skip_eval_enrichment,
+                preflight_snapshot=eval_enrichment_preflight,
+            )
+            adaptive_coverage = self._summarize_batch_contact_coverage(eval_adaptive.get("run_ids", []))
+            if eval_adaptive_enrichment.get("processed", 0) or eval_adaptive_enrichment.get("requeued", 0) or eval_adaptive_enrichment.get("failed_terminal", 0) or eval_adaptive_enrichment.get("skipped_provider_degraded", 0):
+                eval_adaptive["enrichment"] = eval_adaptive_enrichment
+            eval_adaptive["coverage"] = adaptive_coverage
+
+            legacy_records_per_page = _safe_ratio(float(eval_legacy["records_seen"]), float(eval_legacy["pages_processed"]))
+            adaptive_records_per_page = _safe_ratio(float(eval_adaptive["records_seen"]), float(eval_adaptive["pages_processed"]))
+            legacy_pages_per_record = _safe_ratio(float(eval_legacy["pages_processed"]), float(eval_legacy["records_seen"]))
+            adaptive_pages_per_record = _safe_ratio(float(eval_adaptive["pages_processed"]), float(eval_adaptive["records_seen"]))
+            legacy_upsert_ratio = _safe_ratio(float(eval_legacy["records_upserted"]), float(eval_legacy["records_seen"]))
+            adaptive_upsert_ratio = _safe_ratio(float(eval_adaptive["records_upserted"]), float(eval_adaptive["records_seen"]))
             legacy_jobs_per_min = float(eval_legacy.get("jobs_per_minute", 0.0))
             adaptive_jobs_per_min = float(eval_adaptive.get("jobs_per_minute", 0.0))
-            legacy_review_rate = _safe_ratio(eval_legacy["review_items_created"], max(eval_legacy["records_seen"], 1.0))
-            adaptive_review_rate = _safe_ratio(eval_adaptive["review_items_created"], max(eval_adaptive["records_seen"], 1.0))
+            legacy_review_rate = _safe_ratio(float(eval_legacy["review_items_created"]), max(float(eval_legacy["records_seen"]), 1.0))
+            adaptive_review_rate = _safe_ratio(float(eval_adaptive["review_items_created"]), max(float(eval_adaptive["records_seen"]), 1.0))
 
             kpis = {
                 "legacyRecordsPerPage": round(legacy_records_per_page, 4),
@@ -156,6 +195,21 @@ class CrawlService:
                 "legacyReviewRate": round(legacy_review_rate, 4),
                 "adaptiveReviewRate": round(adaptive_review_rate, 4),
                 "reviewRateDelta": round(adaptive_review_rate - legacy_review_rate, 4),
+                "legacyAnyContactRate": round(float(legacy_coverage["any_contact_rate"]), 4),
+                "adaptiveAnyContactRate": round(float(adaptive_coverage["any_contact_rate"]), 4),
+                "anyContactRateDelta": round(float(adaptive_coverage["any_contact_rate"]) - float(legacy_coverage["any_contact_rate"]), 4),
+                "legacyWebsiteRate": round(float(legacy_coverage["website_rate"]), 4),
+                "adaptiveWebsiteRate": round(float(adaptive_coverage["website_rate"]), 4),
+                "websiteRateDelta": round(float(adaptive_coverage["website_rate"]) - float(legacy_coverage["website_rate"]), 4),
+                "legacyEmailRate": round(float(legacy_coverage["email_rate"]), 4),
+                "adaptiveEmailRate": round(float(adaptive_coverage["email_rate"]), 4),
+                "emailRateDelta": round(float(adaptive_coverage["email_rate"]) - float(legacy_coverage["email_rate"]), 4),
+                "legacyInstagramRate": round(float(legacy_coverage["instagram_rate"]), 4),
+                "adaptiveInstagramRate": round(float(adaptive_coverage["instagram_rate"]), 4),
+                "instagramRateDelta": round(float(adaptive_coverage["instagram_rate"]) - float(legacy_coverage["instagram_rate"]), 4),
+                "legacyAllThreeRate": round(float(legacy_coverage["all_three_rate"]), 4),
+                "adaptiveAllThreeRate": round(float(adaptive_coverage["all_three_rate"]), 4),
+                "allThreeRateDelta": round(float(adaptive_coverage["all_three_rate"]) - float(legacy_coverage["all_three_rate"]), 4),
             }
             balanced_score = _compute_balanced_score(kpis, weights)
             kpis["balancedScore"] = round(balanced_score, 4)
@@ -178,6 +232,7 @@ class CrawlService:
                 "upsertRatioDeltaSlope": round(_linear_slope([float(item["kpis"]["upsertRatioDelta"]) for item in epoch_rows]), 6),
                 "jobsPerMinuteDeltaSlope": round(_linear_slope([float(item["kpis"]["jobsPerMinuteDelta"]) for item in epoch_rows]), 6),
                 "reviewRateDeltaSlope": round(_linear_slope([float(item["kpis"]["reviewRateDelta"]) for item in epoch_rows]), 6),
+                "anyContactRateDeltaSlope": round(_linear_slope([float(item["kpis"].get("anyContactRateDelta", 0.0)) for item in epoch_rows]), 6),
                 "balancedScoreSlope": round(_linear_slope([float(item["kpis"]["balancedScore"]) for item in epoch_rows]), 6),
             }
             row["slopes"] = slope_snapshot
@@ -198,6 +253,7 @@ class CrawlService:
                             "upsertRatioDelta": float(kpis["upsertRatioDelta"]),
                             "jobsPerMinuteDelta": float(kpis["jobsPerMinuteDelta"]),
                             "reviewRateDelta": float(kpis["reviewRateDelta"]),
+                            "anyContactRateDelta": float(kpis["anyContactRateDelta"]),
                             "balancedScore": float(kpis["balancedScore"]),
                         },
                         slopes=slope_snapshot,
@@ -206,6 +262,8 @@ class CrawlService:
                             "weights": weights,
                             "replayWindowDays": replay_days,
                             "replayBatchSize": replay_size,
+                            "evalEnrichmentLimitPerSource": enrichment_limit,
+                            "evalEnrichmentWorkers": enrichment_workers,
                         },
                     )
                 )
@@ -216,6 +274,7 @@ class CrawlService:
             "upsertRatioDeltaSlope": round(_linear_slope([float(row["kpis"]["upsertRatioDelta"]) for row in epoch_rows]), 6),
             "jobsPerMinuteDeltaSlope": round(_linear_slope([float(row["kpis"]["jobsPerMinuteDelta"]) for row in epoch_rows]), 6),
             "reviewRateDeltaSlope": round(_linear_slope([float(row["kpis"]["reviewRateDelta"]) for row in epoch_rows]), 6),
+            "anyContactRateDeltaSlope": round(_linear_slope([float(row["kpis"].get("anyContactRateDelta", 0.0)) for row in epoch_rows]), 6),
             "balancedScoreSlope": round(_linear_slope([float(row["kpis"]["balancedScore"]) for row in epoch_rows]), 6),
         }
 
@@ -251,11 +310,12 @@ class CrawlService:
         runtime_mode: str,
         *,
         policy_mode: str = "live",
-    ) -> dict[str, float]:
+    ) -> dict[str, object]:
         aggregate = CrawlMetrics()
         effective_runtime_mode = self._resolve_runtime_mode(runtime_mode)
         requested = [slug for slug in source_slugs if slug]
         selected_count = 0
+        run_ids: list[int] = []
         started_at = time.perf_counter()
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
@@ -266,12 +326,23 @@ class CrawlService:
                     continue
                 source = matches[0]
                 selected_count += 1
+
+                before_rows = repository.list_crawl_run_metrics(source_slug=slug, runtime_mode=effective_runtime_mode, limit=1)
+                before_id = int(before_rows[0]["id"]) if before_rows else None
+
                 metrics = orchestrator.run_for_source(source)
                 aggregate.pages_processed += metrics.pages_processed
                 aggregate.records_seen += metrics.records_seen
                 aggregate.records_upserted += metrics.records_upserted
                 aggregate.review_items_created += metrics.review_items_created
                 aggregate.field_jobs_created += metrics.field_jobs_created
+
+                after_rows = repository.list_crawl_run_metrics(source_slug=slug, runtime_mode=effective_runtime_mode, limit=1)
+                if after_rows:
+                    after_id = int(after_rows[0]["id"])
+                    if before_id is None or after_id != before_id:
+                        run_ids.append(after_id)
+
         elapsed_seconds = max(time.perf_counter() - started_at, 0.001)
         jobs_per_minute = (aggregate.records_upserted / elapsed_seconds) * 60.0
         return {
@@ -283,7 +354,107 @@ class CrawlService:
             "field_jobs_created": float(aggregate.field_jobs_created),
             "elapsed_seconds": round(elapsed_seconds, 3),
             "jobs_per_minute": round(jobs_per_minute, 4),
+            "run_ids": run_ids,
         }
+
+    def _should_skip_eval_enrichment(self, source_slugs: list[str]) -> tuple[bool, dict[str, object] | None]:
+        slugs = _normalize_source_slugs(source_slugs)
+        if not slugs:
+            return False, None
+
+        run_preflight = bool(self._settings.crawler_adaptive_eval_enrichment_run_preflight)
+        require_healthy = bool(self._settings.crawler_adaptive_eval_enrichment_require_healthy_search)
+        if not (run_preflight and require_healthy and self._settings.crawler_search_enabled):
+            return False, None
+
+        preflight_snapshot = self.search_preflight()
+        if not bool(preflight_snapshot.get("healthy", False)):
+            return True, preflight_snapshot
+        return False, preflight_snapshot
+
+    def _run_eval_enrichment_for_sources(
+        self,
+        source_slugs: list[str],
+        *,
+        limit_per_source: int,
+        workers: int,
+        skip_provider_degraded: bool = False,
+        preflight_snapshot: dict[str, object] | None = None,
+    ) -> dict[str, int]:
+        if limit_per_source <= 0:
+            return {"processed": 0, "requeued": 0, "failed_terminal": 0, "skipped_provider_degraded": 0}
+
+        slugs = _normalize_source_slugs(source_slugs)
+        aggregate = {"processed": 0, "requeued": 0, "failed_terminal": 0, "skipped_provider_degraded": 0}
+        if not slugs:
+            return aggregate
+
+        if skip_provider_degraded:
+            aggregate["skipped_provider_degraded"] = len(slugs)
+            log_event(
+                LOGGER,
+                "eval_enrichment_skipped_provider_degraded",
+                source_count=len(slugs),
+                preflight=preflight_snapshot,
+            )
+            return aggregate
+
+        require_healthy = bool(self._settings.crawler_adaptive_eval_enrichment_require_healthy_search)
+        for slug in slugs:
+            result = self.process_field_jobs(
+                limit=max(1, limit_per_source),
+                source_slug=slug,
+                field_name=None,
+                workers=max(1, workers),
+                require_healthy_search=require_healthy,
+                run_preflight=False,
+            )
+            for key in ("processed", "requeued", "failed_terminal"):
+                aggregate[key] += int(result.get(key, 0))
+        return aggregate
+
+    def _summarize_batch_contact_coverage(self, run_ids: list[int] | list[float] | None) -> dict[str, float | int]:
+        normalized_ids = [int(value) for value in (run_ids or []) if value is not None]
+        if not normalized_ids:
+            return {
+                "chapters": 0,
+                "any_contact": 0,
+                "website": 0,
+                "email": 0,
+                "instagram": 0,
+                "all_three": 0,
+                "any_contact_rate": 0.0,
+                "website_rate": 0.0,
+                "email_rate": 0.0,
+                "instagram_rate": 0.0,
+                "all_three_rate": 0.0,
+            }
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            counts = repository.summarize_contact_coverage_for_runs(crawl_run_ids=normalized_ids)
+
+        chapters = int(counts.get("chapters", 0))
+        any_contact = int(counts.get("any_contact", 0))
+        website = int(counts.get("website", 0))
+        email = int(counts.get("email", 0))
+        instagram = int(counts.get("instagram", 0))
+        all_three = int(counts.get("all_three", 0))
+
+        return {
+            "chapters": chapters,
+            "any_contact": any_contact,
+            "website": website,
+            "email": email,
+            "instagram": instagram,
+            "all_three": all_three,
+            "any_contact_rate": _safe_ratio(float(any_contact), float(chapters)),
+            "website_rate": _safe_ratio(float(website), float(chapters)),
+            "email_rate": _safe_ratio(float(email), float(chapters)),
+            "instagram_rate": _safe_ratio(float(instagram), float(chapters)),
+            "all_three_rate": _safe_ratio(float(all_three), float(chapters)),
+        }
+
     def run_adaptive(
         self,
         source_slug: str | None = None,
@@ -438,6 +609,8 @@ class CrawlService:
         runtime_mode: str = "adaptive_assisted",
         cohort_label: str = "target-cohort",
         report_dir: str | None = None,
+        eval_enrichment_limit_per_source: int | None = None,
+        eval_enrichment_workers: int | None = None,
     ) -> dict[str, object]:
         total_rounds = max(1, rounds)
         reports: list[dict[str, object]] = []
@@ -452,6 +625,8 @@ class CrawlService:
                 runtime_mode=runtime_mode,
                 cohort_label=cohort_label,
                 report_path=report_name,
+                eval_enrichment_limit_per_source=eval_enrichment_limit_per_source,
+                eval_enrichment_workers=eval_enrichment_workers,
             )
             reports.append(result)
         return {
@@ -1059,16 +1234,17 @@ def _render_epoch_report(
         f"- upsertRatioDeltaSlope: `{slope.get('upsertRatioDeltaSlope', 0)}`",
         f"- jobsPerMinuteDeltaSlope: `{slope.get('jobsPerMinuteDeltaSlope', 0)}`",
         f"- reviewRateDeltaSlope: `{slope.get('reviewRateDeltaSlope', 0)}`",
+        f"- anyContactRateDeltaSlope: `{slope.get('anyContactRateDeltaSlope', 0)}`",
         f"- balancedScoreSlope: `{slope.get('balancedScoreSlope', 0)}`",
         "",
         "## Per-Epoch KPI Deltas",
-        "| Epoch | Records/Page Delta | Pages/Record Delta | Upsert Ratio Delta | Jobs/Min Delta | Review Rate Delta | Balanced Score |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Epoch | Records/Page Delta | Pages/Record Delta | Upsert Ratio Delta | Jobs/Min Delta | Review Rate Delta | Any Contact Delta | Balanced Score |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in epoch_rows:
         kpis = row["kpis"]
         lines.append(
-            f"| {row['epoch']} | {kpis.get('recordsPerPageDelta', 0)} | {kpis.get('pagesPerRecordDelta', 0)} | {kpis.get('upsertRatioDelta', 0)} | {kpis.get('jobsPerMinuteDelta', 0)} | {kpis.get('reviewRateDelta', 0)} | {kpis.get('balancedScore', 0)} |"
+            f"| {row['epoch']} | {kpis.get('recordsPerPageDelta', 0)} | {kpis.get('pagesPerRecordDelta', 0)} | {kpis.get('upsertRatioDelta', 0)} | {kpis.get('jobsPerMinuteDelta', 0)} | {kpis.get('reviewRateDelta', 0)} | {kpis.get('anyContactRateDelta', 0)} | {kpis.get('balancedScore', 0)} |"
         )
     lines.append("")
     lines.append("## Raw Rows")
@@ -1101,7 +1277,7 @@ def _balanced_kpi_weights(raw: str) -> dict[str, float]:
 
 
 def _compute_balanced_score(kpis: dict[str, float], weights: dict[str, float]) -> float:
-    coverage_component = float(kpis.get("upsertRatioDelta", 0.0))
+    coverage_component = float(kpis.get("anyContactRateDelta", kpis.get("upsertRatioDelta", 0.0)))
     throughput_component = float(kpis.get("jobsPerMinuteDelta", 0.0)) / 10.0
     queue_component = -float(kpis.get("pagesPerRecordDelta", 0.0))
     reliability_component = -float(kpis.get("reviewRateDelta", 0.0))

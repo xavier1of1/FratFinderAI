@@ -1,4 +1,4 @@
-﻿# Frat Finder AI
+# Frat Finder AI
 
 Frat Finder AI is a source-aware chapter discovery and data platform for NIC fraternities.
 
@@ -154,8 +154,8 @@ python -m fratfinder_crawler.cli crawl-export-observations --source-slug sigma-c
 python -m fratfinder_crawler.cli crawl-replay-policy --source-slug sigma-chi-main --runtime-mode adaptive_assisted --window-days 14 --limit 200
 python -m fratfinder_crawler.cli crawl-policy-report --limit 25
 python -m fratfinder_crawler.cli adaptive-replay-window --source-slugs "sigma-chi-main,chi-psi-main" --runtime-mode adaptive_assisted --window-days 14 --limit 300
-python -m fratfinder_crawler.cli adaptive-train-eval --epochs 3 --runtime-mode adaptive_assisted --cohort-label target-cohort --train-sources "sigma-chi-main,chi-psi-main" --eval-sources "kappa-delta-rho-main,delta-kappa-epsilon-main"
-python -m fratfinder_crawler.cli adaptive-train-loop --rounds 2 --epochs-per-round 3 --runtime-mode adaptive_assisted --train-sources "sigma-chi-main,chi-psi-main" --eval-sources "alpha-tau-omega-main,delta-sigma-phi-main" --report-dir docs/reports
+python -m fratfinder_crawler.cli adaptive-train-eval --epochs 3 --runtime-mode adaptive_assisted --cohort-label target-cohort --train-sources "sigma-chi-main,chi-psi-main" --eval-sources "kappa-delta-rho-main,delta-kappa-epsilon-main" --eval-enrichment-limit-per-source 120 --eval-enrichment-workers 4
+python -m fratfinder_crawler.cli adaptive-train-loop --rounds 2 --epochs-per-round 3 --runtime-mode adaptive_assisted --train-sources "sigma-chi-main,chi-psi-main" --eval-sources "alpha-tau-omega-main,delta-sigma-phi-main" --report-dir docs/reports --eval-enrichment-limit-per-source 120 --eval-enrichment-workers 4
 python -m fratfinder_crawler.cli adaptive-policy-diff --snapshot-a 101 --snapshot-b 122
 ```
 
@@ -167,9 +167,15 @@ Agentic RL tuning env vars (V2.1):
 - `Agent:ADAPTIVE_TRACE_HOPS` (default `4`)
 - `Agent:ADAPTIVE_REPLAY_WINDOW_DAYS` (default `7`)
 - `Agent:ADAPTIVE_REPLAY_BATCH_SIZE` (default `500`)
+- `Agent:ADAPTIVE_EVAL_ENRICHMENT_LIMIT_PER_SOURCE` (default `120`)
+- `Agent:ADAPTIVE_EVAL_ENRICHMENT_WORKERS` (default `4`)
+- `Agent:ADAPTIVE_EVAL_ENRICHMENT_RUN_PREFLIGHT` (default `true`)
+- `Agent:ADAPTIVE_EVAL_ENRICHMENT_REQUIRE_HEALTHY_SEARCH` (default `true`)
 - `Agent:ADAPTIVE_RISK_TIMEOUT_WEIGHT` (default `0.75`)
 - `Agent:ADAPTIVE_RISK_REQUEUE_WEIGHT` (default `0.35`)
 - `Agent:ADAPTIVE_BALANCED_KPI_WEIGHTS` (default `{"coverage":0.45,"throughput":0.2,"queue":0.2,"reliability":0.15}`)
+- `CRAWLER_FRONTIER_HIGH_YIELD_RECORD_THRESHOLD` (default `60`)
+- `CRAWLER_FRONTIER_MIN_PAGES_FOR_HIGH_YIELD_STOP` (default `2`)
 
 Revalidate the newest N verified seeds:
 
@@ -378,6 +384,8 @@ docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supaba
 - Field jobs are processed by the crawler service with claim/start/complete/fail/requeue semantics and exponential backoff.
 - Crawl runs persist page-analysis, classification, and extraction metadata for operator inspection.
 - This README is intended to remain an operational runbook as the project evolves.
+
+
 
 
 

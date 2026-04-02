@@ -155,3 +155,23 @@ def test_adaptive_shadow_policy_returns_score_sorted_candidates():
     )
     scores = [decision.score for decision in decisions]
     assert scores == sorted(scores, reverse=True)
+
+def test_stop_conditions_fire_on_high_yield_saturation():
+    should_stop, reason = evaluate_stop_conditions(
+        budget_state={
+            "pages_processed": 3,
+            "max_pages": 40,
+            "records_seen": 95,
+            "high_yield_record_threshold": 80,
+            "min_pages_for_high_yield_stop": 2,
+            "empty_streak": 0,
+            "max_empty_streak": 5,
+            "low_yield_streak": 1,
+            "saturation_threshold": 4,
+            "min_score": 0.1,
+        },
+        frontier_remaining=6,
+        current_score=0.5,
+    )
+    assert should_stop is True
+    assert reason == "high_yield_saturated"

@@ -82,7 +82,10 @@ class AdaptiveCrawlOrchestrator:
                 "max_empty_streak": self._settings.crawler_frontier_max_empty_streak,
                 "saturation_threshold": self._settings.crawler_adaptive_stop_saturation_threshold,
                 "min_score": self._settings.crawler_adaptive_min_score,
+                "high_yield_record_threshold": self._settings.crawler_frontier_high_yield_record_threshold,
+                "min_pages_for_high_yield_stop": self._settings.crawler_frontier_min_pages_for_high_yield_stop,
                 "pages_processed": 0,
+                "records_seen": 0,
                 "empty_streak": 0,
                 "low_yield_streak": 0,
                 "guardrail_hits": 0,
@@ -392,6 +395,7 @@ class AdaptiveCrawlOrchestrator:
         valid_missing_count = self._count_valid_missing_records(extracted)
         verified_website_count = self._count_verified_websites(extracted, state["current_page_url"], state["source"].list_url)
         budget_state = dict(state.get("budget_state") or {})
+        budget_state["records_seen"] = int(metrics.records_seen)
         budget_state["valid_missing_total"] = int(budget_state.get("valid_missing_total", 0)) + valid_missing_count
         budget_state["verified_website_total"] = int(budget_state.get("verified_website_total", 0)) + verified_website_count
 

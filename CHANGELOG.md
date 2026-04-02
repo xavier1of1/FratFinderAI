@@ -1,4 +1,4 @@
-﻿## [2.1.0] - 2026-04-01
+## [2.1.0] - 2026-04-01
 
 ### Added
 - Added migrations:
@@ -29,6 +29,8 @@
 ### Fixed
 - Fixed dataclass field ordering regressions in adaptive models that could break crawler imports.
 - Fixed adaptive graph helper gaps (missing context bucket, ancestor traversal, valid-missing counting, queue-efficiency terminal reward).
+- Fixed adaptive over-scanning on high-yield sources by adding a high_yield_saturated early-stop path based on records discovered vs low-yield streak.
+- Fixed eval-time enrichment churn during search/provider outages by adding adaptive eval preflight health gating and provider-degraded skip reporting.
 - Fixed adaptive persistence contract mismatches between runtime payloads and repository insert columns.
 ## [2.0.1] - 2026-04-01
 
@@ -494,6 +496,7 @@
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
 
 
 

@@ -1,0 +1,136 @@
+{
+  "generated_at_utc": "2026-04-01T23:22:21.410094+00:00",
+  "run_range": [
+    120,
+    173
+  ],
+  "cohort_label": "target-cohort-v21",
+  "eval_sources": [
+    "delta-kappa-epsilon-main",
+    "alpha-tau-omega-main",
+    "delta-sigma-phi-main"
+  ],
+  "throughput": {
+    "legacy": {
+      "runs": 18,
+      "pages": 24,
+      "records_seen": 1968,
+      "records_upserted": 1968,
+      "review_items": 0,
+      "seconds": 450.558085,
+      "jobs_per_min": 262.07497752481794,
+      "records_per_page": 82.0,
+      "pages_per_record": 0.012195121951219513,
+      "review_rate": 0.0
+    },
+    "adaptive_assisted": {
+      "runs": 18,
+      "pages": 90,
+      "records_seen": 1968,
+      "records_upserted": 1968,
+      "review_items": 0,
+      "seconds": 262.555695,
+      "jobs_per_min": 449.73315090346824,
+      "records_per_page": 21.866666666666667,
+      "pages_per_record": 0.04573170731707317,
+      "review_rate": 0.0
+    }
+  },
+  "coverage": {
+    "adaptive_assisted": {
+      "chapters": 1968,
+      "any_contact": 0,
+      "website": 0,
+      "email": 0,
+      "instagram": 0,
+      "all_three": 0,
+      "any_contact_rate": 0.0,
+      "website_rate": 0.0,
+      "email_rate": 0.0,
+      "instagram_rate": 0.0,
+      "all_three_rate": 0.0
+    },
+    "legacy": {
+      "chapters": 1968,
+      "any_contact": 0,
+      "website": 0,
+      "email": 0,
+      "instagram": 0,
+      "all_three": 0,
+      "any_contact_rate": 0.0,
+      "website_rate": 0.0,
+      "email_rate": 0.0,
+      "instagram_rate": 0.0,
+      "all_three_rate": 0.0
+    }
+  },
+  "queue_regression_pct": 275.0,
+  "throughput_improvement_pct": 71.60476560982609,
+  "round_slopes": {
+    "round_2": {
+      "created_at": "2026-04-01 23:18:17.541311+00:00",
+      "kpis": {
+        "balancedScore": 3.583,
+        "reviewRateDelta": 0.0,
+        "legacyReviewRate": 0.0,
+        "upsertRatioDelta": 0.0,
+        "legacyUpsertRatio": 1.0,
+        "adaptiveReviewRate": 0.0,
+        "jobsPerMinuteDelta": 179.4831,
+        "adaptiveUpsertRatio": 1.0,
+        "legacyJobsPerMinute": 308.3318,
+        "pagesPerRecordDelta": 0.0335,
+        "recordsPerPageDelta": -60.1333,
+        "legacyPagesPerRecord": 0.0122,
+        "legacyRecordsPerPage": 82.0,
+        "adaptiveJobsPerMinute": 487.8149,
+        "adaptivePagesPerRecord": 0.0457,
+        "adaptiveRecordsPerPage": 21.8667
+      },
+      "slopes": {
+        "balancedScoreSlope": -0.23515,
+        "reviewRateDeltaSlope": 0.0,
+        "upsertRatioDeltaSlope": 0.0,
+        "jobsPerMinuteDeltaSlope": -11.75905,
+        "pagesPerRecordDeltaSlope": 0.0,
+        "recordsPerPageDeltaSlope": 0.0
+      }
+    },
+    "round_1": {
+      "created_at": "2026-04-01 23:11:27.056250+00:00",
+      "kpis": {
+        "balancedScore": 3.9012,
+        "reviewRateDelta": 0.0,
+        "legacyReviewRate": 0.0,
+        "upsertRatioDelta": 0.0,
+        "legacyUpsertRatio": 1.0,
+        "adaptiveReviewRate": 0.0,
+        "jobsPerMinuteDelta": 195.3939,
+        "adaptiveUpsertRatio": 1.0,
+        "legacyJobsPerMinute": 248.087,
+        "pagesPerRecordDelta": 0.0335,
+        "recordsPerPageDelta": -60.1333,
+        "legacyPagesPerRecord": 0.0122,
+        "legacyRecordsPerPage": 82.0,
+        "adaptiveJobsPerMinute": 443.4809,
+        "adaptivePagesPerRecord": 0.0457,
+        "adaptiveRecordsPerPage": 21.8667
+      },
+      "slopes": {
+        "balancedScoreSlope": 0.22255,
+        "reviewRateDeltaSlope": 0.0,
+        "upsertRatioDeltaSlope": 0.0,
+        "jobsPerMinuteDeltaSlope": 11.12775,
+        "pagesPerRecordDeltaSlope": 0.0,
+        "recordsPerPageDeltaSlope": 0.0
+      }
+    }
+  },
+  "promotion": {
+    "gate_any_contact_60": false,
+    "gate_balanced_slope_non_negative_last_round": false,
+    "gate_queue_regression_le_10pct": false,
+    "gate_two_consecutive_rounds_pass": false,
+    "overall_pass": false
+  }
+}
