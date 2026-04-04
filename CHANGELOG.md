@@ -1,3 +1,59 @@
+## [2.1.2] - 2026-04-04
+
+### Added
+- Added demo recovery report artifact: `docs/reports/DEMO_READINESS_RECOVERY_2026-04-04.md`.
+- Added source-quality and selection-rationale payload contract fields in discovery output (`source_quality`, `selected_candidate_rationale`).
+
+### Changed
+- Hardened source discovery policy to avoid auto-selecting blocked/weak hosts and to emit explicit reject reasons and per-query provider failure traces.
+- Expanded fraternity alias/normalization handling for common NIC aliases and Greek-letter variants, including `???` and `???` inputs.
+- Request intake now only auto-queues when source quality is safe; weak sources are held in `awaiting_confirmation`.
+- Crawl request runner now performs deterministic pre-run source validation/recovery and moves zero-chapter weak-source outcomes to `awaiting_confirmation` instead of silent terminal dead-ends.
+- Enrichment execution now supports LangGraph-forward runtime with explicit legacy fallback on runtime errors, including observable `runtime_fallback` events.
+- `process-field-jobs` now returns runtime execution metadata (`runtime_mode_used`, `runtime_fallback_count`) for benchmark/request analytics.
+
+### Fixed
+- Fixed potential mis-selection of unsafe discovery candidates by adding final source-quality gating and curated-safe fallback behavior.
+- Fixed brittle field-job output parsing fallback logic and improved trailing-JSON parsing reliability in the request runner.
+
+## [2.1.1] - 2026-04-03
+
+### Added
+- Added `0017_field_job_langgraph_runtime.sql` with LangGraph field-job runtime telemetry tables: `field_job_graph_runs`, `field_job_graph_events`, `field_job_graph_checkpoints`, and `field_job_graph_decisions`.
+- Added `FieldJobDecision` model and repository APIs for field-job graph run lifecycle, event emission, checkpoint persistence, and decision logging.
+- Added `FieldJobGraphRuntime` (`services/crawler/src/fratfinder_crawler/orchestration/field_job_graph.py`) with explicit node orchestration (`load_job`, `evaluate_preconditions`, `resolve_job`, `decide_outcome`, `persist_outcome`, `finalize`).
+- Added field-job runtime controls to benchmark configuration and UI: `fieldJobRuntimeMode` and `fieldJobGraphDurability`.
+- Added `0018_benchmark_shadow_diffs.sql` to persist per-cycle LangGraph shadow-diff artifacts for benchmark runs.
+- Added new web APIs for LangGraph field-job telemetry and exports:
+  - `GET /api/field-jobs/graph-runs`
+  - `GET /api/field-jobs/graph-runs/[id]`
+  - `GET /api/benchmarks/[id]/export?format=json|md`
+- Added `0019_benchmark_alerts.sql` for persistent benchmark drift alerts with fingerprint dedupe, severity/status state, and resolution timestamps.
+- Added `GET /api/benchmarks/alerts` with optional forced scan (`scan=1`), severity filtering, and benchmark scoping for operator workflows.
+- Added `GET /api/benchmarks/alerts/summary` to expose global open/resolved drift-alert aggregates for dashboard KPI cards.
+
+### Changed
+- `process-field-jobs` now supports runtime selection (`legacy`, `langgraph_shadow`, `langgraph_primary`) and checkpoint durability control (`exit`, `async`, `sync`) end-to-end from CLI -> pipeline -> benchmark/campaign runners.
+- Field-job chunk processing now routes through LangGraph runtime when enabled while preserving existing repository write contracts for safe transition.
+- Added `FieldJobSupervisorGraphRuntime` to orchestrate batch chunk preparation/dispatch/aggregation through LangGraph state transitions instead of ad-hoc threadpool control-flow.
+- Benchmark and crawl-request runners now use more robust trailing-JSON parsing to reduce stdout-coupling fragility during long runs.
+- Benchmark cycle timeout handling now uses workload-aware estimation (field-aware per-job cost + worker parallelism + fixed overhead) with a safe clamp for long-running website batches.
+- Added `BENCHMARK_CYCLE_TIMEOUT_MS` env override for operators who need a fixed benchmark cycle timeout in constrained or high-latency environments.
+- Benchmark gate baseline selection now requires protocol parity (workers, limit/cycle count, pause, warmup flag) before comparing treatment vs legacy.
+- Benchmark gate report now includes an explicit `Comparison quality` check based on queue-start drift and full-cycle completion.
+- Benchmark timeout estimation now applies a LangGraph runtime multiplier so `langgraph_shadow`/`langgraph_primary` cycles are less likely to fail from artificial clipping.
+- Benchmark runner now computes and stores cycle-window shadow diff diagnostics (`observed_jobs`, decision/status mismatches, mismatch-rate, sample mismatches) whenever field jobs run in a `langgraph_*` runtime.
+- Chapters map rendering now falls back to normalized chapter row state aggregation when map summary API data is empty, restoring visible state dots.
+- Benchmarks detail view now includes explicit LangGraph cutover gate checks (throughput, retry-waste reduction, p95 latency, queue burn retention, and terminal-rate safety) against the latest matching legacy baseline.
+- Benchmarks detail view now also surfaces shadow-diff artifact rows and a field-job graph run timeline with node-level events.
+- Benchmarks detail view now includes drift-alert controls (severity/status filters, manual scan trigger, alert summaries, and resolved-by-scan timestamps) for faster rollout triage.
+- Benchmarks snapshot now surfaces global drift-alert KPI cards (open critical/warning, resolved 24h) plus a one-click "Scan All Benchmarks" operator action.
+- Health endpoint now runs scheduled benchmark drift scan checks and reports scan stats in runtime health payloads.
+
+### Fixed
+- Fixed frontend production verification path by removing stale Node/Next build-process interference and validating successful `next build` output.
+- Fixed chapter map “all zeros/no dots” behavior when state summary responses are empty or stale.
+- Fixed prior changelog gap by documenting the LangGraph field-job runtime migration work completed in this phase.
 ## [2.1.0] - 2026-04-01
 
 ### Added
@@ -496,6 +552,13 @@
 ### Fixed
 - Corrected the seeded Sigma Chi source path to the live undergraduate groups directory and hardened the `directory_v1` table adapter to skip header rows and parse split city/state columns correctly.
 - Fixed field-job transaction persistence for local processing and added source-scoped field-job execution so integration checks and local demos can process only the intended job queue.
+
+
+
+
+
+
+
 
 
 

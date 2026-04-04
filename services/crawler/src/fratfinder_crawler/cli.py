@@ -11,6 +11,7 @@ from fratfinder_crawler.pipeline import CrawlService
 
 
 ADAPTIVE_RUNTIME_CHOICES = ["adaptive_shadow", "adaptive_assisted", "adaptive_primary"]
+FIELD_JOB_RUNTIME_CHOICES = ["legacy", "langgraph_shadow", "langgraph_primary"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_parser.add_argument("--source-slug", help="Only process field jobs for one source slug", default=None)
     jobs_parser.add_argument("--field-name", choices=FIELD_JOB_TYPES, help="Only process one field job type", default=None)
     jobs_parser.add_argument("--workers", type=int, default=None, help="Number of concurrent field-job workers to run")
+    jobs_parser.add_argument("--runtime-mode", choices=FIELD_JOB_RUNTIME_CHOICES, default=None, help="Field-job runtime mode")
+    jobs_parser.add_argument("--graph-durability", choices=["exit", "async", "sync"], default=None, help="LangGraph checkpoint durability mode")
     jobs_parser.add_argument(
         "--require-healthy-search",
         action="store_true",
@@ -170,6 +173,8 @@ def main() -> None:
             workers=args.workers,
             require_healthy_search=args.require_healthy_search,
             run_preflight=args.run_preflight,
+            runtime_mode=args.runtime_mode,
+            graph_durability=args.graph_durability,
         )
         print(json.dumps(result, indent=2))
         return

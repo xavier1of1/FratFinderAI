@@ -22,6 +22,18 @@ class Settings(BaseSettings):
     crawler_field_job_worker_id: str = Field(default="local-crawler-worker", alias="CRAWLER_FIELD_JOB_WORKER_ID")
     crawler_field_job_base_backoff_seconds: int = Field(default=30, alias="CRAWLER_FIELD_JOB_BASE_BACKOFF_SECONDS")
     crawler_field_job_max_workers: int = Field(default=8, alias="CRAWLER_FIELD_JOB_MAX_WORKERS")
+    crawler_field_job_stale_claim_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_STALE_CLAIM_MINUTES")
+    crawler_field_job_graph_run_stale_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_GRAPH_RUN_STALE_MINUTES")
+    crawler_field_job_runtime_mode: str = Field(
+        default="legacy",
+        alias="Agent:FIELD_JOB_RUNTIME_MODE",
+        validation_alias=AliasChoices("Agent:FIELD_JOB_RUNTIME_MODE", "CRAWLER_FIELD_JOB_RUNTIME_MODE"),
+    )
+    crawler_field_job_graph_durability: str = Field(
+        default="sync",
+        alias="Agent:FIELD_JOB_GRAPH_DURABILITY",
+        validation_alias=AliasChoices("Agent:FIELD_JOB_GRAPH_DURABILITY", "CRAWLER_FIELD_JOB_GRAPH_DURABILITY"),
+    )
     crawler_search_enabled: bool = Field(default=True, alias="CRAWLER_SEARCH_ENABLED")
     crawler_search_provider: str = Field(default="auto", alias="CRAWLER_SEARCH_PROVIDER")
     crawler_search_provider_order_free: str = Field(

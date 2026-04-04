@@ -14,6 +14,7 @@ from fratfinder_crawler.models import (
     ExistingSourceCandidate,
     FrontierItem,
     FieldJob,
+    FieldJobDecision,
     FIELD_TO_CHAPTER_COLUMN,
     FIELD_JOB_FIND_EMAIL,
     FIELD_JOB_FIND_INSTAGRAM,
@@ -884,6 +885,83 @@ class CrawlerRepository:
                 field_states=row["field_states"] or {},
             )
 
+    def reconcile_stale_field_jobs(self, max_age_minutes: int = 60) -> int:
+        stale_minutes = max(1, int(max_age_minutes))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH stale_jobs AS (
+                    SELECT id
+                    FROM field_jobs
+                    WHERE status = 'running'
+                      AND started_at IS NOT NULL
+                      AND started_at < NOW() - (%s * INTERVAL '1 minute')
+                )
+                UPDATE field_jobs fj
+                SET
+                    status = 'queued',
+                    scheduled_at = NOW(),
+                    started_at = NULL,
+                    finished_at = NULL,
+                    claimed_by = NULL,
+                    claim_token = NULL,
+                    terminal_failure = FALSE,
+                    attempts = GREATEST(fj.attempts - 1, 0),
+                    last_error = %s,
+                    payload = COALESCE(fj.payload, '{}'::jsonb)
+                        || jsonb_build_object(
+                            'staleRecovery',
+                            jsonb_build_object(
+                                'recoveredAt', NOW(),
+                                'reason', 'stale_claim_timeout',
+                                'staleMinutes', %s
+                            )
+                        )
+                FROM stale_jobs
+                WHERE fj.id = stale_jobs.id
+                """,
+                (
+                    stale_minutes,
+                    f"Recovered stale field job claim after {stale_minutes} minutes without completion",
+                    stale_minutes,
+                ),
+            )
+            updated = cursor.rowcount
+        self._connection.commit()
+        return max(updated, 0)
+
+    def reconcile_stale_field_job_graph_runs(self, max_age_minutes: int = 60) -> int:
+        stale_minutes = max(1, int(max_age_minutes))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE field_job_graph_runs
+                SET
+                    status = 'failed',
+                    error_message = COALESCE(
+                        error_message,
+                        %s
+                    ),
+                    summary = COALESCE(summary, '{}'::jsonb)
+                        || jsonb_build_object(
+                            'staleRunRecovery', TRUE,
+                            'staleMinutes', %s
+                        ),
+                    finished_at = NOW(),
+                    updated_at = NOW()
+                WHERE status = 'running'
+                  AND COALESCE(updated_at, created_at) < NOW() - (%s * INTERVAL '1 minute')
+                """,
+                (
+                    f"Recovered stale field-job graph run after {stale_minutes} minutes without completion",
+                    stale_minutes,
+                    stale_minutes,
+                ),
+            )
+            updated = cursor.rowcount
+        self._connection.commit()
+        return max(updated, 0)
+
     def fetch_provenance_snippets(self, chapter_id: str) -> list[str]:
         with self._connection.transaction(), self._connection.cursor() as cursor:
             cursor.execute(
@@ -1161,6 +1239,191 @@ class CrawlerRepository:
 
 
 
+
+
+    def field_job_graph_tables_ready(self) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    to_regclass('public.field_job_graph_runs') IS NOT NULL
+                    AND to_regclass('public.field_job_graph_events') IS NOT NULL
+                    AND to_regclass('public.field_job_graph_checkpoints') IS NOT NULL
+                    AND to_regclass('public.field_job_graph_decisions') IS NOT NULL AS ready
+                """
+            )
+            row = cursor.fetchone()
+        return bool(row and row["ready"])
+
+
+    def start_field_job_graph_run(
+        self,
+        *,
+        worker_id: str,
+        runtime_mode: str,
+        source_slug: str | None,
+        field_name: str | None,
+        limit: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO field_job_graph_runs (
+                    worker_id,
+                    runtime_mode,
+                    source_slug,
+                    field_name,
+                    requested_limit,
+                    status,
+                    metadata,
+                    summary
+                )
+                VALUES (%s, %s, %s, %s, %s, 'running', %s, '{}'::jsonb)
+                RETURNING id
+                """,
+                (worker_id, runtime_mode, source_slug, field_name, max(1, limit), Jsonb(metadata or {})),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return int(row["id"])
+
+    def append_field_job_graph_event(
+        self,
+        *,
+        run_id: int,
+        node_name: str,
+        phase: str,
+        status: str,
+        latency_ms: int,
+        job_id: str | None = None,
+        attempt: int | None = None,
+        metrics_delta: dict[str, Any] | None = None,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO field_job_graph_events (
+                    run_id,
+                    job_id,
+                    attempt,
+                    node_name,
+                    phase,
+                    status,
+                    latency_ms,
+                    metrics_delta,
+                    diagnostics
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    run_id,
+                    job_id,
+                    attempt,
+                    node_name,
+                    phase,
+                    status,
+                    max(0, latency_ms),
+                    Jsonb(metrics_delta or {}),
+                    Jsonb(diagnostics or {}),
+                ),
+            )
+        self._connection.commit()
+
+    def upsert_field_job_graph_checkpoint(
+        self,
+        *,
+        run_id: int,
+        job_id: str,
+        attempt: int,
+        node_name: str,
+        state: dict[str, Any],
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO field_job_graph_checkpoints (run_id, job_id, attempt, node_name, state)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (run_id, job_id, attempt)
+                DO UPDATE SET
+                    node_name = EXCLUDED.node_name,
+                    state = EXCLUDED.state,
+                    updated_at = NOW()
+                """,
+                (run_id, job_id, max(1, attempt), node_name, Jsonb(state)),
+            )
+        self._connection.commit()
+
+    def insert_field_job_graph_decision(
+        self,
+        *,
+        run_id: int,
+        job_id: str,
+        attempt: int,
+        field_name: str,
+        decision: FieldJobDecision,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO field_job_graph_decisions (
+                    run_id,
+                    job_id,
+                    attempt,
+                    field_name,
+                    decision_status,
+                    confidence,
+                    candidate_kind,
+                    candidate_value,
+                    reason_codes,
+                    write_allowed,
+                    requires_review,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    run_id,
+                    job_id,
+                    max(1, attempt),
+                    field_name,
+                    decision.status,
+                    decision.confidence,
+                    decision.candidate_kind,
+                    decision.candidate_value,
+                    Jsonb(decision.reason_codes),
+                    decision.write_allowed,
+                    decision.requires_review,
+                    Jsonb(metadata or {}),
+                ),
+            )
+        self._connection.commit()
+
+    def finish_field_job_graph_run(
+        self,
+        run_id: int,
+        *,
+        status: str,
+        summary: dict[str, Any],
+        error_message: str | None = None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE field_job_graph_runs
+                SET
+                    status = %s,
+                    summary = %s,
+                    error_message = %s,
+                    finished_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (status, Jsonb(summary), error_message, run_id),
+            )
+        self._connection.commit()
 
     def start_crawl_session(
         self,
@@ -2065,5 +2328,6 @@ class CrawlerRepository:
             "right": right,
             "actionDeltas": action_deltas,
         }
+
 
 

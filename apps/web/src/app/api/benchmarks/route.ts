@@ -15,6 +15,21 @@ const DEFAULT_RUNTIME_MODE = (() => {
   return "adaptive_assisted";
 })();
 
+const DEFAULT_FIELD_JOB_RUNTIME_MODE = (() => {
+  const value = String(process.env.BENCHMARK_FIELD_JOB_RUNTIME_MODE ?? "legacy").trim();
+  if (value === "legacy" || value === "langgraph_shadow" || value === "langgraph_primary") {
+    return value;
+  }
+  return "legacy";
+})();
+
+const DEFAULT_FIELD_JOB_GRAPH_DURABILITY = (() => {
+  const value = String(process.env.BENCHMARK_FIELD_JOB_GRAPH_DURABILITY ?? "sync").trim();
+  if (value === "exit" || value === "async" || value === "sync") {
+    return value;
+  }
+  return "sync";
+})();
 const DEFAULT_WARMUP = (() => {
   const value = String(process.env.BENCHMARK_RUN_ADAPTIVE_WARMUP ?? "true").trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on";
@@ -30,6 +45,8 @@ const benchmarkPayloadSchema = z.object({
   cycles: z.coerce.number().int().min(1).max(100).default(6),
   pauseMs: z.coerce.number().int().min(0).max(10_000).default(500),
   crawlRuntimeMode: z.enum(["legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"]).default(DEFAULT_RUNTIME_MODE),
+  fieldJobRuntimeMode: z.enum(["legacy", "langgraph_shadow", "langgraph_primary"]).default(DEFAULT_FIELD_JOB_RUNTIME_MODE),
+  fieldJobGraphDurability: z.enum(["exit", "async", "sync"]).default(DEFAULT_FIELD_JOB_GRAPH_DURABILITY),
   runAdaptiveCrawlBeforeCycles: z.coerce.boolean().default(DEFAULT_WARMUP)
 });
 
@@ -68,6 +85,8 @@ export async function POST(request: NextRequest) {
       cycles: payload.cycles,
       pauseMs: payload.pauseMs,
       crawlRuntimeMode: payload.crawlRuntimeMode,
+      fieldJobRuntimeMode: payload.fieldJobRuntimeMode,
+      fieldJobGraphDurability: payload.fieldJobGraphDurability,
       runAdaptiveCrawlBeforeCycles: payload.runAdaptiveCrawlBeforeCycles
     };
 

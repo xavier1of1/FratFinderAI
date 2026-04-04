@@ -4,10 +4,12 @@ import path from "path";
 
 import {
   completeBenchmarkRun,
+  computeBenchmarkShadowDiffWindow,
   failBenchmarkRun,
   getBenchmarkRun,
   getFieldJobStatusSnapshot,
-  markBenchmarkRunStarted
+  markBenchmarkRunStarted,
+  upsertBenchmarkShadowDiff
 } from "@/lib/repositories/benchmark-repository";
 import type {
   BenchmarkCycleSample,
@@ -37,6 +39,39 @@ interface CrawlWarmupResult {
   recordsUpserted: number;
   pagesProcessed: number;
 }
+const BENCHMARK_TIMEOUT_MIN_MS = 120_000;
+const BENCHMARK_TIMEOUT_MAX_MS = 900_000;
+const BENCHMARK_TIMEOUT_BASE_OVERHEAD_MS = 80_000;
+
+function estimateBenchmarkCycleTimeoutMs(config: BenchmarkRunConfig): number {
+  const override = Number(process.env.BENCHMARK_CYCLE_TIMEOUT_MS ?? "");
+  if (Number.isFinite(override) && override > 0) {
+    return Math.max(BENCHMARK_TIMEOUT_MIN_MS, Math.min(BENCHMARK_TIMEOUT_MAX_MS, Math.round(override)));
+  }
+
+  const perJobMsByField: Record<BenchmarkFieldName, number> = {
+    find_website: 20_000,
+    find_email: 10_000,
+    find_instagram: 9_000,
+    all: 14_000
+  };
+
+  const perJobMs = perJobMsByField[config.fieldName] ?? 10_000;
+  const runtimeMultiplier =
+    config.fieldJobRuntimeMode === "langgraph_shadow" || config.fieldJobRuntimeMode === "langgraph_primary"
+      ? 1.8
+      : 1.0;
+  const requestedWorkers = Math.max(config.workers, 1);
+  const effectiveWorkers = Math.max(1, Math.min(requestedWorkers, config.limitPerCycle));
+  const predictedProcessingMs = ((config.limitPerCycle * perJobMs) / effectiveWorkers) * runtimeMultiplier;
+  const predictedTotalMs = predictedProcessingMs + BENCHMARK_TIMEOUT_BASE_OVERHEAD_MS;
+
+  return Math.max(BENCHMARK_TIMEOUT_MIN_MS, Math.min(BENCHMARK_TIMEOUT_MAX_MS, Math.round(predictedTotalMs)));
+}
+
+function isLanggraphRuntime(mode: string | undefined): boolean {
+  return mode === "langgraph_shadow" || mode === "langgraph_primary";
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -59,6 +94,18 @@ function findRepositoryRoot(): string {
   return process.cwd();
 }
 
+function parseTrailingJson<T>(output: string): T {
+  const trimmed = output.trim();
+  for (let index = trimmed.lastIndexOf("{"); index >= 0; index = trimmed.lastIndexOf("{", index - 1)) {
+    const candidate = trimmed.slice(index);
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // continue scanning backward for the last complete JSON object
+    }
+  }
+  throw new Error(`Could not parse trailing JSON payload from output: ${trimmed.slice(-600)}`);
+}
 function readLastNumericValue(output: string, key: string): number | null {
   const pattern = new RegExp(`"${key}"\\s*:\\s*(-?\\d+)`, "g");
   let match: RegExpExecArray | null = null;
@@ -76,15 +123,23 @@ function readLastNumericValue(output: string, key: string): number | null {
 }
 
 function parseProcessFieldJobsOutput(output: string): ProcessFieldJobResult {
-  const processed = readLastNumericValue(output, "processed");
-  const requeued = readLastNumericValue(output, "requeued");
-  const failedTerminal = readLastNumericValue(output, "failed_terminal");
+  try {
+    const payload = parseTrailingJson<Record<string, unknown>>(output);
+    const processed = Number(payload.processed ?? 0);
+    const requeued = Number(payload.requeued ?? 0);
+    const failedTerminal = Number(payload.failed_terminal ?? payload.failedTerminal ?? 0);
+    return { processed, requeued, failedTerminal };
+  } catch {
+    const processed = readLastNumericValue(output, "processed");
+    const requeued = readLastNumericValue(output, "requeued");
+    const failedTerminal = readLastNumericValue(output, "failed_terminal");
 
-  if (processed === null || requeued === null || failedTerminal === null) {
-    throw new Error(`Could not parse process-field-jobs output: ${output.slice(-600)}`);
+    if (processed === null || requeued === null || failedTerminal === null) {
+      throw new Error(`Could not parse process-field-jobs output: ${output.slice(-600)}`);
+    }
+
+    return { processed, requeued, failedTerminal };
   }
-
-  return { processed, requeued, failedTerminal };
 }
 
 async function runAdaptiveCrawlWarmup(config: BenchmarkRunConfig): Promise<CrawlWarmupResult | null> {
@@ -160,6 +215,14 @@ async function runFieldJobCycle(config: BenchmarkRunConfig): Promise<ProcessFiel
     String(config.workers)
   ];
 
+  if (config.fieldJobRuntimeMode) {
+    args.push("--runtime-mode", config.fieldJobRuntimeMode);
+  }
+
+  if (config.fieldJobGraphDurability) {
+    args.push("--graph-durability", config.fieldJobGraphDurability);
+  }
+
   if (config.fieldName !== "all") {
     args.push("--field-name", config.fieldName);
   }
@@ -168,7 +231,7 @@ async function runFieldJobCycle(config: BenchmarkRunConfig): Promise<ProcessFiel
     args.push("--source-slug", config.sourceSlug);
   }
 
-  const timeoutMs = Math.max(30_000, Math.min(180_000, config.limitPerCycle * 2_500));
+  const timeoutMs = estimateBenchmarkCycleTimeoutMs(config);
   const workingDirectory = findRepositoryRoot();
 
   return new Promise((resolve, reject) => {
@@ -328,6 +391,7 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
       const cycleStartedAt = new Date().toISOString();
       const cycleStartedAtMs = Date.now();
       const result = await runFieldJobCycle(config);
+      const cycleFinishedAt = new Date().toISOString();
 
       totals.processed += result.processed;
       totals.requeued += result.requeued;
@@ -337,6 +401,30 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
         fieldName: config.fieldName,
         sourceSlug: config.sourceSlug
       });
+
+      if (isLanggraphRuntime(config.fieldJobRuntimeMode)) {
+        try {
+          const shadow = await computeBenchmarkShadowDiffWindow({
+            sourceSlug: config.sourceSlug,
+            fieldName: config.fieldName,
+            runtimeMode: config.fieldJobRuntimeMode ?? "langgraph_shadow",
+            fromIso: cycleStartedAt,
+            toIso: cycleFinishedAt,
+          });
+          await upsertBenchmarkShadowDiff({
+            benchmarkRunId: runId,
+            cycle,
+            runtimeMode: config.fieldJobRuntimeMode ?? "langgraph_shadow",
+            observedJobs: shadow.observedJobs,
+            decisionMismatchCount: shadow.decisionMismatchCount,
+            statusMismatchCount: shadow.statusMismatchCount,
+            mismatchRate: shadow.mismatchRate,
+            details: shadow.details,
+          });
+        } catch {
+          // Keep benchmark progress resilient even if shadow-diff persistence fails.
+        }
+      }
 
       samples.push({
         cycle,
@@ -428,3 +516,6 @@ export function toBenchmarkFieldName(value: string): BenchmarkFieldName {
   }
   throw new Error(`Unsupported benchmark field name: ${value}`);
 }
+
+
+

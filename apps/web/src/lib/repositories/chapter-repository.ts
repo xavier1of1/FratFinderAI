@@ -1,5 +1,5 @@
 import { getDbPool } from "../db";
-import type { ChapterActionResult, ChapterFieldName, ChapterListItem, ChapterMapStateSummary } from "../types";
+import type { ChapterActionResult, ChapterFieldName, ChapterListItem, ChapterListResponse, ChapterMapStateSummary } from "../types";
 
 const STATE_NORMALIZATION_CASE = `
   CASE
@@ -112,6 +112,53 @@ export async function listChapters(params: {
   );
 
   return rows;
+}
+
+export async function getChapterListMetadata(params: {
+  search?: string;
+}): Promise<Omit<ChapterListResponse, "items">> {
+  const search = (params.search ?? "").trim();
+
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{
+    total_count: number;
+    fraternity_slugs: string[] | null;
+    state_options: string[] | null;
+    chapter_statuses: string[] | null;
+  }>(
+    `
+      WITH filtered AS (
+        SELECT
+          f.slug AS fraternity_slug,
+          NULLIF(btrim(c.state), '') AS state,
+          NULLIF(btrim(c.chapter_status), '') AS chapter_status
+        FROM chapters c
+        JOIN fraternities f ON f.id = c.fraternity_id
+        WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.university_name ILIKE '%' || $1 || '%')
+      )
+      SELECT
+        COUNT(*)::int AS total_count,
+        COALESCE(array_agg(DISTINCT fraternity_slug ORDER BY fraternity_slug), ARRAY[]::text[]) AS fraternity_slugs,
+        COALESCE(array_agg(DISTINCT state ORDER BY state) FILTER (WHERE state IS NOT NULL), ARRAY[]::text[]) AS state_options,
+        COALESCE(array_agg(DISTINCT chapter_status ORDER BY chapter_status) FILTER (WHERE chapter_status IS NOT NULL), ARRAY[]::text[]) AS chapter_statuses
+      FROM filtered
+    `,
+    [search]
+  );
+
+  const summary = rows[0] ?? {
+    total_count: 0,
+    fraternity_slugs: [],
+    state_options: [],
+    chapter_statuses: []
+  };
+
+  return {
+    totalCount: Number(summary.total_count ?? 0),
+    fraternitySlugs: summary.fraternity_slugs ?? [],
+    stateOptions: summary.state_options ?? [],
+    chapterStatuses: summary.chapter_statuses ?? []
+  };
 }
 
 export async function listChapterMapSummary(): Promise<ChapterMapStateSummary[]> {

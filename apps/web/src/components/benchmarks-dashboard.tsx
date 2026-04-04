@@ -6,7 +6,18 @@ import { MetricCard } from "@/components/metric-card";
 import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
 import { computeRuntimeComparison } from "@/lib/runtime-comparison";
-import type { AdaptiveEpochMetric, BenchmarkFieldName, BenchmarkRunConfig, BenchmarkRunListItem, CrawlRunListItem } from "@/lib/types";
+import type {
+  AdaptiveEpochMetric,
+  BenchmarkFieldName,
+  BenchmarkAlert,
+  BenchmarkAlertSummary,
+  BenchmarkGateReport,
+  BenchmarkRunConfig,
+  BenchmarkRunListItem,
+  CrawlRunListItem,
+  FieldJobGraphRunDetail,
+  FieldJobGraphRunListItem,
+} from "@/lib/types";
 
 interface ApiSuccess<T> {
   success: true;
@@ -24,6 +35,25 @@ interface ApiFailure {
 
 type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
+interface BenchmarkRunDetailResponse {
+  run: BenchmarkRunListItem;
+  baseline: BenchmarkRunListItem | null;
+  gateReport: BenchmarkGateReport | null;
+}
+
+interface BenchmarkAlertScanResult {
+  startedAt: string;
+  finishedAt: string;
+  consideredRuns: number;
+  alertsCreated: number;
+  alertsResolved: number;
+}
+
+interface BenchmarkAlertsResponse {
+  alerts: BenchmarkAlert[];
+  scanResult: BenchmarkAlertScanResult | null;
+}
+
 type BenchmarkFormState = {
   name: string;
   fieldName: BenchmarkFieldName;
@@ -32,6 +62,8 @@ type BenchmarkFormState = {
   limitPerCycle: number;
   cycles: number;
   pauseMs: number;
+  fieldJobRuntimeMode: "legacy" | "langgraph_shadow" | "langgraph_primary";
+  fieldJobGraphDurability: "exit" | "async" | "sync";
 };
 
 const FIELD_LABELS: Record<BenchmarkFieldName, string> = {
@@ -79,6 +111,8 @@ function formatNumber(value: number | null | undefined, digits = 0): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
+
+
 async function fetchBenchmarks(): Promise<BenchmarkRunListItem[]> {
   const response = await fetch("/api/benchmarks?limit=200", { cache: "no-store" });
   const payload = (await response.json()) as ApiEnvelope<BenchmarkRunListItem[]>;
@@ -121,6 +155,102 @@ async function fetchAdaptiveEpochs(): Promise<AdaptiveEpochMetric[]> {
   return payload.data;
 }
 
+async function fetchBenchmarkDetail(id: string): Promise<BenchmarkRunDetailResponse> {
+  const response = await fetch(`/api/benchmarks/${id}?includeComparisons=1`, { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<BenchmarkRunDetailResponse>;
+
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch benchmark detail: ${response.status}`);
+  }
+
+  return payload.data;
+}
+
+async function fetchBenchmarkAlerts(params: {
+  benchmarkRunId?: string | null;
+  severity?: "info" | "warning" | "critical" | "all";
+  status?: "open" | "resolved" | "all";
+  scan?: boolean;
+}): Promise<BenchmarkAlertsResponse> {
+  const query = new URLSearchParams();
+  query.set("limit", "120");
+  query.set("status", params.status ?? "open");
+  query.set("severity", params.severity ?? "all");
+  if (params.benchmarkRunId) {
+    query.set("benchmarkRunId", params.benchmarkRunId);
+  }
+  if (params.scan) {
+    query.set("scan", "1");
+  }
+
+  const response = await fetch(`/api/benchmarks/alerts?${query.toString()}`, { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<BenchmarkAlertsResponse>;
+
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch benchmark alerts: ${response.status}`);
+  }
+
+  return payload.data;
+}
+async function fetchBenchmarkAlertSummary(): Promise<BenchmarkAlertSummary> {
+  const response = await fetch("/api/benchmarks/alerts/summary", { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<BenchmarkAlertSummary>;
+
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch benchmark alert summary: ${response.status}`);
+  }
+
+  return payload.data;
+}
+async function fetchGraphRuns(params: {
+  sourceSlug: string | null;
+  fieldName: BenchmarkFieldName;
+  runtimeMode: string;
+}): Promise<FieldJobGraphRunListItem[]> {
+  const query = new URLSearchParams();
+  query.set("limit", "12");
+  if (params.sourceSlug) {
+    query.set("sourceSlug", params.sourceSlug);
+  }
+  if (params.fieldName !== "all") {
+    query.set("fieldName", params.fieldName);
+  }
+  if (params.runtimeMode) {
+    query.set("runtimeMode", params.runtimeMode);
+  }
+
+  const response = await fetch(`/api/field-jobs/graph-runs?${query.toString()}`, { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<FieldJobGraphRunListItem[]>;
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch field-job graph runs: ${response.status}`);
+  }
+  return payload.data;
+}
+
+async function fetchGraphRunDetail(runId: number): Promise<FieldJobGraphRunDetail> {
+  const response = await fetch(`/api/field-jobs/graph-runs/${runId}?eventLimit=40&decisionLimit=40`, { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<FieldJobGraphRunDetail>;
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch field-job graph run detail: ${response.status}`);
+  }
+  return payload.data;
+}
+
 export function BenchmarksDashboard({
   initialBenchmarks,
   initialRuns,
@@ -134,6 +264,16 @@ export function BenchmarksDashboard({
   const [crawlRuns, setCrawlRuns] = useState<CrawlRunListItem[]>(initialRuns);
   const [adaptiveEpochs, setAdaptiveEpochs] = useState<AdaptiveEpochMetric[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialBenchmarks[0]?.id ?? null);
+  const [selectedDetail, setSelectedDetail] = useState<BenchmarkRunDetailResponse | null>(null);
+  const [graphRuns, setGraphRuns] = useState<FieldJobGraphRunListItem[]>([]);
+  const [selectedGraphRun, setSelectedGraphRun] = useState<FieldJobGraphRunDetail | null>(null);
+  const [benchmarkAlerts, setBenchmarkAlerts] = useState<BenchmarkAlert[]>([]);
+  const [globalAlertSummary, setGlobalAlertSummary] = useState<BenchmarkAlertSummary | null>(null);
+  const [alertSeverityFilter, setAlertSeverityFilter] = useState<"info" | "warning" | "critical" | "all">("all");
+  const [alertStatusFilter, setAlertStatusFilter] = useState<"open" | "resolved" | "all">("open");
+  const [alertScanResult, setAlertScanResult] = useState<BenchmarkAlertScanResult | null>(null);
+  const [isScanningAlerts, setIsScanningAlerts] = useState(false);
+  const [isScanningAllAlerts, setIsScanningAllAlerts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -144,7 +284,9 @@ export function BenchmarksDashboard({
     workers: 8,
     limitPerCycle: 24,
     cycles: 6,
-    pauseMs: 500
+    pauseMs: 500,
+    fieldJobRuntimeMode: "legacy",
+    fieldJobGraphDurability: "sync"
   });
 
   const selectedBenchmark = useMemo(() => {
@@ -167,10 +309,16 @@ export function BenchmarksDashboard({
   async function refreshBenchmarkList(options?: { selectNewest?: boolean }) {
     setIsRefreshing(true);
     try {
-      const [benchmarkData, runData, epochData] = await Promise.all([fetchBenchmarks(), fetchCrawlRuns(), fetchAdaptiveEpochs()]);
+      const [benchmarkData, runData, epochData, alertSummary] = await Promise.all([
+        fetchBenchmarks(),
+        fetchCrawlRuns(),
+        fetchAdaptiveEpochs(),
+        fetchBenchmarkAlertSummary(),
+      ]);
       setBenchmarks(benchmarkData);
       setCrawlRuns(runData);
       setAdaptiveEpochs(epochData);
+      setGlobalAlertSummary(alertSummary);
 
       const selectedStillExists = selectedId ? benchmarkData.some((item) => item.id === selectedId) : false;
       if (options?.selectNewest && benchmarkData[0]) {
@@ -184,7 +332,6 @@ export function BenchmarksDashboard({
       setIsRefreshing(false);
     }
   }
-
   useEffect(() => {
     if (runningCount === 0) {
       return;
@@ -200,6 +347,14 @@ export function BenchmarksDashboard({
   }, [runningCount]);
 
   useEffect(() => {
+    if (globalAlertSummary) {
+      return;
+    }
+    void fetchBenchmarkAlertSummary()
+      .then((summary) => setGlobalAlertSummary(summary))
+      .catch((error) => setErrorMessage(error instanceof Error ? error.message : String(error)));
+  }, [globalAlertSummary]);
+  useEffect(() => {
     if (adaptiveEpochs.length > 0) {
       return;
     }
@@ -208,6 +363,114 @@ export function BenchmarksDashboard({
       .catch((error) => setErrorMessage(error instanceof Error ? error.message : String(error)));
   }, [adaptiveEpochs.length]);
 
+  useEffect(() => {
+    const benchmark = selectedBenchmark;
+    if (!benchmark) {
+      setSelectedDetail(null);
+      setGraphRuns([]);
+      setSelectedGraphRun(null);
+      setBenchmarkAlerts([]);
+      setAlertScanResult(null);
+      return;
+    }
+
+    let canceled = false;
+    void (async () => {
+      try {
+        const [detail, runs, alertPayload] = await Promise.all([
+          fetchBenchmarkDetail(benchmark.id),
+          fetchGraphRuns({
+            sourceSlug: benchmark.sourceSlug,
+            fieldName: benchmark.fieldName,
+            runtimeMode: benchmark.config.fieldJobRuntimeMode ?? "legacy",
+          }),
+          fetchBenchmarkAlerts({
+            benchmarkRunId: benchmark.id,
+            severity: alertSeverityFilter,
+            status: alertStatusFilter,
+          }),
+        ]);
+
+        if (canceled) {
+          return;
+        }
+
+        setSelectedDetail(detail);
+        setGraphRuns(runs);
+        setBenchmarkAlerts(alertPayload.alerts);
+        setAlertScanResult(alertPayload.scanResult ?? null);
+
+        if (runs.length > 0) {
+          const graphDetail = await fetchGraphRunDetail(runs[0]!.id);
+          if (!canceled) {
+            setSelectedGraphRun(graphDetail);
+          }
+        } else {
+          setSelectedGraphRun(null);
+        }
+      } catch (error) {
+        if (!canceled) {
+          setErrorMessage(error instanceof Error ? error.message : String(error));
+        }
+      }
+    })();
+
+    return () => {
+      canceled = true;
+    };
+  }, [selectedBenchmark?.id, selectedBenchmark?.updatedAt, alertSeverityFilter, alertStatusFilter]);
+
+  async function handleScanAlerts() {
+    if (!selectedBenchmark) {
+      return;
+    }
+    setIsScanningAlerts(true);
+    setErrorMessage(null);
+    try {
+      const [payload, summary] = await Promise.all([
+        fetchBenchmarkAlerts({
+          benchmarkRunId: selectedBenchmark.id,
+          severity: alertSeverityFilter,
+          status: alertStatusFilter,
+          scan: true,
+        }),
+        fetchBenchmarkAlertSummary(),
+      ]);
+      setBenchmarkAlerts(payload.alerts);
+      setGlobalAlertSummary(summary);
+      setAlertScanResult(payload.scanResult ?? null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsScanningAlerts(false);
+    }
+  }
+
+  async function handleScanAllAlerts() {
+    setIsScanningAllAlerts(true);
+    setErrorMessage(null);
+    try {
+      const [alertsPayload, summary] = await Promise.all([
+        fetchBenchmarkAlerts({
+          severity: "all",
+          status: "all",
+          scan: true,
+        }),
+        fetchBenchmarkAlertSummary(),
+      ]);
+
+      setGlobalAlertSummary(summary);
+      if (selectedBenchmark) {
+        const scoped = alertsPayload.alerts.filter((alert) => alert.benchmarkRunId === selectedBenchmark.id);
+        setBenchmarkAlerts(scoped);
+      }
+      setAlertScanResult(alertsPayload.scanResult ?? null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsScanningAllAlerts(false);
+    }
+  }
   async function handleRunBenchmark(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -221,7 +484,9 @@ export function BenchmarksDashboard({
         workers: form.workers,
         limitPerCycle: form.limitPerCycle,
         cycles: form.cycles,
-        pauseMs: form.pauseMs
+        pauseMs: form.pauseMs,
+        fieldJobRuntimeMode: form.fieldJobRuntimeMode,
+        fieldJobGraphDurability: form.fieldJobGraphDurability
       };
 
       const response = await fetch("/api/benchmarks", {
@@ -258,6 +523,17 @@ export function BenchmarksDashboard({
       }),
     [crawlRuns, selectedBenchmark?.sourceSlug]
   );
+
+  const gateReport = selectedDetail?.gateReport ?? null;
+  const baselineBenchmark = selectedDetail?.baseline ?? null;
+  const shadowDiffs = selectedDetail?.run?.shadowDiffs ?? selectedBenchmark?.shadowDiffs ?? [];
+  const selectedAlerts = benchmarkAlerts;
+  const alertSummary = useMemo(() => ({
+    info: selectedAlerts.filter((alert) => alert.severity === "info").length,
+    warning: selectedAlerts.filter((alert) => alert.severity === "warning").length,
+    critical: selectedAlerts.filter((alert) => alert.severity === "critical").length,
+  }), [selectedAlerts]);
+
   const epochSeries = useMemo(() => [...adaptiveEpochs].reverse(), [adaptiveEpochs]);
 
   return (
@@ -274,6 +550,9 @@ export function BenchmarksDashboard({
               <MetricCard label="Latest Throughput" value={summary ? `${formatNumber(summary.jobsPerMinute, 1)} jobs/min` : "n/a"} />
               <MetricCard label="Best Throughput" value={`${formatNumber(bestThroughput, 1)} jobs/min`} />
               <MetricCard label="Best Queue Delta" value={formatNumber(bestQueueDelta)} />
+              <MetricCard label="Open Critical Alerts" value={formatNumber(globalAlertSummary?.openCritical ?? 0)} />
+              <MetricCard label="Open Warning Alerts" value={formatNumber(globalAlertSummary?.openWarning ?? 0)} />
+              <MetricCard label="Resolved (24h)" value={formatNumber(globalAlertSummary?.resolvedLast24h ?? 0)} />
             </div>
           </div>
           <div className="heroAsideCard">
@@ -293,6 +572,17 @@ export function BenchmarksDashboard({
             <div className="heroChecklistItem">
               <strong>Campaign Validation</strong>
               <span>Need broader proof? Use <a href="/campaigns">Campaigns</a> for multi-fraternity long-run tests.</span>
+            </div>
+            <div className="buttonRow">
+              <button
+                type="button"
+                className="buttonSecondary"
+                onClick={() => void handleScanAllAlerts()}
+                disabled={isScanningAllAlerts}
+              >
+                {isScanningAllAlerts ? "Scanning all..." : "Scan All Benchmarks"}
+              </button>
+              <span className="cellHint">{globalAlertSummary ? `Updated ${formatTimestamp(globalAlertSummary.lastUpdatedAt)}` : "Alert summary loading..."}</span>
             </div>
           </div>
         </div>
@@ -385,6 +675,41 @@ export function BenchmarksDashboard({
                 onChange={(event) => setForm((current) => ({ ...current, pauseMs: Number(event.target.value) || 0 }))}
               />
             </div>
+            <div className="fieldStack">
+              <label htmlFor="benchmark-field-runtime">Field-Job Runtime</label>
+              <select
+                id="benchmark-field-runtime"
+                value={form.fieldJobRuntimeMode}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    fieldJobRuntimeMode: event.target.value as "legacy" | "langgraph_shadow" | "langgraph_primary"
+                  }))
+                }
+              >
+                <option value="legacy">legacy</option>
+                <option value="langgraph_shadow">langgraph_shadow</option>
+                <option value="langgraph_primary">langgraph_primary</option>
+              </select>
+            </div>
+
+            <div className="fieldStack">
+              <label htmlFor="benchmark-field-durability">Graph Durability</label>
+              <select
+                id="benchmark-field-durability"
+                value={form.fieldJobGraphDurability}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    fieldJobGraphDurability: event.target.value as "exit" | "async" | "sync"
+                  }))
+                }
+              >
+                <option value="sync">sync</option>
+                <option value="async">async</option>
+                <option value="exit">exit</option>
+              </select>
+            </div>
           </div>
 
           <div className="buttonRow">
@@ -440,6 +765,14 @@ export function BenchmarksDashboard({
                   <p className="muted">{FIELD_LABELS[selectedBenchmark.fieldName]} benchmark {selectedBenchmark.sourceSlug ? `for ${selectedBenchmark.sourceSlug}` : "across all sources"}</p>
                 </div>
                 <StatusPill status={selectedBenchmark.status} />
+              </div>
+              <div className="buttonRow">
+                <a className="buttonSecondary" href={`/api/benchmarks/${selectedBenchmark.id}/export?format=json`} target="_blank" rel="noreferrer">
+                  Export JSON Report
+                </a>
+                <a className="buttonSecondary" href={`/api/benchmarks/${selectedBenchmark.id}/export?format=md`} target="_blank" rel="noreferrer">
+                  Export Markdown Report
+                </a>
               </div>
 
               <div className="benchmarkMetaGrid">
@@ -555,6 +888,207 @@ export function BenchmarksDashboard({
                       </div>
                     </div>
                   </div>
+                </>
+              )}
+
+              <h3>LangGraph Cutover Gates</h3>
+              {gateReport ? (
+                <>
+                  <p className="muted">Baseline: {baselineBenchmark?.name ?? "n/a"}</p>
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Gate</th>
+                          <th>Value</th>
+                          <th>Target</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gateReport.checks.map((check) => (
+                          <tr key={check.label}>
+                            <td>{check.label}</td>
+                            <td>{check.value}</td>
+                            <td>{check.target}</td>
+                            <td><strong>{check.passed ? "pass" : "fail"}</strong></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <p className="muted">Need at least one succeeded legacy benchmark with the same field/source scope to evaluate cutover gates.</p>
+              )}
+
+              <h3>Drift Alerts</h3>
+              <div className="buttonRow">
+                <select
+                  value={alertSeverityFilter}
+                  onChange={(event) => setAlertSeverityFilter(event.target.value as "info" | "warning" | "critical" | "all")}
+                >
+                  <option value="all">All severities</option>
+                  <option value="critical">Critical</option>
+                  <option value="warning">Warning</option>
+                  <option value="info">Info</option>
+                </select>
+                <select
+                  value={alertStatusFilter}
+                  onChange={(event) => setAlertStatusFilter(event.target.value as "open" | "resolved" | "all")}
+                >
+                  <option value="open">Open only</option>
+                  <option value="resolved">Resolved only</option>
+                  <option value="all">Open + Resolved</option>
+                </select>
+                <button type="button" className="buttonSecondary" onClick={() => void handleScanAlerts()} disabled={isScanningAlerts}>
+                  {isScanningAlerts ? "Scanning..." : "Run Drift Scan"}
+                </button>
+              </div>
+              <p className="muted">
+                Alerts in view: {selectedAlerts.length} (critical {alertSummary.critical}, warning {alertSummary.warning}, info {alertSummary.info})
+              </p>
+              {alertScanResult ? (
+                <p className="muted">
+                  Last scan: {formatTimestamp(alertScanResult.finishedAt)}. Considered {alertScanResult.consideredRuns} runs, opened {alertScanResult.alertsCreated}, resolved {alertScanResult.alertsResolved}.
+                </p>
+              ) : null}
+              {selectedAlerts.length === 0 ? (
+                <p className="muted">No alerts for the selected filters.</p>
+              ) : (
+                <div className="tableWrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Severity</th>
+                        <th>Status</th>
+                        <th>Type</th>
+                        <th>Message</th>
+                        <th>Created</th>
+                        <th>Resolved</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedAlerts.map((alert) => {
+                        const payload = alert.payload ?? {};
+                        const resolvedByScanAt =
+                          typeof payload.resolvedByScanAt === "string"
+                            ? payload.resolvedByScanAt
+                            : null;
+                        return (
+                          <tr key={alert.id}>
+                            <td>{alert.severity}</td>
+                            <td>{alert.status}</td>
+                            <td>{alert.alertType}</td>
+                            <td>{alert.message}</td>
+                            <td>{formatTimestamp(alert.createdAt)}</td>
+                            <td>{formatTimestamp(alert.resolvedAt ?? resolvedByScanAt)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <h3>Shadow Diff Artifacts</h3>
+              {shadowDiffs.length === 0 ? (
+                <p className="muted">No shadow diff artifacts captured for this benchmark yet.</p>
+              ) : (
+                <div className="tableWrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Cycle</th>
+                        <th>Observed Jobs</th>
+                        <th>Decision Mismatch</th>
+                        <th>Status Mismatch</th>
+                        <th>Mismatch Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shadowDiffs.map((row) => (
+                        <tr key={`${row.id}-${row.cycle}`}>
+                          <td>{row.cycle}</td>
+                          <td>{row.observedJobs}</td>
+                          <td>{row.decisionMismatchCount}</td>
+                          <td>{row.statusMismatchCount}</td>
+                          <td>{formatPercent(row.mismatchRate, 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <h3>Field-Job Graph Timeline</h3>
+              {graphRuns.length === 0 ? (
+                <p className="muted">No field-job graph runs found for this benchmark scope.</p>
+              ) : (
+                <>
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Run ID</th>
+                          <th>Runtime</th>
+                          <th>Status</th>
+                          <th>Worker</th>
+                          <th>Events</th>
+                          <th>Decisions</th>
+                          <th>Created</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {graphRuns.slice(0, 8).map((row) => (
+                          <tr key={row.id}>
+                            <td>
+                              <button type="button" className="buttonLink" onClick={() => {
+                                void fetchGraphRunDetail(row.id)
+                                  .then((detail) => setSelectedGraphRun(detail))
+                                  .catch((error) => setErrorMessage(error instanceof Error ? error.message : String(error)));
+                              }}>
+                                {row.id}
+                              </button>
+                            </td>
+                            <td>{row.runtimeMode}</td>
+                            <td>{row.status}</td>
+                            <td>{row.workerId}</td>
+                            <td>{row.eventCount}</td>
+                            <td>{row.decisionCount}</td>
+                            <td>{formatTimestamp(row.createdAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {selectedGraphRun ? (
+                    <div className="tableWrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Node</th>
+                            <th>Phase</th>
+                            <th>Status</th>
+                            <th>Latency (ms)</th>
+                            <th>Job</th>
+                            <th>At</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedGraphRun.events.slice(0, 20).map((event) => (
+                            <tr key={event.id}>
+                              <td>{event.nodeName}</td>
+                              <td>{event.phase}</td>
+                              <td>{event.status}</td>
+                              <td>{event.latencyMs}</td>
+                              <td>{event.jobId ?? "n/a"}</td>
+                              <td>{formatTimestamp(event.createdAt)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
                 </>
               )}
 
@@ -676,6 +1210,53 @@ export function BenchmarksDashboard({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

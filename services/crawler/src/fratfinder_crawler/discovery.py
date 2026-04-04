@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Protocol
 from urllib.parse import urlparse
 import re
+import unicodedata
 
 from fratfinder_crawler.models import ExistingSourceCandidate, VerifiedSourceRecord
 from fratfinder_crawler.search import SearchClient, SearchResult
@@ -47,22 +48,43 @@ _DIRECTORY_MARKERS = (
 
 _FRATERNITY_ALIASES = {
     "phi-gamma-delta": ("fiji",),
+    "pi-kappa-alpha": ("pike", "pka"),
+    "tau-kappa-epsilon": ("tke", "tekes"),
+    "sigma-alpha-epsilon": ("sae",),
+    "sigma-phi-epsilon": ("sigep",),
+    "alpha-tau-omega": ("ato",),
+    "kappa-sigma": ("ksig",),
 }
 
 _ALIAS_CANONICALS = {
     "fiji": ("phi-gamma-delta", "Phi Gamma Delta"),
+    "pike": ("pi-kappa-alpha", "Pi Kappa Alpha"),
+    "pka": ("pi-kappa-alpha", "Pi Kappa Alpha"),
+    "pikappaalpha": ("pi-kappa-alpha", "Pi Kappa Alpha"),
+    "tke": ("tau-kappa-epsilon", "Tau Kappa Epsilon"),
+    "tekes": ("tau-kappa-epsilon", "Tau Kappa Epsilon"),
+    "taukappaepsilon": ("tau-kappa-epsilon", "Tau Kappa Epsilon"),
+    "sae": ("sigma-alpha-epsilon", "Sigma Alpha Epsilon"),
+    "sigep": ("sigma-phi-epsilon", "Sigma Phi Epsilon"),
+    "ato": ("alpha-tau-omega", "Alpha Tau Omega"),
+    "ksig": ("kappa-sigma", "Kappa Sigma"),
 }
 
 _FRATERNITY_HOST_HINTS = {
     "phi-gamma-delta": ("phigam.org",),
     "sigma-chi": ("sigmachi.org",),
     "alpha-tau-omega": ("ato.org",),
+    "pi-kappa-alpha": ("pikes.org", "pikapp.org"),
+    "tau-kappa-epsilon": ("tke.org",),
+    "kappa-sigma": ("kappasigma.org",),
 }
 
 _FRATERNITY_SOURCE_HINTS = {
     "phi-gamma-delta": "https://phigam.org/about/overview/our-chapters/",
     "sigma-chi": "https://sigmachi.org/chapters/",
     "alpha-tau-omega": "https://ato.org/home-2/ato-map/",
+    "pi-kappa-alpha": "https://pikes.org/chapters/",
+    "tau-kappa-epsilon": "https://www.tke.org/chapters",
 }
 
 _FRATERNITY_CONTEXT_MARKERS = (
@@ -159,6 +181,75 @@ _GREEK_SYMBOLS = {
     "ω": "omega",
 }
 
+_ADDITIONAL_GREEK_SYMBOLS = {
+    "\u0391": "alpha",
+    "\u03b1": "alpha",
+    "\u0392": "beta",
+    "\u03b2": "beta",
+    "\u0393": "gamma",
+    "\u03b3": "gamma",
+    "\u0394": "delta",
+    "\u03b4": "delta",
+    "\u0395": "epsilon",
+    "\u03b5": "epsilon",
+    "\u0396": "zeta",
+    "\u03b6": "zeta",
+    "\u0397": "eta",
+    "\u03b7": "eta",
+    "\u0398": "theta",
+    "\u03b8": "theta",
+    "\u0399": "iota",
+    "\u03b9": "iota",
+    "\u039a": "kappa",
+    "\u03ba": "kappa",
+    "\u039b": "lambda",
+    "\u03bb": "lambda",
+    "\u039c": "mu",
+    "\u03bc": "mu",
+    "\u039d": "nu",
+    "\u03bd": "nu",
+    "\u039e": "xi",
+    "\u03be": "xi",
+    "\u039f": "omicron",
+    "\u03bf": "omicron",
+    "\u03a0": "pi",
+    "\u03c0": "pi",
+    "\u03a1": "rho",
+    "\u03c1": "rho",
+    "\u03a3": "sigma",
+    "\u03c3": "sigma",
+    "\u03c2": "sigma",
+    "\u03a4": "tau",
+    "\u03c4": "tau",
+    "\u03a5": "upsilon",
+    "\u03c5": "upsilon",
+    "\u03a6": "phi",
+    "\u03c6": "phi",
+    "\u03a7": "chi",
+    "\u03c7": "chi",
+    "\u03a8": "psi",
+    "\u03c8": "psi",
+    "\u03a9": "omega",
+    "\u03c9": "omega",
+}
+
+_ADDITIONAL_GREEK_SYMBOLS = {
+    "\u00ce\u0091": "alpha",
+    "\u00ce\u00b1": "alpha",
+    "\u00ce\u00a0": "pi",
+    "\u00cf\u0080": "pi",
+    "\u00ce\u00a4": "tau",
+    "\u00cf\u0084": "tau",
+    "\u00ce\u009a": "kappa",
+    "\u00ce\u00ba": "kappa",
+    "\u00ce\u0095": "epsilon",
+    "\u00ce\u00b5": "epsilon",
+    "\u00ce\u00a7": "chi",
+    "\u00cf\u0087": "chi",
+    "\u00ce\u00a8": "psi",
+    "\u00cf\u0088": "psi",
+}
+
 
 class DiscoveryRepository(Protocol):
     def get_verified_source_by_slug(self, fraternity_slug: str) -> VerifiedSourceRecord | None:
@@ -167,10 +258,15 @@ class DiscoveryRepository(Protocol):
     def get_existing_source_candidates(self, fraternity_slug: str) -> list[ExistingSourceCandidate]:
         ...
 
+    def list_verified_sources(self, limit: int = 200) -> list[VerifiedSourceRecord]:
+        ...
+
 
 def _replace_greek_symbols(value: str) -> str:
-    translated = value
+    translated = unicodedata.normalize("NFKC", value)
     for symbol, replacement in _GREEK_SYMBOLS.items():
+        translated = translated.replace(symbol, f" {replacement} ")
+    for symbol, replacement in _ADDITIONAL_GREEK_SYMBOLS.items():
         translated = translated.replace(symbol, f" {replacement} ")
     return translated
 
@@ -219,8 +315,80 @@ def _contains_phrase(text: str, phrase: str) -> bool:
     return bool(normalized_phrase and normalized_phrase in normalized_text)
 
 
+def _fraternity_acronym(fraternity_name: str) -> str:
+    tokens = _display_tokens(fraternity_name)
+    return "".join(token[0] for token in tokens if token)
+
+
+def _resolve_alias_from_repository(
+    fraternity_name: str,
+    fraternity_slug: str,
+    repository: DiscoveryRepository | None,
+    trace: list[dict[str, Any]],
+) -> tuple[str, str]:
+    if repository is None:
+        return fraternity_name, fraternity_slug
+
+    list_fn = getattr(repository, "list_verified_sources", None)
+    if not callable(list_fn):
+        return fraternity_name, fraternity_slug
+
+    target_compact = _compact(fraternity_name)
+    target_tokens = set(_display_tokens(fraternity_name))
+    target_acronym = _fraternity_acronym(fraternity_name)
+    if not target_compact:
+        return fraternity_name, fraternity_slug
+
+    try:
+        verified_sources = list_fn(limit=250)
+    except Exception as exc:  # pragma: no cover - defensive repository path
+        trace.append({"step": "repository_alias_resolution_failed", "error": str(exc)})
+        return fraternity_name, fraternity_slug
+
+    best_score = 0
+    best_match: VerifiedSourceRecord | None = None
+    for candidate in verified_sources:
+        candidate_name = str(candidate.fraternity_name or "").strip()
+        candidate_slug = str(candidate.fraternity_slug or "").strip()
+        if not candidate_name or not candidate_slug:
+            continue
+
+        candidate_compact = _compact(candidate_name)
+        candidate_slug_compact = _compact(candidate_slug)
+        candidate_tokens = set(_display_tokens(candidate_name))
+        candidate_acronym = _fraternity_acronym(candidate_name)
+
+        score = 0
+        if target_compact == candidate_compact or target_compact == candidate_slug_compact:
+            score += 6
+        overlap = len(target_tokens.intersection(candidate_tokens))
+        if overlap > 0:
+            score += overlap
+        if target_acronym and target_acronym == candidate_acronym:
+            score += 4
+
+        if score > best_score:
+            best_score = score
+            best_match = candidate
+
+    if best_match is None or best_match.fraternity_slug == fraternity_slug or best_score < 4:
+        return fraternity_name, fraternity_slug
+
+    trace.append(
+        {
+            "step": "alias_resolution",
+            "alias": fraternity_name,
+            "canonical_name": best_match.fraternity_name,
+            "canonical_slug": best_match.fraternity_slug,
+            "reason": "repository_alias_match",
+            "score": best_score,
+        }
+    )
+    return best_match.fraternity_name, best_match.fraternity_slug
+
+
 def _normalize_fraternity_identity(fraternity_name: str) -> tuple[str, str, list[dict[str, str]]]:
-    trimmed = fraternity_name.strip()
+    trimmed = _replace_greek_symbols(fraternity_name).strip()
     slug = _slugify(trimmed)
     trace: list[dict[str, str]] = [
         {
@@ -228,6 +396,7 @@ def _normalize_fraternity_identity(fraternity_name: str) -> tuple[str, str, list
             "input_name": fraternity_name,
             "normalized_name": trimmed,
             "normalized_slug": slug,
+            "acronym": _fraternity_acronym(trimmed),
         }
     ]
 
@@ -257,6 +426,10 @@ def _name_variants(fraternity_name: str, fraternity_slug: str) -> list[str]:
     if ampersand != fraternity_name:
         variants.append(ampersand)
 
+    acronym = _fraternity_acronym(fraternity_name)
+    if acronym:
+        variants.append(acronym.upper())
+
     if fraternity_slug in _FRATERNITY_ALIASES:
         variants.extend(_FRATERNITY_ALIASES[fraternity_slug])
 
@@ -285,6 +458,22 @@ class DiscoveryCandidate:
 
 
 @dataclass(slots=True)
+class DiscoverySourceQuality:
+    score: float
+    is_weak: bool
+    is_blocked: bool
+    reasons: list[str]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "score": self.score,
+            "is_weak": self.is_weak,
+            "is_blocked": self.is_blocked,
+            "reasons": self.reasons,
+        }
+
+
+@dataclass(slots=True)
 class DiscoveryResult:
     fraternity_name: str
     fraternity_slug: str
@@ -294,6 +483,8 @@ class DiscoveryResult:
     candidates: list[DiscoveryCandidate]
     source_provenance: str | None
     fallback_reason: str | None
+    source_quality: DiscoverySourceQuality | None
+    selected_candidate_rationale: str | None
     resolution_trace: list[dict[str, Any]]
 
     def as_dict(self) -> dict:
@@ -306,6 +497,8 @@ class DiscoveryResult:
             "candidates": [asdict(candidate) for candidate in self.candidates],
             "source_provenance": self.source_provenance,
             "fallback_reason": self.fallback_reason,
+            "source_quality": self.source_quality.as_dict() if self.source_quality else None,
+            "selected_candidate_rationale": self.selected_candidate_rationale,
             "resolution_trace": self.resolution_trace,
         }
 
@@ -482,6 +675,65 @@ def _choose_existing_candidate(candidates: list[ExistingSourceCandidate]) -> Exi
     return ranked[0]
 
 
+
+def _source_quality_from_url(url: str | None) -> DiscoverySourceQuality:
+    if not url:
+        return DiscoverySourceQuality(score=0.0, is_weak=True, is_blocked=False, reasons=["missing_url"])
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return DiscoverySourceQuality(score=0.0, is_weak=True, is_blocked=False, reasons=["invalid_url"])
+
+    host = (parsed.netloc or "").lower().strip(".")
+    path = (parsed.path or "").lower()
+    reasons: list[str] = []
+    score = 0.56
+
+    if parsed.scheme not in {"http", "https"}:
+        reasons.append("non_http_url")
+        score -= 0.4
+
+    is_blocked = _host_is_blocked(host)
+    if is_blocked:
+        reasons.append("blocked_host")
+        score -= 0.72
+
+    if any(marker in path for marker in _DIRECTORY_MARKERS):
+        reasons.append("directory_path")
+        score += 0.24
+
+    weak_markers = [marker for marker in _WEAK_SOURCE_PATH_MARKERS if marker in path]
+    if weak_markers:
+        reasons.append("weak_path")
+        score -= min(0.45, 0.18 * len(weak_markers))
+
+    if path.strip("/") == "":
+        reasons.append("generic_root_path")
+        score -= 0.08
+
+    score = max(0.0, min(1.0, score))
+    return DiscoverySourceQuality(
+        score=round(score, 4),
+        is_weak=is_blocked or score < 0.4 or "weak_path" in reasons,
+        is_blocked=is_blocked,
+        reasons=reasons,
+    )
+
+
+def _search_candidate_is_runnable(candidate: DiscoveryCandidate) -> tuple[bool, DiscoverySourceQuality, list[str]]:
+    quality = _source_quality_from_url(candidate.url)
+    reasons = list(quality.reasons)
+    combined = f"{candidate.title} {candidate.snippet}".lower()
+    if any(marker in combined for marker in _NON_ORG_CONTEXT_MARKERS):
+        reasons.append("non_org_context")
+    if "alumni" in combined and "international" not in combined and "headquarters" not in combined:
+        reasons.append("noisy_alumni_context")
+    if candidate.score < 0.5:
+        reasons.append("low_candidate_score")
+    runnable = not quality.is_weak and "non_org_context" not in reasons and "noisy_alumni_context" not in reasons
+    return runnable, quality, reasons
+
 def _build_search_queries(fraternity_name: str, fraternity_slug: str) -> list[str]:
     variants = _name_variants(fraternity_name, fraternity_slug)
     queries: list[str] = []
@@ -575,6 +827,8 @@ def _evaluate_existing_source_candidate(
         context_hits += 1
     if any(marker in combined for marker in _NON_ORG_CONTEXT_MARKERS):
         reasons.append("non_org_context")
+    if "alumni" in combined and "international" not in combined and "headquarters" not in combined:
+        reasons.append("noisy_alumni_context")
     if context_hits == 0:
         reasons.append("missing_fraternity_context")
 
@@ -603,6 +857,7 @@ def discover_source(
     verified_min_confidence: float = 0.65,
 ) -> DiscoveryResult:
     normalized_name, slug, trace = _normalize_fraternity_identity(fraternity_name)
+    normalized_name, slug = _resolve_alias_from_repository(normalized_name, slug, repository, trace)
 
     if not normalized_name:
         return DiscoveryResult(
@@ -614,6 +869,8 @@ def discover_source(
             candidates=[],
             source_provenance=None,
             fallback_reason="empty_fraternity_name",
+            source_quality=_source_quality_from_url(None),
+            selected_candidate_rationale=None,
             resolution_trace=trace,
         )
 
@@ -621,6 +878,8 @@ def discover_source(
     selected_confidence = 0.0
     source_provenance: str | None = None
     fallback_reason: str | None = None
+    source_quality: DiscoverySourceQuality | None = None
+    selected_candidate_rationale: str | None = None
     registry_candidate: VerifiedSourceRecord | None = None
     existing_candidate: ExistingSourceCandidate | None = None
     synthetic_candidates: list[DiscoveryCandidate] = []
@@ -694,6 +953,8 @@ def discover_source(
         selected_url = registry_candidate.national_url
         selected_confidence = registry_candidate.confidence
         source_provenance = "verified_registry"
+        source_quality = _source_quality_from_url(selected_url)
+        selected_candidate_rationale = "verified_registry_healthy"
         trace.append(
             {
                 "step": "selected_verified_registry_candidate",
@@ -717,6 +978,8 @@ def discover_source(
             selected_url = existing_candidate.list_url
             selected_confidence = existing_candidate.confidence
             source_provenance = "existing_source"
+            source_quality = _source_quality_from_url(selected_url)
+            selected_candidate_rationale = "existing_source_candidate"
             trace.append(
                 {
                     "step": "selected_existing_source_candidate",
@@ -747,6 +1010,8 @@ def discover_source(
             selected_url = existing_candidate.list_url
             selected_confidence = existing_candidate.confidence
             source_provenance = "existing_source"
+            source_quality = _source_quality_from_url(selected_url)
+            selected_candidate_rationale = "existing_source_newer_and_healthier"
             fallback_reason = "registry_disagreed_preferred_existing_source"
             trace.append(
                 {
@@ -772,8 +1037,25 @@ def discover_source(
         queries = _build_search_queries(normalized_name, slug)
         raw_results: list[SearchResult] = []
         for query in queries:
-            results = search_client.search(query, max_results=max_candidates)
-            raw_results.extend(results)
+            try:
+                results = search_client.search(query, max_results=max_candidates)
+                raw_results.extend(results)
+            except Exception as exc:
+                provider_attempts: list[dict[str, Any]] = []
+                consume_attempts = getattr(search_client, "consume_last_provider_attempts", None)
+                if callable(consume_attempts):
+                    try:
+                        provider_attempts = list(consume_attempts())
+                    except Exception:
+                        provider_attempts = []
+                trace.append(
+                    {
+                        "step": "search_query_error",
+                        "query": query,
+                        "error": str(exc),
+                        "provider_attempts": provider_attempts,
+                    }
+                )
 
         deduped: dict[str, SearchResult] = {}
         for result in raw_results:
@@ -792,64 +1074,114 @@ def discover_source(
                     score=_score_candidate(normalized_name, slug, result),
                 )
             )
-
         search_candidates.sort(key=lambda item: (item.score, -item.rank, item.url), reverse=True)
-        if search_candidates and search_candidates[0].score >= 0.6:
+        if search_candidates:
+            selected_search_candidate: DiscoveryCandidate | None = None
+            selected_search_quality: DiscoverySourceQuality | None = None
+            rejected_candidates: list[dict[str, Any]] = []
             top_candidate = search_candidates[0]
-            top_parsed = urlparse(top_candidate.url)
-            top_combined = f"{(top_candidate.title or '').lower()} {(top_candidate.snippet or '').lower()} {(top_parsed.path or '').lower()}"
-            trusted_host_hints = _FRATERNITY_HOST_HINTS.get(slug, ())
-            hinted_source = _FRATERNITY_SOURCE_HINTS.get(slug)
-            top_matches_trusted_host = _host_matches_any_hint((top_parsed.netloc or "").lower(), trusted_host_hints)
-            top_is_noisy = any(marker in top_combined for marker in ("alumni chapter", "alumni association", "alumni club", "alumni")) or (
-                (top_parsed.path or "").lower().endswith(".pdf")
-            )
-            top_has_directory_signal = _text_has_directory_signal(top_candidate.title or "", top_candidate.snippet or "", top_parsed.path or "")
-            hinted_path = (urlparse(hinted_source).path or "").lower() if hinted_source else ""
-            hinted_has_directory_signal = _text_has_directory_signal(hinted_path)
-            should_use_hinted_directory = bool(
-                hinted_source
-                and hinted_has_directory_signal
-                and top_matches_trusted_host
-                and not top_has_directory_signal
-            )
 
-            if hinted_source and ((top_is_noisy and not top_matches_trusted_host) or should_use_hinted_directory):
-                selected_url = hinted_source
-                selected_confidence = max(top_candidate.score, 0.7)
-                source_provenance = "search"
-                fallback_reason = fallback_reason or (
-                    "used_curated_source_hint_over_noisy_search"
-                    if top_is_noisy and not top_matches_trusted_host
-                    else "used_curated_source_hint_over_generic_same_host_page"
-                )
-                trace.append(
+            for candidate in search_candidates:
+                runnable, candidate_quality, candidate_reasons = _search_candidate_is_runnable(candidate)
+                if runnable and candidate.score >= 0.6:
+                    selected_search_candidate = candidate
+                    selected_search_quality = candidate_quality
+                    break
+                rejected_candidates.append(
                     {
-                        "step": (
-                            "selected_curated_source_hint_over_noisy_search"
-                            if top_is_noisy and not top_matches_trusted_host
-                            else "selected_curated_source_hint_over_generic_same_host_page"
-                        ),
-                        "hinted_url": hinted_source,
-                        "rejected_url": top_candidate.url,
-                        "rejected_score": top_candidate.score,
+                        "url": candidate.url,
+                        "provider": candidate.provider,
+                        "score": candidate.score,
+                        "reasons": candidate_reasons,
+                        "quality": candidate_quality.as_dict(),
                     }
                 )
+
+            if rejected_candidates:
+                trace.append({"step": "rejected_search_candidates", "rejected": rejected_candidates})
+
+            if selected_search_candidate is not None:
+                hinted_source = _FRATERNITY_SOURCE_HINTS.get(slug)
+                hinted_quality = _source_quality_from_url(hinted_source) if hinted_source else _source_quality_from_url(None)
+                selected_parsed = urlparse(selected_search_candidate.url)
+                selected_has_directory_signal = _text_has_directory_signal(
+                    selected_search_candidate.title,
+                    selected_search_candidate.snippet,
+                    selected_parsed.path,
+                )
+                hinted_path = (urlparse(hinted_source).path or "").lower() if hinted_source else ""
+                hinted_has_directory_signal = _text_has_directory_signal(hinted_path)
+                selected_matches_hinted_host = bool(
+                    hinted_source and _host_matches_hint((selected_parsed.netloc or "").lower(), (urlparse(hinted_source).netloc or "").lower())
+                )
+
+                if hinted_source and not hinted_quality.is_weak and selected_matches_hinted_host and not selected_has_directory_signal and hinted_has_directory_signal:
+                    selected_url = hinted_source
+                    selected_confidence = max(selected_search_candidate.score, 0.7)
+                    source_provenance = "search"
+                    source_quality = hinted_quality
+                    selected_candidate_rationale = "curated_hint_over_generic_same_host_page"
+                    fallback_reason = fallback_reason or "used_curated_source_hint_over_generic_same_host_page"
+                    trace.append(
+                        {
+                            "step": "selected_curated_source_hint_over_generic_same_host_page",
+                            "hinted_url": hinted_source,
+                            "rejected_url": selected_search_candidate.url,
+                            "rejected_score": selected_search_candidate.score,
+                        }
+                    )
+                else:
+                    selected_url = selected_search_candidate.url
+                    selected_confidence = selected_search_candidate.score
+                    source_provenance = "search"
+                    source_quality = selected_search_quality
+                    if selected_search_candidate.url != top_candidate.url:
+                        selected_candidate_rationale = "promoted_safe_candidate_over_top_rejected"
+                        fallback_reason = fallback_reason or "promoted_non_blocked_candidate"
+                    else:
+                        selected_candidate_rationale = "selected_search_candidate"
+                    trace.append(
+                        {
+                            "step": "selected_search_candidate",
+                            "url": selected_url,
+                            "score": selected_confidence,
+                            "provider": selected_search_candidate.provider,
+                            "rationale": selected_candidate_rationale,
+                        }
+                    )
             else:
-                selected_url = top_candidate.url
-                selected_confidence = top_candidate.score
-                source_provenance = "search"
-                trace.append(
-                    {
-                        "step": "selected_search_candidate",
-                        "url": selected_url,
-                        "score": selected_confidence,
-                        "provider": top_candidate.provider,
-                    }
-                )
+                hinted_source = _FRATERNITY_SOURCE_HINTS.get(slug)
+                hinted_quality = _source_quality_from_url(hinted_source) if hinted_source else _source_quality_from_url(None)
+                if hinted_source and not hinted_quality.is_weak:
+                    hinted_candidate = DiscoveryCandidate(
+                        title=f"{normalized_name} Official Chapter Directory",
+                        url=hinted_source,
+                        snippet="Curated official source hint for fraternity chapter discovery.",
+                        provider="curated_hint",
+                        rank=1,
+                        score=0.85,
+                    )
+                    search_candidates.insert(0, hinted_candidate)
+                    selected_url = hinted_source
+                    selected_confidence = hinted_candidate.score
+                    source_provenance = "search"
+                    source_quality = hinted_quality
+                    selected_candidate_rationale = "curated_hint_safe_fallback"
+                    fallback_reason = fallback_reason or "used_curated_source_hint_after_search"
+                    noisy_rejected = any("noisy_alumni_context" in (entry.get("reasons") or []) for entry in rejected_candidates)
+                    trace.append(
+                        {
+                            "step": "selected_curated_source_hint_over_noisy_search" if noisy_rejected else "selected_curated_hint",
+                            "url": selected_url,
+                            "score": selected_confidence,
+                        }
+                    )
+                else:
+                    fallback_reason = fallback_reason or "no_safe_candidate"
         else:
             hinted_source = _FRATERNITY_SOURCE_HINTS.get(slug)
-            if hinted_source:
+            hinted_quality = _source_quality_from_url(hinted_source) if hinted_source else _source_quality_from_url(None)
+            if hinted_source and not hinted_quality.is_weak:
                 hinted_candidate = DiscoveryCandidate(
                     title=f"{normalized_name} Official Chapter Directory",
                     url=hinted_source,
@@ -862,6 +1194,8 @@ def discover_source(
                 selected_url = hinted_source
                 selected_confidence = hinted_candidate.score
                 source_provenance = "search"
+                source_quality = hinted_quality
+                selected_candidate_rationale = "curated_hint_safe_fallback"
                 fallback_reason = fallback_reason or "used_curated_source_hint_after_search"
                 trace.append(
                     {
@@ -871,6 +1205,7 @@ def discover_source(
                     }
                 )
             else:
+                fallback_reason = fallback_reason or "no_safe_candidate"
                 trace.append({"step": "search_fallback_exhausted", "queries_executed": len(queries)})
 
     combined_candidates = [*synthetic_candidates, *search_candidates]
@@ -885,6 +1220,28 @@ def discover_source(
         if len(deduped_candidates) >= max_candidates:
             break
 
+    if selected_url is not None:
+        selected_quality = source_quality or _source_quality_from_url(selected_url)
+        if selected_quality.is_weak:
+            trace.append(
+                {
+                    "step": "final_source_quality_gate_rejected",
+                    "url": selected_url,
+                    "reasons": selected_quality.reasons,
+                }
+            )
+            fallback_reason = fallback_reason or "no_safe_candidate"
+            selected_url = None
+            selected_confidence = 0.0
+            source_provenance = None
+            selected_candidate_rationale = None
+            source_quality = selected_quality
+        else:
+            source_quality = selected_quality
+
+    if selected_url is None and source_quality is None:
+        source_quality = _source_quality_from_url(None)
+
     return DiscoveryResult(
         fraternity_name=normalized_name,
         fraternity_slug=slug,
@@ -894,6 +1251,8 @@ def discover_source(
         candidates=deduped_candidates,
         source_provenance=source_provenance,
         fallback_reason=fallback_reason,
+        source_quality=source_quality,
+        selected_candidate_rationale=selected_candidate_rationale,
         resolution_trace=trace,
     )
 

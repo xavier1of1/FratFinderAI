@@ -51,6 +51,25 @@ const STATE_GRID: Record<string, { row: number; column: number }> = {
 };
 
 const STATE_CODES = Object.keys(STATE_GRID).sort();
+const STATE_NAME_TO_CODE: Record<string, string> = {
+  ALABAMA: "AL", ALASKA: "AK", ARIZONA: "AZ", ARKANSAS: "AR", CALIFORNIA: "CA", COLORADO: "CO", CONNECTICUT: "CT", DELAWARE: "DE", "DISTRICT OF COLUMBIA": "DC",
+  FLORIDA: "FL", GEORGIA: "GA", HAWAII: "HI", IDAHO: "ID", ILLINOIS: "IL", INDIANA: "IN", IOWA: "IA", KANSAS: "KS", KENTUCKY: "KY", LOUISIANA: "LA",
+  MAINE: "ME", MARYLAND: "MD", MASSACHUSETTS: "MA", MICHIGAN: "MI", MINNESOTA: "MN", MISSISSIPPI: "MS", MISSOURI: "MO", MONTANA: "MT", NEBRASKA: "NE", NEVADA: "NV",
+  "NEW HAMPSHIRE": "NH", "NEW JERSEY": "NJ", "NEW MEXICO": "NM", "NEW YORK": "NY", "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", OHIO: "OH", OKLAHOMA: "OK", OREGON: "OR", PENNSYLVANIA: "PA",
+  "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD", TENNESSEE: "TN", TEXAS: "TX", UTAH: "UT", VERMONT: "VT", VIRGINIA: "VA", WASHINGTON: "WA", "WEST VIRGINIA": "WV",
+  WISCONSIN: "WI", WYOMING: "WY"
+};
+
+function normalizeStateCode(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toUpperCase();
+  if (STATE_CODES.includes(normalized)) {
+    return normalized;
+  }
+  return STATE_NAME_TO_CODE[normalized] ?? null;
+}
 const DEFAULT_RERUN_FIELDS: ChapterFieldName[] = ["find_website", "find_email", "find_instagram"];
 const MAX_VISIBLE_STATE_DOTS = 24;
 
@@ -105,12 +124,21 @@ async function unwrapResponse<T>(response: Response): Promise<T> {
 
 export function ChaptersDashboard({
   chapters: initialChapters,
-  mapSummary
+  mapSummary,
+  totalChapterCount: initialTotalChapterCount,
+  fraternityOptions: initialFraternityOptions,
+  stateOptions: initialStateOptions,
+  statusOptions: initialStatusOptions
 }: {
   chapters: ChapterListItem[];
   mapSummary: ChapterMapStateSummary[];
+  totalChapterCount: number;
+  fraternityOptions: string[];
+  stateOptions: string[];
+  statusOptions: string[];
 }) {
   const [chapters, setChapters] = useState<ChapterListItem[]>(initialChapters);
+  const [totalChapterCount, setTotalChapterCount] = useState<number>(Math.max(initialTotalChapterCount, initialChapters.length));
   const [nameFilter, setNameFilter] = useState("");
   const [fraternityFilter, setFraternityFilter] = useState("all");
   const [universityFilter, setUniversityFilter] = useState("");
@@ -126,9 +154,24 @@ export function ChaptersDashboard({
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const fraternityOptions = useMemo(() => Array.from(new Set(chapters.map((chapter) => chapter.fraternitySlug))).sort(), [chapters]);
-  const statusOptions = useMemo(() => Array.from(new Set(chapters.map((chapter) => chapter.chapterStatus))).sort(), [chapters]);
-  const stateOptions = useMemo(() => Array.from(new Set(chapters.map((chapter) => chapter.state).filter(Boolean) as string[])).sort(), [chapters]);
+  const fraternityOptions = useMemo(
+    () => Array.from(new Set([...initialFraternityOptions, ...chapters.map((chapter) => chapter.fraternitySlug)])).sort(),
+    [chapters, initialFraternityOptions]
+  );
+  const statusOptions = useMemo(
+    () => Array.from(new Set([...initialStatusOptions, ...chapters.map((chapter) => chapter.chapterStatus)])).sort(),
+    [chapters, initialStatusOptions]
+  );
+  const stateOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...initialStateOptions,
+          ...(chapters.map((chapter) => chapter.state).filter(Boolean) as string[])
+        ])
+      ).sort(),
+    [chapters, initialStateOptions]
+  );
 
   const filteredChapters = useMemo(() => {
     const normalizedName = nameFilter.trim().toLowerCase();
@@ -158,7 +201,22 @@ export function ChaptersDashboard({
     }
   }, [activeChapter?.id]);
 
-  const mapCounts = useMemo(() => new Map(mapSummary.map((item) => [item.stateCode, item.chapterCount])), [mapSummary]);
+  const mapCounts = useMemo(() => {
+    const summaryCounts = new Map(mapSummary.map((item) => [item.stateCode, item.chapterCount]));
+    const summaryTotal = Array.from(summaryCounts.values()).reduce((sum, count) => sum + Number(count || 0), 0);
+    if (summaryTotal > 0) {
+      return summaryCounts;
+    }
+    const fallback = new Map<string, number>();
+    for (const chapter of chapters) {
+      const code = normalizeStateCode(chapter.state);
+      if (!code) {
+        continue;
+      }
+      fallback.set(code, (fallback.get(code) ?? 0) + 1);
+    }
+    return fallback;
+  }, [chapters, mapSummary]);
 
   const allFilteredSelected = filteredChapters.length > 0 && filteredChapters.every((chapter) => selectedIds.includes(chapter.id));
 
@@ -223,6 +281,7 @@ export function ChaptersDashboard({
         })
       );
       setChapters((current) => current.filter((chapter) => !selectedIds.includes(chapter.id)));
+      setTotalChapterCount((current) => Math.max(0, current - result.affectedCount));
       setSelectedIds([]);
       setActionMessage(`Deleted ${result.affectedCount} chapter record(s).`);
     } catch (error) {
@@ -262,7 +321,7 @@ export function ChaptersDashboard({
         <div className="chaptersHeaderRow">
           <div>
             <h2>Chapters</h2>
-            <p className="muted mapNote">Showing {filteredChapters.length} of {chapters.length} loaded chapters.</p>
+            <p className="muted mapNote">Showing {filteredChapters.length} of {chapters.length} loaded chapters{totalChapterCount > chapters.length ? ` (${totalChapterCount} total in database)` : ""}.</p>
             <p className="muted mapNote">Map counts use normalized state data across the full chapter dataset.</p>
           </div>
           <div className="mapLegend">

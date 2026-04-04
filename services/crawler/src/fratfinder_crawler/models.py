@@ -312,3 +312,15 @@ class EpochMetric:
     slopes: dict[str, float]
     cohort_label: str = "default"
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class FieldJobDecision:
+    status: str
+    confidence: float | None = None
+    candidate_kind: str | None = None
+    candidate_value: str | None = None
+    reason_codes: list[str] = field(default_factory=list)
+    write_allowed: bool = False
+    requires_review: bool = False
+

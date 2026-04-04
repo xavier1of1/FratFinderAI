@@ -32,6 +32,14 @@ export interface ChapterMapStateSummary {
   chapterCount: number;
 }
 
+export interface ChapterListResponse {
+  items: ChapterListItem[];
+  totalCount: number;
+  fraternitySlugs: string[];
+  stateOptions: string[];
+  chapterStatuses: string[];
+}
+
 export interface CrawlRunListItem {
   id: number;
   sourceSlug: string | null;
@@ -115,6 +123,8 @@ export interface BenchmarkRunConfig {
   cycles: number;
   pauseMs: number;
   crawlRuntimeMode?: "legacy" | "adaptive_shadow" | "adaptive_assisted" | "adaptive_primary";
+  fieldJobRuntimeMode?: "legacy" | "langgraph_shadow" | "langgraph_primary";
+  fieldJobGraphDurability?: "exit" | "async" | "sync";
   runAdaptiveCrawlBeforeCycles?: boolean;
 }
 
@@ -144,6 +154,34 @@ export interface BenchmarkRunSummary {
   queueDepthDelta: number;
 }
 
+export interface BenchmarkShadowDiff {
+  id: number;
+  benchmarkRunId: string;
+  cycle: number;
+  runtimeMode: string;
+  observedJobs: number;
+  decisionMismatchCount: number;
+  statusMismatchCount: number;
+  mismatchRate: number;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface BenchmarkGateCheck {
+  label: string;
+  value: string;
+  target: string;
+  passed: boolean;
+}
+
+export interface BenchmarkGateReport {
+  benchmarkId: string;
+  benchmarkName: string;
+  baselineBenchmarkId: string | null;
+  baselineBenchmarkName: string | null;
+  checks: BenchmarkGateCheck[];
+}
+
 export interface BenchmarkRunListItem {
   id: string;
   name: string;
@@ -155,6 +193,7 @@ export interface BenchmarkRunListItem {
   config: BenchmarkRunConfig;
   summary: BenchmarkRunSummary | null;
   samples: BenchmarkCycleSample[];
+  shadowDiffs?: BenchmarkShadowDiff[];
   startedAt: string | null;
   finishedAt: string | null;
   lastError: string | null;
@@ -170,6 +209,29 @@ export interface BenchmarkQueueSnapshot {
   total: number;
 }
 
+export interface BenchmarkAlert {
+  id: number;
+  benchmarkRunId: string | null;
+  alertType: string;
+  severity: "info" | "warning" | "critical";
+  status: "open" | "resolved";
+  message: string;
+  fingerprint: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
+export interface BenchmarkAlertSummary {
+  openTotal: number;
+  resolvedTotal: number;
+  openInfo: number;
+  openWarning: number;
+  openCritical: number;
+  resolvedLast24h: number;
+  lastUpdatedAt: string;
+}
 export type FraternityCrawlRequestStatus = "draft" | "queued" | "running" | "succeeded" | "failed" | "canceled";
 
 export type FraternityCrawlRequestStage =
@@ -190,10 +252,14 @@ export interface FraternityCrawlRequestConfig {
 export interface FraternityCrawlSourceQuality {
   score: number;
   isWeak: boolean;
+  isBlocked?: boolean;
   reasons: string[];
   recoveryAttempts: number;
   recoveredFromUrl?: string | null;
   recoveredToUrl?: string | null;
+  sourceRejectedCount?: number;
+  sourceRecoveredCount?: number;
+  zeroChapterPrevented?: number;
 }
 
 export interface FraternityCrawlEnrichmentAnalytics {
@@ -206,6 +272,9 @@ export interface FraternityCrawlEnrichmentAnalytics {
   queueAtStart: number;
   queueRemaining: number;
   budgetStrategy: string;
+  runtimeFallbackCount?: number;
+  zeroChapterPrevented?: number;
+  queueBurnRate?: number;
 }
 
 export interface FraternityDiscoveryCandidate {
@@ -224,6 +293,13 @@ export interface FraternityCrawlProgress {
     confidenceTier: string;
     sourceProvenance?: "verified_registry" | "existing_source" | "search" | null;
     fallbackReason?: string | null;
+    sourceQuality?: {
+      score: number;
+      isWeak: boolean;
+      isBlocked?: boolean;
+      reasons: string[];
+    } | null;
+    selectedCandidateRationale?: string | null;
     resolutionTrace?: Array<Record<string, unknown>>;
     candidates: FraternityDiscoveryCandidate[];
   };
@@ -490,3 +566,60 @@ export interface AdaptiveInsights {
   validMissingCount: number;
   verifiedWebsiteCount: number;
 }
+
+export interface FieldJobGraphRunListItem {
+  id: number;
+  workerId: string;
+  runtimeMode: string;
+  sourceSlug: string | null;
+  fieldName: string | null;
+  requestedLimit: number;
+  status: string;
+  summary: Record<string, unknown>;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  eventCount: number;
+  decisionCount: number;
+}
+
+export interface FieldJobGraphEventItem {
+  id: number;
+  runId: number;
+  jobId: string | null;
+  attempt: number | null;
+  nodeName: string;
+  phase: string;
+  status: string;
+  latencyMs: number;
+  metricsDelta: Record<string, unknown>;
+  diagnostics: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface FieldJobGraphDecisionItem {
+  id: number;
+  runId: number;
+  jobId: string;
+  attempt: number;
+  fieldName: string;
+  decisionStatus: string;
+  confidence: number | null;
+  candidateKind: string | null;
+  candidateValue: string | null;
+  reasonCodes: string[];
+  writeAllowed: boolean;
+  requiresReview: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface FieldJobGraphRunDetail {
+  run: FieldJobGraphRunListItem;
+  events: FieldJobGraphEventItem[];
+  decisions: FieldJobGraphDecisionItem[];
+}
+
+
+

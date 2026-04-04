@@ -22,6 +22,8 @@ class _ServiceWithHooks(CrawlService):
         workers: int | None = None,
         require_healthy_search: bool = False,
         run_preflight: bool | None = None,
+        runtime_mode: str | None = None,
+        graph_durability: str | None = None,
     ) -> dict[str, int]:
         self.job_calls.append(
             {
@@ -31,6 +33,8 @@ class _ServiceWithHooks(CrawlService):
                 "workers": workers,
                 "require_healthy_search": require_healthy_search,
                 "run_preflight": run_preflight,
+                "runtime_mode": runtime_mode,
+                "graph_durability": graph_durability,
             }
         )
         return {"processed": 2, "requeued": 1, "failed_terminal": 0}

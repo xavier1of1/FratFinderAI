@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { discoverFraternitySource } from "@/lib/fraternity-discovery";
+import { evaluateSourceUrl } from "@/lib/source-selection";
 import { scheduleDueFraternityCrawlRequests, scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
 import {
   appendFraternityCrawlRequestEvent,
@@ -61,6 +62,7 @@ export async function POST(request: NextRequest) {
     const sourceProvenance = discovery.sourceProvenance;
     const fallbackReason = discovery.fallbackReason;
     const resolutionTrace = discovery.resolutionTrace;
+    const sourceQuality = discovery.sourceQuality ?? evaluateSourceUrl(sourceUrl);
 
     const fraternityName = discovery.fraternityName || payload.fraternityName.trim();
     const fraternitySlug = discovery.fraternitySlug || slugify(fraternityName);
@@ -96,7 +98,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const shouldAutoQueue = (confidenceTier === "high" || confidenceTier === "medium") && Boolean(sourceUrl);
+    const shouldAutoQueue =
+      (confidenceTier === "high" || confidenceTier === "medium") &&
+      Boolean(sourceUrl) &&
+      !sourceQuality.isWeak;
     const status = shouldAutoQueue ? "queued" : "draft";
     const stage = shouldAutoQueue ? "discovery" : "awaiting_confirmation";
 
@@ -118,11 +123,15 @@ export async function POST(request: NextRequest) {
           confidenceTier,
           sourceProvenance,
           fallbackReason,
+          sourceQuality,
+          selectedCandidateRationale: discovery.selectedCandidateRationale,
           resolutionTrace,
           candidates: discovery.candidates
         }
       },
-      lastError: !shouldAutoQueue ? "Low-confidence source discovery; confirm source before running." : null
+      lastError: !shouldAutoQueue
+        ? `Source needs confirmation before running (${sourceQuality.reasons.join(", ") || "insufficient_source_quality"}).`
+        : null
     });
 
     await appendFraternityCrawlRequestEvent({

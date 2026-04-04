@@ -454,8 +454,27 @@ export async function getSourceFieldJobSnapshot(sourceSlug: string): Promise<Sou
   return fields.map((field) => ({ field, ...grouped[field] }));
 }
 
-export async function getLatestCrawlRunForSource(sourceSlug: string): Promise<CrawlRunListItem | null> {
+export async function getLatestCrawlRunForSource(
+  sourceSlug: string,
+  options?: {
+    startedAfter?: string;
+    excludeRunId?: number | null;
+  }
+): Promise<CrawlRunListItem | null> {
   const dbPool = getDbPool();
+  const whereClauses = ["s.slug = $1"];
+  const values: Array<string | number> = [sourceSlug];
+
+  if (options?.startedAfter) {
+    values.push(options.startedAfter);
+    whereClauses.push(`cr.started_at >= $${values.length}::timestamptz`);
+  }
+
+  if (options?.excludeRunId !== undefined && options.excludeRunId !== null) {
+    values.push(options.excludeRunId);
+    whereClauses.push(`cr.id <> $${values.length}`);
+  }
+
   const { rows } = await dbPool.query<CrawlRunListItem>(
     `
       SELECT
@@ -475,11 +494,11 @@ export async function getLatestCrawlRunForSource(sourceSlug: string): Promise<Cr
         COALESCE(NULLIF(cr.extraction_metadata ->> 'llm_calls_used', '')::integer, 0) AS "llmCallsUsed"
       FROM crawl_runs cr
       JOIN sources s ON s.id = cr.source_id
-      WHERE s.slug = $1
+      WHERE ${whereClauses.join(" AND ")}
       ORDER BY cr.started_at DESC
       LIMIT 1
     `,
-    [sourceSlug]
+    values
   );
 
   return rows[0] ?? null;

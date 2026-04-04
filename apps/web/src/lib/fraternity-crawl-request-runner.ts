@@ -22,6 +22,21 @@ import type {
   FraternityCrawlSourceQuality
 } from "@/lib/types";
 
+const DEFAULT_FIELD_JOB_RUNTIME_MODE = (() => {
+  const value = String(process.env.FIELD_JOB_RUNTIME_MODE ?? process.env["Agent:FIELD_JOB_RUNTIME_MODE"] ?? "langgraph_primary").trim();
+  if (value === "legacy" || value === "langgraph_shadow" || value === "langgraph_primary") {
+    return value;
+  }
+  return "langgraph_primary";
+})();
+
+const DEFAULT_FIELD_JOB_GRAPH_DURABILITY = (() => {
+  const value = String(process.env.FIELD_JOB_GRAPH_DURABILITY ?? process.env["Agent:FIELD_JOB_GRAPH_DURABILITY"] ?? "async").trim();
+  if (value === "exit" || value === "async" || value === "sync") {
+    return value;
+  }
+  return "async";
+})();
 const activeRequestRuns = new Set<string>();
 
 function delay(ms: number): Promise<void> {
@@ -137,29 +152,65 @@ async function runPythonCommand(args: string[], timeoutMs: number): Promise<Comm
   });
 }
 
-function parseFieldJobResult(output: string): { processed: number; requeued: number; failedTerminal: number } {
-  const readLast = (key: string) => {
-    const pattern = new RegExp(`"${key}"\\s*:\\s*(-?\\d+)`, "g");
-    let match: RegExpExecArray | null = null;
-    let value: number | null = null;
-    while (true) {
-      match = pattern.exec(output);
-      if (!match) {
-        break;
+function parseTrailingJson<T>(output: string): T {
+  const trimmed = output.trim();
+  for (let index = trimmed.lastIndexOf("{"); index >= 0; index = trimmed.lastIndexOf("{", index - 1)) {
+    const candidate = trimmed.slice(index);
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // continue scanning backward for the last complete JSON object
+    }
+  }
+  throw new Error(`Could not parse trailing JSON payload from output: ${trimmed.slice(-600)}`);
+}
+function parseFieldJobResult(output: string): {
+  processed: number;
+  requeued: number;
+  failedTerminal: number;
+  runtimeFallbackCount: number;
+  runtimeModeUsed: string | null;
+} {
+  try {
+    const payload = parseTrailingJson<Record<string, unknown>>(output);
+    return {
+      processed: Number(payload.processed ?? 0),
+      requeued: Number(payload.requeued ?? 0),
+      failedTerminal: Number(payload.failed_terminal ?? payload.failedTerminal ?? 0),
+      runtimeFallbackCount: Number(payload.runtime_fallback_count ?? payload.runtimeFallbackCount ?? 0),
+      runtimeModeUsed:
+        typeof payload.runtime_mode_used === "string"
+          ? payload.runtime_mode_used
+          : typeof payload.runtimeModeUsed === "string"
+            ? payload.runtimeModeUsed
+            : null
+    };
+  } catch {
+    const readLast = (key: string) => {
+      const pattern = new RegExp(`"${key}"\\s*:\\s*(-?\\d+)`, "g");
+      let match: RegExpExecArray | null = null;
+      let value: number | null = null;
+      while (true) {
+        match = pattern.exec(output);
+        if (!match) {
+          break;
+        }
+        value = Number(match[1]);
       }
-      value = Number(match[1]);
-    }
-    if (value === null) {
-      throw new Error(`Could not parse ${key} from process-field-jobs output`);
-    }
-    return value;
-  };
+      if (value === null) {
+        throw new Error(`Could not parse ${key} from process-field-jobs output`);
+      }
+      return value;
+    };
 
-  return {
-    processed: readLast("processed"),
-    requeued: readLast("requeued"),
-    failedTerminal: readLast("failed_terminal")
-  };
+    return {
+      processed: readLast("processed"),
+      requeued: readLast("requeued"),
+      failedTerminal: readLast("failed_terminal"),
+      runtimeFallbackCount: 0,
+      runtimeModeUsed: null
+    };
+  }
 }
 
 function cloneProgress(progress: FraternityCrawlProgress | undefined): FraternityCrawlProgress {
@@ -345,12 +396,143 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
 
   const confidenceTier =
     request.sourceConfidence !== null ? (request.sourceConfidence >= 0.8 ? "high" : request.sourceConfidence >= 0.6 ? "medium" : "low") : "low";
-  const currentSourceQuality = request.progress.analytics?.sourceQuality ?? {
+  let currentSourceQuality = request.progress.analytics?.sourceQuality ?? {
     ...evaluateSourceUrl(request.sourceUrl),
     recoveryAttempts: Number(request.progress.analytics?.sourceQuality?.recoveryAttempts ?? 0),
     recoveredFromUrl: request.progress.analytics?.sourceQuality?.recoveredFromUrl ?? null,
-    recoveredToUrl: request.progress.analytics?.sourceQuality?.recoveredToUrl ?? null
+    recoveredToUrl: request.progress.analytics?.sourceQuality?.recoveredToUrl ?? null,
+    sourceRejectedCount: Number(request.progress.analytics?.sourceQuality?.sourceRejectedCount ?? 0),
+    sourceRecoveredCount: Number(request.progress.analytics?.sourceQuality?.sourceRecoveredCount ?? 0),
+    zeroChapterPrevented: Number(request.progress.analytics?.sourceQuality?.zeroChapterPrevented ?? 0)
   };
+
+  if (currentSourceQuality.isWeak) {
+    const recoveryAttempts = Number(currentSourceQuality.recoveryAttempts ?? 0);
+    if (recoveryAttempts < 1) {
+      try {
+        const rediscovered = await discoverFraternitySource(request.fraternityName);
+        const alternateCandidate = pickBestDiscoveryCandidate(rediscovered.candidates, request.sourceUrl);
+        const alternateUrl = alternateCandidate?.url ?? rediscovered.selectedUrl;
+        const normalizedCurrent = (request.sourceUrl ?? "").replace(/\/+$/, "");
+        const normalizedAlternate = (alternateUrl ?? "").replace(/\/+$/, "");
+        if (alternateUrl && normalizedAlternate !== normalizedCurrent) {
+          const alternateQuality = evaluateSourceUrl(alternateUrl);
+          if (!alternateQuality.isWeak && alternateQuality.score > currentSourceQuality.score + 0.08) {
+            const nextSourceSlug = `${rediscovered.fraternitySlug || request.fraternitySlug}-main`;
+            const nextSource = new URL(alternateUrl);
+            const recoveredFraternity = await upsertFraternityRecord({
+              slug: rediscovered.fraternitySlug || request.fraternitySlug,
+              name: rediscovered.fraternityName || request.fraternityName,
+              nicAffiliated: true
+            });
+            await upsertSourceRecord({
+              fraternityId: recoveredFraternity.id,
+              slug: nextSourceSlug,
+              baseUrl: nextSource.origin,
+              listPath: alternateUrl,
+              sourceType: "html_directory",
+              parserKey: "directory_v1",
+              active: true,
+              metadata: {
+                discovery: {
+                  selectedUrl: alternateUrl,
+                  selectedConfidence: rediscovered.selectedConfidence,
+                  confidenceTier: rediscovered.confidenceTier,
+                  sourceProvenance: rediscovered.sourceProvenance,
+                  fallbackReason: rediscovered.fallbackReason,
+                  resolutionTrace: rediscovered.resolutionTrace,
+                  sourceQuality: alternateQuality,
+                  selectedCandidateRationale: rediscovered.selectedCandidateRationale
+                }
+              }
+            });
+
+            currentSourceQuality = {
+              ...alternateQuality,
+              recoveryAttempts: recoveryAttempts + 1,
+              recoveredFromUrl: request.sourceUrl,
+              recoveredToUrl: alternateUrl,
+              sourceRejectedCount: Number(currentSourceQuality.sourceRejectedCount ?? 0),
+              sourceRecoveredCount: Number(currentSourceQuality.sourceRecoveredCount ?? 0) + 1,
+              zeroChapterPrevented: Number(currentSourceQuality.zeroChapterPrevented ?? 0) + 1
+            };
+
+            const recoveredProgress = updateProgressAnalytics(
+              {
+                ...request.progress,
+                discovery: {
+                  sourceUrl: alternateUrl,
+                  sourceConfidence: rediscovered.selectedConfidence,
+                  confidenceTier: rediscovered.confidenceTier,
+                  sourceProvenance: rediscovered.sourceProvenance,
+                  fallbackReason: rediscovered.fallbackReason,
+                  sourceQuality: alternateQuality,
+                  selectedCandidateRationale: rediscovered.selectedCandidateRationale,
+                  resolutionTrace: rediscovered.resolutionTrace,
+                  candidates: rediscovered.candidates
+                }
+              },
+              {
+                sourceQuality: currentSourceQuality
+              }
+            );
+
+            await updateFraternityCrawlRequest({
+              id: requestId,
+              sourceSlug: nextSourceSlug,
+              sourceUrl: alternateUrl,
+              sourceConfidence: rediscovered.selectedConfidence,
+              progress: recoveredProgress,
+              lastError: null
+            });
+            await appendFraternityCrawlRequestEvent({
+              requestId,
+              eventType: "source_recovered",
+              message: "Recovered weak source before crawl stage and switched to a stronger candidate",
+              payload: {
+                previousSourceUrl: request.sourceUrl,
+                nextSourceUrl: alternateUrl,
+                previousQuality: currentSourceQuality,
+                nextQuality: alternateQuality,
+                fallbackReason: rediscovered.fallbackReason,
+                rationale: rediscovered.selectedCandidateRationale
+              }
+            });
+            await executeFraternityCrawlRequest(requestId);
+            return;
+          }
+        }
+      } catch {
+        // Fall through to awaiting_confirmation with source diagnostics.
+      }
+    }
+
+    const rejectedSourceQuality = {
+      ...currentSourceQuality,
+      sourceRejectedCount: Number(currentSourceQuality.sourceRejectedCount ?? 0) + 1
+    };
+    await updateFraternityCrawlRequest({
+      id: requestId,
+      status: "draft",
+      stage: "awaiting_confirmation",
+      clearFinishedAt: true,
+      lastError: `Source requires confirmation before crawl (${rejectedSourceQuality.reasons.join(", ") || "insufficient_source_quality"}).`,
+      progress: updateProgressAnalytics(request.progress, {
+        sourceQuality: rejectedSourceQuality
+      })
+    });
+    await appendFraternityCrawlRequestEvent({
+      requestId,
+      eventType: "source_rejected",
+      message: "Request moved to awaiting_confirmation because source quality is weak",
+      payload: {
+        sourceUrl: request.sourceUrl,
+        sourceQuality: rejectedSourceQuality,
+        alternatives: request.progress.discovery?.candidates?.slice(0, 5) ?? []
+      }
+    });
+    return;
+  }
 
   await updateFraternityCrawlRequest({
     id: requestId,
@@ -370,11 +552,18 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
     payload: { stage: "crawl_run", sourceSlug: request.sourceSlug }
   });
 
+  const crawlStageStartedAt = new Date().toISOString();
+  const crawlRunBaseline = await getLatestCrawlRunForSource(request.sourceSlug);
+  const crawlRunQueryOptions = {
+    startedAfter: crawlStageStartedAt,
+    excludeRunId: crawlRunBaseline?.id ?? null
+  };
+
   try {
     try {
       await runPythonCommand(["-m", "fratfinder_crawler.cli", "run", "--source-slug", request.sourceSlug], computeCrawlRunTimeoutMs());
     } catch (error) {
-      const crawlRunAfterTimeout = await getLatestCrawlRunForSource(request.sourceSlug);
+      const crawlRunAfterTimeout = await getLatestCrawlRunForSource(request.sourceSlug, crawlRunQueryOptions);
       const fieldSnapshotAfterTimeout = await getSourceFieldJobSnapshot(request.sourceSlug);
       const progressAfterTimeout = buildProgressSnapshot({
         sourceUrl: request.sourceUrl,
@@ -418,7 +607,7 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
       }
     }
 
-    const crawlRunAfterIngest = await getLatestCrawlRunForSource(request.sourceSlug);
+    const crawlRunAfterIngest = await getLatestCrawlRunForSource(request.sourceSlug, crawlRunQueryOptions);
     const fieldSnapshotAfterIngest = await getSourceFieldJobSnapshot(request.sourceSlug);
     let progressAfterIngest = buildProgressSnapshot({
       sourceUrl: request.sourceUrl,
@@ -440,6 +629,28 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
       id: requestId,
       progress: progressAfterIngest
     });
+
+    if (!progressAfterIngest.crawlRun?.id) {
+      await updateFraternityCrawlRequest({
+        id: requestId,
+        status: "failed",
+        stage: "failed",
+        finishedAtNow: true,
+        progress: progressAfterIngest,
+        lastError: "Crawl command completed but no new crawl run was recorded for this request"
+      });
+      await appendFraternityCrawlRequestEvent({
+        requestId,
+        eventType: "stage_failed",
+        message: "Crawl run stage did not create a new crawl run record",
+        payload: {
+          stage: "crawl_run",
+          crawlRunBaseline: crawlRunBaseline?.id ?? null,
+          crawlStageStartedAt
+        }
+      });
+      return;
+    }
 
     if ((progressAfterIngest.crawlRun?.recordsSeen ?? 0) <= 0) {
       const recoveryAttempts = Number(currentSourceQuality.recoveryAttempts ?? 0);
@@ -540,21 +751,29 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
         }
       }
 
+      const zeroChapterQuality = {
+        ...currentSourceQuality,
+        sourceRejectedCount: Number(currentSourceQuality.sourceRejectedCount ?? 0) + 1,
+        zeroChapterPrevented: Number(currentSourceQuality.zeroChapterPrevented ?? 0) + 1
+      };
       await updateFraternityCrawlRequest({
         id: requestId,
-        status: "failed",
-        stage: "failed",
-        finishedAtNow: true,
-        progress: progressAfterIngest,
-        lastError: "No chapters discovered from the selected national source. Confirm source URL or parser strategy."
+        status: "draft",
+        stage: "awaiting_confirmation",
+        clearFinishedAt: true,
+        progress: updateProgressAnalytics(progressAfterIngest, {
+          sourceQuality: zeroChapterQuality
+        }),
+        lastError: "No chapters discovered from the selected national source. Source held for confirmation before rerun."
       });
       await appendFraternityCrawlRequestEvent({
         requestId,
-        eventType: "stage_failed",
-        message: "Crawl run discovered zero chapters; request halted before enrichment",
+        eventType: "source_rejected",
+        message: "Crawl run discovered zero chapters; request moved to awaiting_confirmation",
         payload: {
           stage: "crawl_run",
-          crawlRun: progressAfterIngest.crawlRun
+          crawlRun: progressAfterIngest.crawlRun,
+          sourceQuality: zeroChapterQuality
         }
       });
       return;
@@ -589,6 +808,8 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
         degradedCycleCount: cycleState.degradedCycleCount,
         queueAtStart: totalFieldJobs(progressAfterIngest.totals),
         queueRemaining: totalFieldJobs(progressAfterIngest.totals),
+        runtimeFallbackCount: Number(progressAfterIngest.analytics?.enrichment?.runtimeFallbackCount ?? 0),
+        queueBurnRate: Number(progressAfterIngest.analytics?.enrichment?.queueBurnRate ?? 0),
         budgetStrategy: "initial_adaptive_budget"
       }
     });
@@ -598,70 +819,107 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
     });
 
     for (let cycle = 1; cycle <= effectiveConfig.maxEnrichmentCycles; cycle += 1) {
-      let commandResult: CommandResult;
+      let commandResult: CommandResult | null = null;
+      let runtimeModeUsed: "legacy" | "langgraph_shadow" | "langgraph_primary" = DEFAULT_FIELD_JOB_RUNTIME_MODE as "legacy" | "langgraph_shadow" | "langgraph_primary";
+      let runtimeFallbackCount = 0;
+      const cycleTimeoutMs = computeFieldJobCycleTimeoutMs(effectiveConfig.fieldJobWorkers, effectiveConfig.fieldJobLimitPerCycle);
+      const buildJobArgs = (mode: "legacy" | "langgraph_shadow" | "langgraph_primary") => {
+        const args = [
+          "-m",
+          "fratfinder_crawler.cli",
+          "process-field-jobs",
+          "--source-slug",
+          request.sourceSlug as string,
+          "--workers",
+          String(effectiveConfig.fieldJobWorkers),
+          "--limit",
+          String(effectiveConfig.fieldJobLimitPerCycle),
+          "--run-preflight",
+          "--runtime-mode",
+          mode
+        ];
+        if (mode !== "legacy") {
+          args.push("--graph-durability", DEFAULT_FIELD_JOB_GRAPH_DURABILITY);
+        }
+        return args;
+      };
+
       try {
-        commandResult = await runPythonCommand(
-          [
-            "-m",
-            "fratfinder_crawler.cli",
-            "process-field-jobs",
-            "--source-slug",
-            request.sourceSlug,
-            "--workers",
-            String(effectiveConfig.fieldJobWorkers),
-            "--limit",
-            String(effectiveConfig.fieldJobLimitPerCycle),
-            "--run-preflight"
-          ],
-          computeFieldJobCycleTimeoutMs(effectiveConfig.fieldJobWorkers, effectiveConfig.fieldJobLimitPerCycle)
-        );
+        commandResult = await runPythonCommand(buildJobArgs(runtimeModeUsed), cycleTimeoutMs);
       } catch (error) {
-        const latestRun = await getLatestCrawlRunForSource(request.sourceSlug);
-        const fieldSnapshot = await getSourceFieldJobSnapshot(request.sourceSlug);
-        const progress = buildProgressSnapshot({
-          sourceUrl: request.sourceUrl,
-          sourceConfidence: request.sourceConfidence,
-          confidenceTier,
-          sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
-          fallbackReason: request.progress.discovery?.fallbackReason ?? null,
-          resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
-          candidates: request.progress.discovery?.candidates ?? [],
-          crawlRun: latestRun,
-          fieldSnapshot,
-          analytics: request.progress.analytics
-        });
         const message = error instanceof Error ? error.message : String(error);
-        const totals = progress.totals ?? { queued: 0, running: 0, done: 0, failed: 0 };
-        const remainingWork = (totals.queued ?? 0) + (totals.running ?? 0);
-        const isTimeout = message.includes("timed out");
+        const shouldFallbackToLegacy = runtimeModeUsed !== "legacy" && !message.includes("timed out");
 
-        await updateFraternityCrawlRequest({
-          id: requestId,
-          progress
-        });
-
-        await appendFraternityCrawlRequestEvent({
-          requestId,
-          eventType: isTimeout ? "enrichment_cycle_timeout" : "enrichment_cycle_error",
-          message: isTimeout ? `Enrichment cycle ${cycle} timed out` : `Enrichment cycle ${cycle} failed`,
-          payload: {
-            cycle,
-            error: message,
-            totals,
-            adaptiveConfig: effectiveConfig
+        if (shouldFallbackToLegacy) {
+          try {
+            commandResult = await runPythonCommand(buildJobArgs("legacy"), cycleTimeoutMs);
+            runtimeModeUsed = "legacy";
+            runtimeFallbackCount = 1;
+            await appendFraternityCrawlRequestEvent({
+              requestId,
+              eventType: "runtime_fallback",
+              message: `Enrichment cycle ${cycle} fell back to legacy runtime`,
+              payload: {
+                cycle,
+                fromRuntime: DEFAULT_FIELD_JOB_RUNTIME_MODE,
+                toRuntime: "legacy",
+                error: message
+              }
+            });
+          } catch {
+            commandResult = null;
           }
-        });
-
-        if (isTimeout && remainingWork > 0 && cycle < effectiveConfig.maxEnrichmentCycles) {
-          cycleState.degradedCycleCount += 1;
-          effectiveConfig = computeAdaptiveEnrichmentConfig(request.config, progress, cycleState);
-          if (effectiveConfig.pauseMs > 0) {
-            await delay(effectiveConfig.pauseMs);
-          }
-          continue;
         }
 
-        throw error;
+        if (!commandResult) {
+          const latestRun = await getLatestCrawlRunForSource(request.sourceSlug);
+          const fieldSnapshot = await getSourceFieldJobSnapshot(request.sourceSlug);
+          const progress = buildProgressSnapshot({
+            sourceUrl: request.sourceUrl,
+            sourceConfidence: request.sourceConfidence,
+            confidenceTier,
+            sourceProvenance: request.progress.discovery?.sourceProvenance ?? null,
+            fallbackReason: request.progress.discovery?.fallbackReason ?? null,
+            resolutionTrace: request.progress.discovery?.resolutionTrace ?? [],
+            candidates: request.progress.discovery?.candidates ?? [],
+            crawlRun: latestRun,
+            fieldSnapshot,
+            analytics: request.progress.analytics
+          });
+          const totals = progress.totals ?? { queued: 0, running: 0, done: 0, failed: 0 };
+          const remainingWork = (totals.queued ?? 0) + (totals.running ?? 0);
+          const isTimeout = message.includes("timed out");
+
+          await updateFraternityCrawlRequest({
+            id: requestId,
+            progress
+          });
+
+          await appendFraternityCrawlRequestEvent({
+            requestId,
+            eventType: isTimeout ? "enrichment_cycle_timeout" : "enrichment_cycle_error",
+            message: isTimeout ? `Enrichment cycle ${cycle} timed out` : `Enrichment cycle ${cycle} failed`,
+            payload: {
+              cycle,
+              error: message,
+              totals,
+              runtimeMode: runtimeModeUsed,
+              runtimeFallbackCount,
+              adaptiveConfig: effectiveConfig
+            }
+          });
+
+          if (isTimeout && remainingWork > 0 && cycle < effectiveConfig.maxEnrichmentCycles) {
+            cycleState.degradedCycleCount += 1;
+            effectiveConfig = computeAdaptiveEnrichmentConfig(request.config, progress, cycleState);
+            if (effectiveConfig.pauseMs > 0) {
+              await delay(effectiveConfig.pauseMs);
+            }
+            continue;
+          }
+
+          throw error;
+        }
       }
 
       const parsed = parseFieldJobResult(`${commandResult.stdout}\n${commandResult.stderr}`);
@@ -697,6 +955,20 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
           degradedCycleCount: cycleState.degradedCycleCount,
           queueAtStart: Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)),
           queueRemaining: remainingQueue,
+          runtimeFallbackCount:
+            Number(progressAfterIngest.analytics?.enrichment?.runtimeFallbackCount ?? 0) +
+            Number(parsed.runtimeFallbackCount ?? 0) +
+            runtimeFallbackCount,
+          queueBurnRate:
+            Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)) > 0
+              ? Number(
+                  (
+                    (Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)) -
+                      remainingQueue) /
+                    Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals))
+                  ).toFixed(4)
+                )
+              : 0,
           budgetStrategy:
             cycleState.degradedCycleCount > 0 ? "adaptive_degraded" : cycleState.lowProgressCycles > 0 ? "adaptive_stabilized" : "adaptive_steady"
         }
@@ -717,6 +989,8 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
           processed: parsed.processed,
           requeued: parsed.requeued,
           failedTerminal: parsed.failedTerminal,
+          runtimeModeUsed: parsed.runtimeModeUsed ?? runtimeModeUsed,
+          runtimeFallbackCount: Number(parsed.runtimeFallbackCount ?? 0) + runtimeFallbackCount,
           totals: nextProgress.totals,
           adaptiveConfig: effectiveConfig
         }
@@ -770,6 +1044,14 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
           degradedCycleCount: cycleState.degradedCycleCount,
           queueAtStart: Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)),
           queueRemaining: exhaustedQueueRemaining,
+          runtimeFallbackCount: Number(progressAfterIngest.analytics?.enrichment?.runtimeFallbackCount ?? 0),
+          queueBurnRate:
+            Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)) > 0
+              ? Number(
+                  ((Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals)) - exhaustedQueueRemaining) /
+                    Number(progressAfterIngest.analytics?.enrichment?.queueAtStart ?? totalFieldJobs(progressAfterIngest.totals))).toFixed(4)
+                )
+              : 0,
           budgetStrategy: "adaptive_budget_exhausted"
         }
       }).analytics

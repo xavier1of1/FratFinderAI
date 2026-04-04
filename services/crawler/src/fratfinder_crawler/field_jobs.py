@@ -571,6 +571,9 @@ class FieldJobEngine:
             "failed_terminal": failed_terminal,
         }
 
+    def process_claimed_job(self, job: FieldJob) -> FieldJobResult:
+        return self._process_single_job(job)
+
     def _process_single_job(self, job: FieldJob) -> FieldJobResult:
         self._search_errors_encountered = False
         self._search_queries_attempted = 0

@@ -112,7 +112,10 @@ Process missing-field jobs for one source only:
 
 ```bash
 python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25
+python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25 --runtime-mode langgraph_shadow --graph-durability sync
 ```
+
+Run database migrations (including `0017_field_job_langgraph_runtime.sql`) before using `langgraph_*` field-job runtime modes.
 
 Probe search-provider health before launching a large batch:
 
@@ -168,6 +171,8 @@ Agentic RL tuning env vars (V2.1):
 - `Agent:ADAPTIVE_REPLAY_WINDOW_DAYS` (default `7`)
 - `Agent:ADAPTIVE_REPLAY_BATCH_SIZE` (default `500`)
 - `Agent:ADAPTIVE_EVAL_ENRICHMENT_LIMIT_PER_SOURCE` (default `120`)
+- `Agent:FIELD_JOB_RUNTIME_MODE` (default `legacy`, options: `legacy`, `langgraph_shadow`, `langgraph_primary`)
+- `Agent:FIELD_JOB_GRAPH_DURABILITY` (default `sync`, options: `exit`, `async`, `sync`)
 - `Agent:ADAPTIVE_EVAL_ENRICHMENT_WORKERS` (default `4`)
 - `Agent:ADAPTIVE_EVAL_ENRICHMENT_RUN_PREFLIGHT` (default `true`)
 - `Agent:ADAPTIVE_EVAL_ENRICHMENT_REQUIRE_HEALTHY_SEARCH` (default `true`)

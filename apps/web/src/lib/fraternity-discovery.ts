@@ -13,6 +13,13 @@ export interface FraternitySourceDiscoveryResult {
   confidenceTier: "high" | "medium" | "low";
   candidates: FraternityDiscoveryCandidate[];
   sourceProvenance: "verified_registry" | "existing_source" | "search" | null;
+  sourceQuality?: {
+    score: number;
+    isWeak: boolean;
+    isBlocked: boolean;
+    reasons: string[];
+  } | null;
+  selectedCandidateRationale?: string | null;
   fallbackReason: string | null;
   resolutionTrace: Array<Record<string, unknown>>;
 }
@@ -48,6 +55,13 @@ function parseDiscoveryOutput(output: string): FraternitySourceDiscoveryResult {
     candidates: FraternityDiscoveryCandidate[];
     source_provenance?: "verified_registry" | "existing_source" | "search" | null;
     fallback_reason?: string | null;
+    source_quality?: {
+      score?: number;
+      is_weak?: boolean;
+      is_blocked?: boolean;
+      reasons?: unknown;
+    } | null;
+    selected_candidate_rationale?: string | null;
     resolution_trace?: Array<Record<string, unknown>>;
   };
 
@@ -59,6 +73,17 @@ function parseDiscoveryOutput(output: string): FraternitySourceDiscoveryResult {
     confidenceTier: payload.confidence_tier,
     candidates: Array.isArray(payload.candidates) ? payload.candidates : [],
     sourceProvenance: payload.source_provenance ?? null,
+    sourceQuality: payload.source_quality
+      ? {
+          score: Number(payload.source_quality.score ?? 0),
+          isWeak: Boolean(payload.source_quality.is_weak ?? true),
+          isBlocked: Boolean(payload.source_quality.is_blocked ?? false),
+          reasons: Array.isArray(payload.source_quality.reasons)
+            ? payload.source_quality.reasons.map((item) => String(item))
+            : []
+        }
+      : null,
+    selectedCandidateRationale: payload.selected_candidate_rationale ?? null,
     fallbackReason: payload.fallback_reason ?? null,
     resolutionTrace: Array.isArray(payload.resolution_trace) ? payload.resolution_trace : []
   };

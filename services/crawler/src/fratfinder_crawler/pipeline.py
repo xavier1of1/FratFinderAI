@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import time
 from urllib.parse import urlparse
@@ -21,7 +20,12 @@ from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.search import SearchClient, SearchUnavailableError
 from fratfinder_crawler.models import CrawlMetrics, EpochMetric
-from fratfinder_crawler.orchestration import AdaptiveCrawlOrchestrator, CrawlOrchestrator
+from fratfinder_crawler.orchestration import (
+    AdaptiveCrawlOrchestrator,
+    CrawlOrchestrator,
+    FieldJobGraphRuntime,
+    FieldJobSupervisorGraphRuntime,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,7 +39,7 @@ class CrawlService:
         source_slug: str | None = None,
         runtime_mode: str | None = None,
         policy_mode: str = "live",
-    ) -> dict[str, int]:
+    ) -> dict[str, object]:
         aggregate = CrawlMetrics()
         effective_runtime_mode = self._resolve_runtime_mode(runtime_mode)
 
@@ -380,7 +384,7 @@ class CrawlService:
         workers: int,
         skip_provider_degraded: bool = False,
         preflight_snapshot: dict[str, object] | None = None,
-    ) -> dict[str, int]:
+    ) -> dict[str, object]:
         if limit_per_source <= 0:
             return {"processed": 0, "requeued": 0, "failed_terminal": 0, "skipped_provider_degraded": 0}
 
@@ -728,6 +732,18 @@ class CrawlService:
             policy_mode=policy_mode,
         )
 
+    def _resolve_field_job_runtime_mode(self, runtime_mode: str | None = None) -> str:
+        mode = (runtime_mode or self._settings.crawler_field_job_runtime_mode or "legacy").strip().lower()
+        if mode not in {"legacy", "langgraph_shadow", "langgraph_primary"}:
+            return "legacy"
+        return mode
+
+    def _resolve_field_job_graph_durability(self, graph_durability: str | None = None) -> str:
+        durability = (graph_durability or self._settings.crawler_field_job_graph_durability or "sync").strip().lower()
+        if durability not in {"exit", "async", "sync"}:
+            return "sync"
+        return durability
+
     def process_field_jobs(
         self,
         limit: int = 25,
@@ -736,18 +752,47 @@ class CrawlService:
         workers: int | None = None,
         require_healthy_search: bool = False,
         run_preflight: bool | None = None,
-    ) -> dict[str, int]:
+        runtime_mode: str | None = None,
+        graph_durability: str | None = None,
+    ) -> dict[str, object]:
         effective_workers = workers or self._settings.crawler_field_job_max_workers
+        effective_runtime_mode = self._resolve_field_job_runtime_mode(runtime_mode)
+        effective_graph_durability = self._resolve_field_job_graph_durability(graph_durability)
         degraded_mode = False
         preflight_enabled = self._settings.crawler_search_preflight_enabled if run_preflight is None else run_preflight
         preflight_snapshot: dict[str, object] | None = None
+
+        stale_jobs_recovered = 0
+        stale_graph_runs_recovered = 0
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            stale_jobs_recovered = repository.reconcile_stale_field_jobs(
+                self._settings.crawler_field_job_stale_claim_minutes
+            )
+            if repository.field_job_graph_tables_ready():
+                stale_graph_runs_recovered = repository.reconcile_stale_field_job_graph_runs(
+                    self._settings.crawler_field_job_graph_run_stale_minutes
+                )
+
+        if stale_jobs_recovered or stale_graph_runs_recovered:
+            log_event(
+                LOGGER,
+                "field_job_stale_runtime_state_reconciled",
+                stale_jobs_recovered=stale_jobs_recovered,
+                stale_graph_runs_recovered=stale_graph_runs_recovered,
+                stale_claim_minutes=self._settings.crawler_field_job_stale_claim_minutes,
+                stale_graph_run_minutes=self._settings.crawler_field_job_graph_run_stale_minutes,
+                source_slug=source_slug,
+                field_name=field_name,
+            )
 
         if preflight_enabled and self._settings.crawler_search_enabled:
             preflight_snapshot = self.search_preflight()
             healthy = bool(preflight_snapshot.get("healthy", False))
             if not healthy:
                 if require_healthy_search:
-                    result = {"processed": 0, "requeued": 0, "failed_terminal": 0}
+                    result = {"processed": 0, "requeued": 0, "failed_terminal": 0, "runtime_fallback_count": 0, "runtime_mode_used": effective_runtime_mode}
                     log_event(
                         LOGGER,
                         "field_job_batch_skipped_provider_degraded",
@@ -755,6 +800,8 @@ class CrawlService:
                         source_slug=source_slug,
                         field_name=field_name,
                         workers=effective_workers,
+                        runtime_mode=effective_runtime_mode,
+                        graph_durability=effective_graph_durability,
                         preflight=preflight_snapshot,
                     )
                     return result
@@ -763,7 +810,7 @@ class CrawlService:
 
         worker_limits = _distribute_limit(limit, effective_workers)
         if not worker_limits:
-            result = {"processed": 0, "requeued": 0, "failed_terminal": 0}
+            result = {"processed": 0, "requeued": 0, "failed_terminal": 0, "runtime_fallback_count": 0, "runtime_mode_used": effective_runtime_mode}
             log_event(
                 LOGGER,
                 "field_job_batch_finished",
@@ -772,52 +819,25 @@ class CrawlService:
                 field_name=field_name,
                 workers=0,
                 degraded_mode=degraded_mode,
+                runtime_mode=effective_runtime_mode,
+                graph_durability=effective_graph_durability,
                 preflight=preflight_snapshot,
                 **result,
             )
             return result
 
-        if len(worker_limits) == 1:
-            result = self._process_field_job_chunk(
-                limit=worker_limits[0],
-                source_slug=source_slug,
-                field_name=field_name,
-                worker_index=1,
-                total_workers=1,
-                degraded_mode=degraded_mode,
-            )
-            log_event(
-                LOGGER,
-                "field_job_batch_finished",
-                limit=limit,
-                source_slug=source_slug,
-                field_name=field_name,
-                workers=1,
-                degraded_mode=degraded_mode,
-                preflight=preflight_snapshot,
-                **result,
-            )
-            return result
-
-        with ThreadPoolExecutor(max_workers=len(worker_limits), thread_name_prefix="field-job-worker") as executor:
-            futures = [
-                executor.submit(
-                    self._process_field_job_chunk,
-                    worker_limit,
-                    source_slug,
-                    field_name,
-                    index,
-                    len(worker_limits),
-                    degraded_mode,
-                )
-                for index, worker_limit in enumerate(worker_limits, start=1)
-            ]
-
-        aggregate = {"processed": 0, "requeued": 0, "failed_terminal": 0}
-        for future in futures:
-            chunk_result = future.result()
-            for key in aggregate:
-                aggregate[key] += chunk_result[key]
+        supervisor = FieldJobSupervisorGraphRuntime(
+            worker_limits=worker_limits,
+            runtime_mode=effective_runtime_mode,
+            graph_durability=effective_graph_durability,
+            source_slug=source_slug,
+            field_name=field_name,
+            degraded_mode=degraded_mode,
+            chunk_processor=self._process_field_job_chunk,
+        )
+        aggregate = supervisor.run()
+        aggregate["stale_jobs_recovered"] = stale_jobs_recovered
+        aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
 
         log_event(
             LOGGER,
@@ -827,6 +847,8 @@ class CrawlService:
             field_name=field_name,
             workers=len(worker_limits),
             degraded_mode=degraded_mode,
+            runtime_mode=effective_runtime_mode,
+            graph_durability=effective_graph_durability,
             preflight=preflight_snapshot,
             **aggregate,
         )
@@ -840,7 +862,9 @@ class CrawlService:
         worker_index: int,
         total_workers: int,
         degraded_mode: bool = False,
-    ) -> dict[str, int]:
+        runtime_mode: str = "legacy",
+        graph_durability: str = "sync",
+    ) -> dict[str, object]:
         search_settings = self._settings
         max_search_pages = self._settings.crawler_search_max_pages_per_job
         dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
@@ -860,10 +884,11 @@ class CrawlService:
 
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
+            worker_id = _worker_id(self._settings.crawler_field_job_worker_id, worker_index, total_workers)
             engine = FieldJobEngine(
                 repository=repository,
                 logger=LOGGER,
-                worker_id=_worker_id(self._settings.crawler_field_job_worker_id, worker_index, total_workers),
+                worker_id=worker_id,
                 base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
                 source_slug=source_slug,
                 field_name=field_name,
@@ -887,7 +912,55 @@ class CrawlService:
                 instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
                 greedy_collect_mode=self._settings.crawler_greedy_collect,
             )
-            return engine.process(limit=limit)
+            if runtime_mode == "legacy":
+                result = engine.process(limit=limit)
+                result["runtime_fallback_count"] = 0
+                result["runtime_mode_used"] = "legacy"
+                return result
+            if not repository.field_job_graph_tables_ready():
+                log_event(
+                    LOGGER,
+                    "field_job_graph_runtime_fallback_missing_tables",
+                    level=logging.WARNING,
+                    runtime_mode=runtime_mode,
+                    worker_id=worker_id,
+                    source_slug=source_slug,
+                    field_name=field_name,
+                    error="field-job graph tables are unavailable",
+                )
+                result = engine.process(limit=limit)
+                result["runtime_fallback_count"] = 1
+                result["runtime_mode_used"] = "legacy"
+                return result
+            graph_runtime = FieldJobGraphRuntime(
+                repository=repository,
+                engine=engine,
+                worker_id=worker_id,
+                runtime_mode=runtime_mode,
+                graph_durability=graph_durability,
+                source_slug=source_slug,
+                field_name=field_name,
+            )
+            try:
+                result = graph_runtime.process(limit=limit)
+                result["runtime_fallback_count"] = 0
+                result["runtime_mode_used"] = runtime_mode
+                return result
+            except Exception as exc:  # pragma: no cover - runtime guardrail
+                log_event(
+                    LOGGER,
+                    "field_job_graph_runtime_fallback_exception",
+                    level=logging.WARNING,
+                    runtime_mode=runtime_mode,
+                    worker_id=worker_id,
+                    source_slug=source_slug,
+                    field_name=field_name,
+                    error=str(exc),
+                )
+                result = engine.process(limit=limit)
+                result["runtime_fallback_count"] = 1
+                result["runtime_mode_used"] = "legacy"
+                return result
 
     def search_preflight(self, probes: int | None = None) -> dict[str, object]:
         if not self._settings.crawler_search_enabled:
@@ -1023,6 +1096,13 @@ class CrawlService:
                 "candidates": [],
                 "source_provenance": None,
                 "fallback_reason": "source_discovery_exception",
+                "source_quality": {
+                    "score": 0.0,
+                    "is_weak": True,
+                    "is_blocked": False,
+                    "reasons": ["source_discovery_exception"],
+                },
+                "selected_candidate_rationale": None,
                 "resolution_trace": [
                     {
                         "step": "source_discovery_exception",
