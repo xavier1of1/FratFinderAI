@@ -125,3 +125,27 @@ def test_directory_adapter_uses_header_aware_table_columns_for_chi_psi_style_tab
     assert len(stubs) == 1
     assert stubs[0].chapter_name == "Pi"
     assert stubs[0].university_name == "Union College"
+
+
+def test_directory_adapter_extracts_repeated_list_chapter_entries():
+    fixture = """
+    <section>
+      <h2>Theta Xi Chapters</h2>
+      <ul>
+        <li><span>Auburn University – Beta Zeta Chapter</span></li>
+        <li><span>University of Alabama – Alpha Lambda Chapter</span></li>
+        <li><span>Arizona State University – Delta Alpha Chapter</span></li>
+        <li><span>Embry-Riddle Aeronautical University – Gamma Iota Chapter</span></li>
+        <li><span>University of Arizona – Gamma Psi Chapter</span></li>
+      </ul>
+    </section>
+    """
+
+    records = DirectoryV1Adapter().parse(fixture, "https://www.thetaxi.org/chapters-and-colonies/")
+    stubs = DirectoryV1Adapter().parse_stubs(fixture, "https://www.thetaxi.org/chapters-and-colonies/")
+
+    assert len(records) == 5
+    assert records[0].name == "Beta Zeta"
+    assert records[0].university_name == "Auburn University"
+    assert len(stubs) == 5
+    assert stubs[0].provenance == "directory_v1:repeated_list"

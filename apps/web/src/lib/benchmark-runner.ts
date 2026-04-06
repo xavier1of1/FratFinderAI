@@ -1,5 +1,7 @@
 import { spawn } from "child_process";
+import { randomUUID } from "crypto";
 import { existsSync } from "fs";
+import os from "os";
 import path from "path";
 
 import {
@@ -11,15 +13,27 @@ import {
   markBenchmarkRunStarted,
   upsertBenchmarkShadowDiff
 } from "@/lib/repositories/benchmark-repository";
+import {
+  claimBenchmarkRunLease,
+  heartbeatBenchmarkRunLease,
+  heartbeatRuntimeWorker,
+  releaseBenchmarkRunLease,
+  stopRuntimeWorker,
+  upsertRuntimeWorker,
+} from "@/lib/repositories/runtime-worker-repository";
 import type {
   BenchmarkCycleSample,
   BenchmarkFieldName,
+  BenchmarkIsolationMode,
   BenchmarkQueueSnapshot,
   BenchmarkRunConfig,
   BenchmarkRunSummary
 } from "@/lib/types";
 
 const activeRuns = new Set<string>();
+const BENCHMARK_WORKER_ID = `benchmark-worker:${os.hostname()}:${process.pid}`;
+const BENCHMARK_WORKER_LEASE_SECONDS = Math.max(30, Number(process.env.BENCHMARK_WORKER_LEASE_SECONDS ?? 90));
+const BENCHMARK_HEARTBEAT_INTERVAL_MS = Math.max(10_000, Math.min(60_000, Math.floor(BENCHMARK_WORKER_LEASE_SECONDS * 500)));
 
 interface ProcessFieldJobResult {
   processed: number;
@@ -50,6 +64,12 @@ interface CrawlWarmupResult {
   recordsSeen: number;
   recordsUpserted: number;
   pagesProcessed: number;
+}
+
+interface BenchmarkExecutionContext {
+  preconditions?: Record<string, unknown>;
+  isolationMode?: BenchmarkIsolationMode;
+  contaminationStatus?: "isolated" | "shared_live";
 }
 const BENCHMARK_TIMEOUT_MIN_MS = 120_000;
 const BENCHMARK_TIMEOUT_MAX_MS = 900_000;
@@ -364,10 +384,20 @@ function buildSummary(params: {
   cyclesCompleted: number;
   startSnapshot: BenchmarkQueueSnapshot;
   endSnapshot: BenchmarkQueueSnapshot;
+  executionContext?: BenchmarkExecutionContext;
 }): BenchmarkRunSummary {
   const elapsedMs = Math.max(Date.now() - params.startedAtMs, 1);
   const jobsPerMinute = (params.totals.processed * 60_000) / elapsedMs;
   const avgCycleMs = params.cyclesCompleted > 0 ? elapsedMs / params.cyclesCompleted : 0;
+  const businessStatus =
+    params.totals.processed > 0 ||
+    params.totals.invalidBlocked > 0 ||
+    params.totals.repairableBlocked > 0 ||
+    params.totals.repairPromoted > 0 ||
+    params.totals.reconciledHistorical > 0 ||
+    params.startSnapshot.queued !== params.endSnapshot.queued
+      ? "progressed"
+      : "no_business_progress";
 
   return {
     elapsedMs,
@@ -375,6 +405,7 @@ function buildSummary(params: {
     totalProcessed: params.totals.processed,
     totalRequeued: params.totals.requeued,
     totalFailedTerminal: params.totals.failedTerminal,
+    businessStatus,
     jobsPerMinute,
     avgCycleMs,
     queueDepthStart: params.startSnapshot.queued,
@@ -384,12 +415,20 @@ function buildSummary(params: {
     repairableBlocked: params.totals.repairableBlocked,
     repairPromoted: params.totals.repairPromoted,
     reconciledHistorical: params.totals.reconciledHistorical,
-    actionableQueueRemaining: params.endSnapshot.queued
+    actionableQueueRemaining: params.endSnapshot.queued,
+    preconditions: params.executionContext?.preconditions,
+    isolationMode: params.executionContext?.isolationMode,
+    contaminationStatus: params.executionContext?.contaminationStatus,
   };
 }
 
-async function executeBenchmarkRun(runId: string): Promise<void> {
+export async function runBenchmarkExecution(
+  runId: string,
+  executionContext?: BenchmarkExecutionContext
+): Promise<void> {
   const startedAtMs = Date.now();
+  const leaseToken = randomUUID();
+  let heartbeat: NodeJS.Timeout | null = null;
   const samples: BenchmarkCycleSample[] = [];
   const totals: BenchmarkTotals = {
     processed: 0,
@@ -410,6 +449,35 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
   let endSnapshot = startSnapshot;
 
   try {
+    await upsertRuntimeWorker({
+      workerId: BENCHMARK_WORKER_ID,
+      workloadLane: "benchmark",
+      runtimeOwner: "evaluation_worker_benchmark_runner",
+      leaseSeconds: BENCHMARK_WORKER_LEASE_SECONDS,
+      metadata: { runId },
+    });
+
+    const claimed = await claimBenchmarkRunLease({
+      runId,
+      workerId: BENCHMARK_WORKER_ID,
+      leaseToken,
+      leaseSeconds: BENCHMARK_WORKER_LEASE_SECONDS,
+    });
+    if (!claimed) {
+      await stopRuntimeWorker(BENCHMARK_WORKER_ID);
+      return;
+    }
+
+    heartbeat = setInterval(() => {
+      void heartbeatRuntimeWorker(BENCHMARK_WORKER_ID, BENCHMARK_WORKER_LEASE_SECONDS);
+      void heartbeatBenchmarkRunLease({
+        runId,
+        workerId: BENCHMARK_WORKER_ID,
+        leaseToken,
+        leaseSeconds: BENCHMARK_WORKER_LEASE_SECONDS,
+      });
+    }, BENCHMARK_HEARTBEAT_INTERVAL_MS);
+
     await markBenchmarkRunStarted(runId);
 
     const run = await getBenchmarkRun(runId);
@@ -500,7 +568,8 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
       totals,
       cyclesCompleted: samples.length,
       startSnapshot,
-      endSnapshot
+      endSnapshot,
+      executionContext,
     });
 
     await completeBenchmarkRun({
@@ -508,6 +577,16 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
       summary,
       samples
     });
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = null;
+    }
+    await releaseBenchmarkRunLease({
+      runId,
+      workerId: BENCHMARK_WORKER_ID,
+      leaseToken,
+    });
+    await stopRuntimeWorker(BENCHMARK_WORKER_ID);
   } catch (error) {
     try {
       const summary = buildSummary({
@@ -515,7 +594,8 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
         totals,
         cyclesCompleted: samples.length,
         startSnapshot,
-        endSnapshot
+        endSnapshot,
+        executionContext,
       });
 
       await failBenchmarkRun({
@@ -527,6 +607,16 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
     } catch {
       // Keep the scheduler alive even if DB persistence fails unexpectedly.
     }
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = null;
+    }
+    await releaseBenchmarkRunLease({
+      runId,
+      workerId: BENCHMARK_WORKER_ID,
+      leaseToken,
+    });
+    await stopRuntimeWorker(BENCHMARK_WORKER_ID);
   }
 }
 
@@ -537,7 +627,7 @@ export async function scheduleBenchmarkRun(runId: string): Promise<boolean> {
 
   activeRuns.add(runId);
   queueMicrotask(() => {
-    void executeBenchmarkRun(runId).finally(() => {
+    void runBenchmarkExecution(runId).finally(() => {
       activeRuns.delete(runId);
     });
   });

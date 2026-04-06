@@ -356,6 +356,30 @@ class FieldJob:
     crawl_run_id: int | None = None
     field_states: dict[str, str] = field(default_factory=dict)
     priority: int = 0
+    queue_state: str = "actionable"
+    validity_class: str | None = None
+    repair_state: str | None = None
+    blocked_reason: str | None = None
+    terminal_outcome: str | None = None
+
+
+@dataclass(slots=True)
+class ChapterRepairJob:
+    id: str
+    chapter_id: str
+    chapter_slug: str
+    chapter_name: str
+    source_slug: str | None
+    payload: dict[str, Any]
+    attempts: int
+    max_attempts: int
+    priority: int
+    claim_token: str
+    repair_state: str
+    university_name: str | None = None
+    website_url: str | None = None
+    instagram_url: str | None = None
+    contact_email: str | None = None
 
 
 class UnsupportedSourceError(Exception):
@@ -404,6 +428,9 @@ class FraternityCrawlRequestRecord:
     started_at: str | None
     finished_at: str | None
     priority: int
+    runtime_worker_id: str | None = None
+    runtime_lease_expires_at: str | None = None
+    runtime_last_heartbeat_at: str | None = None
     config: dict[str, Any] = field(default_factory=dict)
     progress: dict[str, Any] = field(default_factory=dict)
     last_error: str | None = None

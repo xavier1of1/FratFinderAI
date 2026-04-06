@@ -4,7 +4,7 @@ import { StatusPill } from "@/components/status-pill";
 import { TagPill } from "@/components/tag-pill";
 import { fetchFromApi } from "@/lib/api-client";
 import { instagramHandleFromUrl } from "@/lib/social";
-import type { AgentOpsSummary, ChapterEvidence, ChapterSearchRun, ProvisionalChapter, RequestGraphRun } from "@/lib/types";
+import type { AgentOpsSummary, ChapterEvidence, ChapterSearchRun, OpsAlert, ProvisionalChapter, RequestGraphRun } from "@/lib/types";
 
 interface AgentOpsPayload {
   summary: AgentOpsSummary;
@@ -12,6 +12,7 @@ interface AgentOpsPayload {
   provisionalChapters: ProvisionalChapter[];
   evidence: ChapterEvidence[];
   chapterSearchRuns: ChapterSearchRun[];
+  opsAlerts: OpsAlert[];
 }
 
 export default async function AgentOpsPage() {
@@ -26,7 +27,7 @@ export default async function AgentOpsPage() {
     <div className="sectionStack">
       <PageIntro
         eyebrow="Agent Ops"
-        title="V3.0.0 LangGraph execution, queue health, and evidence"
+        title="V3.0.1 LangGraph execution, queue health, and evidence"
         description="Use this console to inspect V3 request graph runs, verify the worker queue is draining cleanly, and audit evidence before anything becomes canonical chapter data."
         meta={[
           `${data.graphRuns.length} graph runs`,
@@ -46,13 +47,26 @@ export default async function AgentOpsPage() {
           <MetricCard label="Awaiting Confirmation" value={data.summary.requestAwaitingConfirmation} />
           <MetricCard label="Completed Requests" value={data.summary.requestCompleted} />
           <MetricCard label="Queued Field Jobs" value={data.summary.fieldJobsQueued} />
+          <MetricCard label="Actionable Field Jobs" value={data.summary.fieldJobsActionable} />
           <MetricCard label="Running Field Jobs" value={data.summary.fieldJobsRunning} />
           <MetricCard label="Deferred Field Jobs" value={data.summary.fieldJobsDeferred} />
+          <MetricCard label="Blocked Invalid Jobs" value={data.summary.fieldJobsBlockedInvalid} />
+          <MetricCard label="Blocked Repair Jobs" value={data.summary.fieldJobsBlockedRepairable} />
+          <MetricCard label="Queued Repair Jobs" value={data.summary.chapterRepairQueued} />
+          <MetricCard label="Running Repair Jobs" value={data.summary.chapterRepairRunning} />
+          <MetricCard label="Completed Repair Jobs" value={data.summary.chapterRepairCompleted} />
+          <MetricCard label="Historical Reconciliations" value={data.summary.chapterRepairHistoricalReconciled} />
           <MetricCard label="Terminal No Signal" value={data.summary.fieldJobsTerminalNoSignal} />
           <MetricCard label="Review Required" value={data.summary.fieldJobsReviewRequired} />
           <MetricCard label="Auto Written" value={data.summary.fieldJobsUpdated} />
           <MetricCard label="Evidence In Review" value={data.summary.evidenceReview} />
           <MetricCard label="Evidence Ready To Write" value={data.summary.evidenceWrite} />
+          <MetricCard label="Open Ops Alerts" value={data.summary.opsAlertsOpen} />
+          <MetricCard label="Critical Ops Alerts" value={data.summary.opsAlertsCritical} />
+          <MetricCard label="Warning Ops Alerts" value={data.summary.opsAlertsWarning} />
+          <MetricCard label="Resolved Alerts 24h" value={data.summary.opsAlertsResolvedLast24h} />
+          <MetricCard label="Oldest Open Alert" value={`${data.summary.opsAlertsOldestOpenMinutes}m`} />
+          <MetricCard label="Oldest Open Provisional" value={`${data.summary.provisionalOldestOpenHours}h`} />
         </div>
         <p className="muted">
           Queue status: {queueClear ? "No request-level bottleneck detected." : "Requests are still queued or running, so the queue is active."}
@@ -71,6 +85,8 @@ export default async function AgentOpsPage() {
           <MetricCard label="Repairable Entities" value={data.summary.chapterValidityRepairable} />
           <MetricCard label="Blocked Invalid Jobs" value={data.summary.chapterValidityBlockedInvalid} />
           <MetricCard label="Blocked Repair Jobs" value={data.summary.chapterValidityBlockedRepairable} />
+          <MetricCard label="Provisional Review" value={data.summary.provisionalReview} />
+          <MetricCard label="Provisional Rejected" value={data.summary.provisionalRejected} />
         </div>
         <p className="muted">
           Latest: {latestChapterSearch ? `${latestChapterSearch.sourceSlug ?? "unknown source"} / ${latestChapterSearch.sourceClass ?? "unknown class"} / ${latestChapterSearch.coverageState ?? "unknown coverage"}` : "No chapter-search runs yet."}
@@ -167,7 +183,7 @@ export default async function AgentOpsPage() {
         <h2>Provisional Chapters</h2>
         <p className="sectionDescription">Broader-web chapter discoveries live here until they are promoted by strong official evidence or resolved by review.</p>
         <p className="muted">
-          Open: {data.summary.provisionalOpen} | Promoted: {data.summary.provisionalPromoted}
+          Open: {data.summary.provisionalOpen} | Promoted: {data.summary.provisionalPromoted} | Review: {data.summary.provisionalReview} | Rejected: {data.summary.provisionalRejected} | Oldest Open Age: {data.summary.provisionalOldestOpenHours}h
         </p>
         <div className="tableWrap">
           <table>
@@ -202,6 +218,42 @@ export default async function AgentOpsPage() {
                     )}
                   </td>
                   <td>{new Date(chapter.updatedAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Ops Alerts</h2>
+        <p className="sectionDescription">Operational failures and saturation issues should be visible here without digging through raw logs or database tables.</p>
+        <p className="muted">
+          Open: {data.summary.opsAlertsOpen} | Critical: {data.summary.opsAlertsCritical} | Warning: {data.summary.opsAlertsWarning} | Resolved 24h: {data.summary.opsAlertsResolvedLast24h}
+        </p>
+        <div className="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Scope</th>
+                <th>Type</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Message</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.opsAlerts.map((alert) => (
+                <tr key={alert.id}>
+                  <td>{alert.alertScope}</td>
+                  <td>{alert.alertType}</td>
+                  <td>{alert.severity ? <TagPill label={alert.severity} tone={alert.severity === "info" ? "info" : "warning"} /> : <span className="muted">n/a</span>}</td>
+                  <td>{alert.status ? <StatusPill status={alert.status} /> : <span className="muted">n/a</span>}</td>
+                  <td>{alert.sourceSlug ?? <span className="muted">n/a</span>}</td>
+                  <td>{alert.message}</td>
+                  <td>{new Date(alert.createdAt).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>

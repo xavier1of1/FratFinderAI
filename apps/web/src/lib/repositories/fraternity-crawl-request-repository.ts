@@ -18,6 +18,9 @@ interface FraternityCrawlRequestRow {
   sourceConfidence: number | string | null;
   status: FraternityCrawlRequestStatus;
   stage: FraternityCrawlRequestStage;
+  runtimeWorkerId: string | null;
+  runtimeLeaseExpiresAt: string | null;
+  runtimeLastHeartbeatAt: string | null;
   scheduledFor: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -87,6 +90,9 @@ function mapRequestRow(row: FraternityCrawlRequestRow, events: FraternityCrawlRe
     sourceConfidence,
     status: row.status,
     stage: row.stage,
+    runtimeWorkerId: row.runtimeWorkerId,
+    runtimeLeaseExpiresAt: row.runtimeLeaseExpiresAt,
+    runtimeLastHeartbeatAt: row.runtimeLastHeartbeatAt,
     scheduledFor: row.scheduledFor,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
@@ -152,6 +158,9 @@ export async function listFraternityCrawlRequests(limit = 100): Promise<Fraterni
         source_confidence AS "sourceConfidence",
         status,
         stage,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         scheduled_for AS "scheduledFor",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
@@ -185,6 +194,9 @@ export async function getFraternityCrawlRequest(id: string): Promise<FraternityC
         source_confidence AS "sourceConfidence",
         status,
         stage,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         scheduled_for AS "scheduledFor",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
@@ -252,6 +264,9 @@ export async function createFraternityCrawlRequest(params: {
         source_confidence AS "sourceConfidence",
         status,
         stage,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         scheduled_for AS "scheduledFor",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
@@ -364,9 +379,15 @@ export async function reconcileStaleFraternityCrawlRequests(maxAgeMinutes = 30):
         status = 'failed',
         stage = 'failed',
         finished_at = NOW(),
-        last_error = COALESCE(last_error, 'Fraternity crawl request stalled before completion')
+        last_error = COALESCE(last_error, 'Fraternity crawl request stalled before completion'),
+        runtime_worker_id = NULL,
+        runtime_lease_token = NULL,
+        runtime_lease_expires_at = NULL
       WHERE status = 'running'
-        AND updated_at < NOW() - ($1::int * INTERVAL '1 minute')
+        AND (
+          (runtime_lease_expires_at IS NOT NULL AND runtime_lease_expires_at < NOW())
+          OR (runtime_lease_expires_at IS NULL AND updated_at < NOW() - ($1::int * INTERVAL '1 minute'))
+        )
     `,
     [Math.max(1, maxAgeMinutes)]
   );
@@ -381,6 +402,11 @@ export async function listDueQueuedFraternityCrawlRequestIds(limit = 20): Promis
       FROM fraternity_crawl_requests
       WHERE status = 'queued'
         AND scheduled_for <= NOW()
+        AND (
+          runtime_worker_id IS NULL
+          OR runtime_lease_expires_at IS NULL
+          OR runtime_lease_expires_at < NOW()
+        )
       ORDER BY priority DESC, scheduled_for ASC
       LIMIT $1
     `,

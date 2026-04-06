@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
-from fratfinder_crawler.models import FraternityCrawlRequestRecord
+from fratfinder_crawler.models import FraternityCrawlRequestRecord, ProvisionalChapterRecord
 from fratfinder_crawler.orchestration.request_graph import RequestSupervisorGraphRuntime
 
 
@@ -61,6 +61,8 @@ class _FakeRequestRepository:
         self.run_status: dict[int, dict] = {}
         self.latest_crawl_runs: dict[str, dict] = {}
         self.field_snapshots: dict[str, list[dict]] = {}
+        self.provisional_chapters: list[ProvisionalChapterRecord] = []
+        self.provisional_updates: list[dict] = []
         self._run_id = 100
 
     def start_request_graph_run(self, **_: object) -> int:
@@ -151,11 +153,42 @@ class _FakeRequestRepository:
     def insert_provider_health_snapshot(self, **kwargs: object) -> None:
         self.provider_health_snapshots.append(dict(kwargs))
 
+    def list_provisional_chapters_for_request(self, request_id: str, *, statuses=("provisional",), limit: int = 200):
+        assert request_id == self.request.id
+        return [item for item in self.provisional_chapters if item.status in statuses][:limit]
+
+    def update_provisional_chapter_status(
+        self,
+        provisional_id: str,
+        *,
+        status: str,
+        promotion_reason: str | None = None,
+        promoted_chapter_id: str | None = None,
+    ) -> None:
+        self.provisional_updates.append(
+            {
+                "id": provisional_id,
+                "status": status,
+                "promotion_reason": promotion_reason,
+                "promoted_chapter_id": promoted_chapter_id,
+            }
+        )
+        self.provisional_chapters = [
+            replace(
+                item,
+                status=status if item.id == provisional_id else item.status,
+                promotion_reason=promotion_reason if item.id == provisional_id else item.promotion_reason,
+                promoted_chapter_id=promoted_chapter_id if item.id == provisional_id else item.promoted_chapter_id,
+            )
+            for item in self.provisional_chapters
+        ]
+
 
 class _FakeCrawlerRepository:
     def __init__(self):
         self.upserted_fraternities: list[dict] = []
         self.upserted_sources: list[dict] = []
+        self.upserted_chapters: list[dict] = []
 
     def upsert_fraternity(self, slug: str, name: str, nic_affiliated: bool = True) -> tuple[str, str]:
         self.upserted_fraternities.append({"slug": slug, "name": name, "nicAffiliated": nic_affiliated})
@@ -164,6 +197,15 @@ class _FakeCrawlerRepository:
     def upsert_source(self, **kwargs: object) -> tuple[str, str]:
         self.upserted_sources.append(dict(kwargs))
         return "source-1", str(kwargs["slug"])
+
+    def load_sources(self, source_slug: str | None = None):
+        if not source_slug:
+            return []
+        return [SimpleNamespace(id="source-1", fraternity_id="frat-1", source_slug=source_slug, slug=source_slug)]
+
+    def upsert_chapter_discovery(self, source, chapter):
+        self.upserted_chapters.append({"source": source, "chapter": chapter})
+        return "chapter-1"
 
 
 def _build_runtime(
@@ -223,6 +265,59 @@ def test_request_graph_completes_without_enrichment_queue():
     assert request_repository.request.status == "succeeded"
     assert request_repository.request.progress["crawlRun"]["recordsSeen"] == 5
     assert any(event_type == "request_completed" for event_type, _ in request_repository.events)
+
+
+def test_request_graph_promotes_reviews_and_rejects_provisional_chapters():
+    request = _request()
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_email", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_instagram", "queued": 0, "running": 0, "done": 0, "failed": 0},
+    ]
+    request_repository.provisional_chapters = [
+        ProvisionalChapterRecord(
+            id="prov-1",
+            fraternity_id="frat-1",
+            slug="alpha-beta-test",
+            name="Alpha Beta",
+            status="provisional",
+            request_id=request.id,
+            university_name="Example University",
+            website_url="https://example.edu/alphabeta",
+        ),
+        ProvisionalChapterRecord(
+            id="prov-2",
+            fraternity_id="frat-1",
+            slug="alpha-beta-review",
+            name="Alpha Beta Review",
+            status="provisional",
+            request_id=request.id,
+            university_name=None,
+            website_url="https://weak.example.com/chapter",
+        ),
+        ProvisionalChapterRecord(
+            id="prov-3",
+            fraternity_id="frat-1",
+            slug="alpha-beta-rejected",
+            name="Alpha Beta Rejected",
+            status="provisional",
+            request_id=request.id,
+            university_name=None,
+        ),
+    ]
+
+    crawler_repository = _FakeCrawlerRepository()
+    runtime = _build_runtime(request_repository, crawler_repository)
+    result = runtime._evaluate_provisional_promotions({"request": request, "progress": {}})  # type: ignore[attr-defined]
+
+    assert len(crawler_repository.upserted_chapters) == 1
+    assert any(update["status"] == "promoted" for update in request_repository.provisional_updates)
+    assert any(update["status"] == "review" for update in request_repository.provisional_updates)
+    assert any(update["status"] == "rejected" for update in request_repository.provisional_updates)
+    assert result["progress"]["provisional"]["autoPromoted"] == 1
+    assert result["progress"]["provisional"]["reviewRequired"] == 1
+    assert result["progress"]["provisional"]["rejected"] == 1
 
 
 def test_request_graph_pauses_when_recovery_budget_is_exhausted():

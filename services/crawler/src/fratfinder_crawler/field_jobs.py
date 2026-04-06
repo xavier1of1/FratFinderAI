@@ -723,7 +723,7 @@ class FieldJobEngine:
             return False
         if self._search_queries_attempted <= 0 or self._search_queries_failed < self._search_queries_attempted:
             return False
-        queue_state = ((job.payload.get("contactResolution") or {}).get("queueState") if isinstance(job.payload.get("contactResolution"), dict) else None) or "actionable"
+        queue_state = job.queue_state or ((job.payload.get("contactResolution") or {}).get("queueState") if isinstance(job.payload.get("contactResolution"), dict) else None) or "actionable"
         return queue_state == "deferred" and self._payload_int(job.payload.get("transient_provider_failures")) >= self._transient_short_retries and int(job.attempts or 0) > 1
 
     def _candidate_result(self, job: FieldJob, match: CandidateMatch, target_field: str) -> FieldJobResult:

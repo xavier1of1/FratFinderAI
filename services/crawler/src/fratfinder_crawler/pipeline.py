@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+from threading import Event, Thread
 from datetime import datetime, timezone
 from pathlib import Path
 import time
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import requests
 
@@ -163,6 +165,8 @@ class CrawlService:
             1,
             int(poll_seconds if poll_seconds is not None else self._settings.crawler_v3_request_poll_seconds),
         )
+        lease_seconds = max(30, int(self._settings.crawler_v3_request_worker_lease_seconds))
+        heartbeat_seconds = max(5, min(int(self._settings.crawler_v3_request_worker_heartbeat_seconds), max(5, lease_seconds // 2)))
         summaries: list[dict[str, object]] = []
         stale_recovered_total = 0
         idle_cycles = 0
@@ -175,43 +179,99 @@ class CrawlService:
             once=once,
             batch_limit=batch_limit,
             poll_seconds=effective_poll_seconds,
+            lease_seconds=lease_seconds,
+            heartbeat_seconds=heartbeat_seconds,
         )
 
-        while True:
+        try:
             with get_connection(self._settings) as connection:
                 request_repository = RequestGraphRepository(connection)
-                stale_recovered_total += request_repository.reconcile_stale_requests(
-                    self._settings.crawler_v3_request_stale_minutes
+                request_repository.upsert_worker_process(
+                    worker_id=self._settings.crawler_v3_request_worker_id,
+                    workload_lane="request",
+                    runtime_owner=self._settings.crawler_v3_request_worker_runtime_owner,
+                    lease_seconds=lease_seconds,
+                    metadata={"runtimeMode": runtime_mode},
                 )
-                request = request_repository.claim_next_due_request(self._settings.crawler_v3_request_worker_id)
 
-            if request is None:
-                idle_cycles += 1
-                if once or len(summaries) >= batch_limit:
+            while True:
+                with get_connection(self._settings) as connection:
+                    request_repository = RequestGraphRepository(connection)
+                    request_repository.heartbeat_worker_process(
+                        self._settings.crawler_v3_request_worker_id,
+                        lease_seconds=lease_seconds,
+                    )
+                    stale_recovered_total += request_repository.reconcile_stale_requests(
+                        self._settings.crawler_v3_request_stale_minutes
+                    )
+                    request_lease_token = str(uuid4())
+                    request = request_repository.claim_next_due_request(
+                        self._settings.crawler_v3_request_worker_id,
+                        lease_token=request_lease_token,
+                        lease_seconds=lease_seconds,
+                    )
+
+                if request is None:
+                    idle_cycles += 1
+                    if once or len(summaries) >= batch_limit:
+                        break
+                    time.sleep(effective_poll_seconds)
+                    continue
+
+                idle_cycles = 0
+                log_event(
+                    LOGGER,
+                    "request_worker_claimed_request",
+                    worker_id=self._settings.crawler_v3_request_worker_id,
+                    request_id=request.id,
+                    fraternity_slug=request.fraternity_slug,
+                    source_slug=request.source_slug,
+                    stage=request.stage,
+                )
+                heartbeat_stop = Event()
+                heartbeat_thread = Thread(
+                    target=self._heartbeat_request_worker,
+                    kwargs={
+                        "request_id": request.id,
+                        "lease_token": request_lease_token,
+                        "lease_seconds": lease_seconds,
+                        "heartbeat_seconds": heartbeat_seconds,
+                        "stop_event": heartbeat_stop,
+                        "runtime_mode": runtime_mode,
+                    },
+                    daemon=True,
+                    name=f"request-worker-heartbeat-{request.id}",
+                )
+                heartbeat_thread.start()
+                try:
+                    summary = self.run_request(
+                        request_id=request.id,
+                        runtime_mode=runtime_mode,
+                        crawl_runtime_mode=self._settings.crawler_v3_crawl_runtime_mode,
+                        field_job_runtime_mode=self._settings.crawler_v3_field_job_runtime_mode,
+                        graph_durability=self._settings.crawler_v3_field_job_graph_durability,
+                    )
+                finally:
+                    heartbeat_stop.set()
+                    heartbeat_thread.join(timeout=max(heartbeat_seconds, 5))
+                    with get_connection(self._settings) as connection:
+                        request_repository = RequestGraphRepository(connection)
+                        request_repository.release_request_lease(
+                            request_id=request.id,
+                            worker_id=self._settings.crawler_v3_request_worker_id,
+                            lease_token=request_lease_token,
+                        )
+                        request_repository.heartbeat_worker_process(
+                            self._settings.crawler_v3_request_worker_id,
+                            lease_seconds=lease_seconds,
+                        )
+                summaries.append(summary)
+                if once and len(summaries) >= batch_limit:
                     break
-                time.sleep(effective_poll_seconds)
-                continue
-
-            idle_cycles = 0
-            log_event(
-                LOGGER,
-                "request_worker_claimed_request",
-                worker_id=self._settings.crawler_v3_request_worker_id,
-                request_id=request.id,
-                fraternity_slug=request.fraternity_slug,
-                source_slug=request.source_slug,
-                stage=request.stage,
-            )
-            summary = self.run_request(
-                request_id=request.id,
-                runtime_mode=runtime_mode,
-                crawl_runtime_mode=self._settings.crawler_v3_crawl_runtime_mode,
-                field_job_runtime_mode=self._settings.crawler_v3_field_job_runtime_mode,
-                graph_durability=self._settings.crawler_v3_field_job_graph_durability,
-            )
-            summaries.append(summary)
-            if once and len(summaries) >= batch_limit:
-                break
+        finally:
+            with get_connection(self._settings) as connection:
+                request_repository = RequestGraphRepository(connection)
+                request_repository.stop_worker_process(self._settings.crawler_v3_request_worker_id, status="stopped")
 
         aggregate = {
             "workerId": self._settings.crawler_v3_request_worker_id,
@@ -226,6 +286,40 @@ class CrawlService:
         }
         log_event(LOGGER, "request_worker_finished", **aggregate)
         return aggregate
+
+    def _heartbeat_request_worker(
+        self,
+        *,
+        request_id: str,
+        lease_token: str,
+        lease_seconds: int,
+        heartbeat_seconds: int,
+        stop_event: Event,
+        runtime_mode: str,
+    ) -> None:
+        while not stop_event.wait(heartbeat_seconds):
+            try:
+                with get_connection(self._settings) as connection:
+                    request_repository = RequestGraphRepository(connection)
+                    request_repository.heartbeat_worker_process(
+                        self._settings.crawler_v3_request_worker_id,
+                        lease_seconds=lease_seconds,
+                    )
+                    request_repository.heartbeat_request_lease(
+                        request_id=request_id,
+                        worker_id=self._settings.crawler_v3_request_worker_id,
+                        lease_token=lease_token,
+                        lease_seconds=lease_seconds,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive heartbeat logging
+                log_event(
+                    LOGGER,
+                    "request_worker_heartbeat_failed",
+                    worker_id=self._settings.crawler_v3_request_worker_id,
+                    request_id=request_id,
+                    runtime_mode=runtime_mode,
+                    error=str(exc),
+                )
 
     def adaptive_train_eval(
         self,
@@ -1029,68 +1123,15 @@ class CrawlService:
             repairable_jobs_by_chapter.setdefault(job.chapter_id, []).append(job)
 
         for chapter_jobs in repairable_jobs_by_chapter.values():
+            seed_job = chapter_jobs[0]
             repair_summary["queued"] += len(chapter_jobs)
-            outcome = self._repair_chapter_identity(repository, chapter_jobs[0], policy_pack=policy_pack)
-            if outcome["status"] == "promoted_to_canonical_valid":
-                for job in chapter_jobs:
-                    repository.patch_queued_field_job(
-                        job.id,
-                        payload_patch={
-                            "queueTriage": {
-                                "outcome": "keep_actionable",
-                                "validityClass": "canonical_valid",
-                                "repairOutcome": outcome["status"],
-                            },
-                            "contactResolution": {
-                                "queueState": "actionable",
-                                "validityClass": "canonical_valid",
-                            },
-                        },
-                        status="queued",
-                        scheduled_delay_seconds=0,
-                        last_error="",
-                        terminal_failure=False,
-                    )
-                    triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
-                    repair_summary["reconciledHistorical"] += 1
-                repair_summary["promotedToCanonical"] += len(chapter_jobs)
-                continue
-
-            if outcome["status"] == "confirmed_invalid":
-                for job in chapter_jobs:
-                    repository.patch_queued_field_job(
-                        job.id,
-                        payload_patch={
-                            "queueTriage": {
-                                "outcome": "cancel_invalid",
-                                "validityClass": "invalid_non_chapter",
-                                "invalidReason": outcome.get("reason") or "identity_semantically_invalid",
-                                "repairOutcome": outcome["status"],
-                            },
-                            "contactResolution": {
-                                "queueState": "blocked_invalid",
-                                "validityClass": "invalid_non_chapter",
-                                "reasonCode": outcome.get("reason") or "identity_semantically_invalid",
-                            },
-                        },
-                        status="failed",
-                        last_error=f"Canceled invalid repair candidate: {outcome.get('reason') or 'identity_semantically_invalid'}",
-                        terminal_failure=True,
-                        completed_payload={
-                            "status": "blocked_invalid",
-                            "reasonCode": outcome.get("reason") or "identity_semantically_invalid",
-                            "validityClass": "invalid_non_chapter",
-                        },
-                    )
-                    triage_summary["invalidCancelled"] = int(triage_summary["invalidCancelled"]) + 1
-                    repair_summary["reconciledHistorical"] += 1
-                repair_summary["confirmedInvalid"] += len(chapter_jobs)
-                continue
-
-            delay_seconds = 86_400 if policy_pack.get("force_long_repair_cooldown") else 43_200
-            outcome_key = "repair_exhausted"
-            if outcome["status"] == "downgraded_to_provisional":
-                outcome_key = "downgraded_to_provisional"
+            repository.enqueue_chapter_repair_job(
+                chapter_id=seed_job.chapter_id,
+                source_slug=seed_job.source_slug,
+                priority=max(job.priority for job in chapter_jobs),
+                payload=self._build_chapter_repair_payload(seed_job, policy_pack=policy_pack),
+            )
+            delay_seconds = 900
             for job in chapter_jobs:
                 repository.patch_queued_field_job(
                     job.id,
@@ -1098,26 +1139,25 @@ class CrawlService:
                         "queueTriage": {
                             "outcome": "requires_entity_repair",
                             "validityClass": "repairable_candidate",
-                            "repairReason": outcome.get("reason") or "identity_semantically_incomplete",
-                            "repairOutcome": outcome_key,
+                            "repairReason": "queued_for_entity_repair",
+                        },
+                        "chapterRepair": {
+                            "state": "queued",
+                            "sourceSlug": seed_job.source_slug,
                         },
                         "contactResolution": {
                             "queueState": "deferred",
                             "validityClass": "repairable_candidate",
-                            "reasonCode": outcome.get("reason") or "repair_exhausted",
+                            "reasonCode": "queued_for_entity_repair",
                         },
                     },
                     status="queued",
                     scheduled_delay_seconds=delay_seconds,
-                    last_error="Deferred until chapter identity repair succeeds",
+                    last_error="Deferred until chapter repair queue finishes",
                     terminal_failure=False,
                 )
                 triage_summary["repairQueued"] = int(triage_summary["repairQueued"]) + 1
                 repair_summary["reconciledHistorical"] += 1
-            if outcome_key == "downgraded_to_provisional":
-                repair_summary["downgradedToProvisional"] += len(chapter_jobs)
-            else:
-                repair_summary["repairExhausted"] += len(chapter_jobs)
 
         triaged = int(triage_summary["triaged"])
         blocked = int(triage_summary["invalidCancelled"]) + int(triage_summary["repairQueued"]) + int(triage_summary["deferredLongCooldown"])
@@ -1170,6 +1210,170 @@ class CrawlService:
         if repaired_university:
             return {"status": "downgraded_to_provisional", "reason": "repair_not_canonical"}
         return {"status": "repair_exhausted", "reason": "identity_semantically_incomplete"}
+
+    def _build_chapter_repair_payload(self, job: FieldJob, *, policy_pack: dict[str, object]) -> dict[str, object]:
+        return {
+            "origin": "historical_queue_reconciliation",
+            "chapterSlug": job.chapter_slug,
+            "chapterName": job.chapter_name,
+            "sourceSlug": job.source_slug,
+            "universityName": job.university_name,
+            "websiteUrl": job.website_url,
+            "instagramUrl": job.instagram_url,
+            "contactEmail": job.contact_email,
+            "sourceBaseUrl": job.source_base_url,
+            "sourceListUrl": job.payload.get("sourceListUrl") if isinstance(job.payload.get("sourceListUrl"), str) else None,
+            "policyPack": str(policy_pack.get("name") or "default"),
+        }
+
+    def _process_chapter_repair_queue(
+        self,
+        repository: CrawlerRepository,
+        *,
+        source_slug: str | None,
+        limit: int,
+        policy_pack: dict[str, object],
+    ) -> dict[str, int]:
+        summary = {
+            "queued": 0,
+            "running": 0,
+            "promotedToCanonical": 0,
+            "downgradedToProvisional": 0,
+            "confirmedInvalid": 0,
+            "repairExhausted": 0,
+            "reconciledHistorical": 0,
+        }
+        for _ in range(max(0, limit)):
+            repair_job = repository.claim_next_chapter_repair_job(self._settings.crawler_field_job_worker_id, source_slug=source_slug)
+            if repair_job is None:
+                break
+            summary["running"] += 1
+            synthetic_job = FieldJob(
+                id=repair_job.id,
+                chapter_id=repair_job.chapter_id,
+                chapter_slug=repair_job.chapter_slug,
+                chapter_name=repair_job.chapter_name,
+                field_name="verify_school",
+                payload=dict(repair_job.payload or {}),
+                attempts=repair_job.attempts,
+                max_attempts=repair_job.max_attempts,
+                claim_token=repair_job.claim_token,
+                source_base_url=repair_job.payload.get("sourceBaseUrl") if isinstance(repair_job.payload.get("sourceBaseUrl"), str) else None,
+                website_url=repair_job.website_url,
+                instagram_url=repair_job.instagram_url,
+                contact_email=repair_job.contact_email,
+                source_slug=repair_job.source_slug,
+                university_name=repair_job.university_name,
+            )
+            outcome = self._repair_chapter_identity(repository, synthetic_job, policy_pack=policy_pack)
+            related_jobs = repository.list_queued_field_jobs_for_chapter(repair_job.chapter_id)
+            affected_count = max(1, len(related_jobs))
+
+            if outcome["status"] == "promoted_to_canonical_valid":
+                for job in related_jobs:
+                    repository.patch_queued_field_job(
+                        job.id,
+                        payload_patch={
+                            "queueTriage": {
+                                "outcome": "keep_actionable",
+                                "validityClass": "canonical_valid",
+                                "repairOutcome": outcome["status"],
+                            },
+                            "chapterRepair": {
+                                "state": "promoted_to_canonical_valid",
+                            },
+                            "contactResolution": {
+                                "queueState": "actionable",
+                                "validityClass": "canonical_valid",
+                            },
+                        },
+                        status="queued",
+                        scheduled_delay_seconds=0,
+                        last_error="",
+                        terminal_failure=False,
+                    )
+                repository.complete_chapter_repair_job(
+                    repair_job,
+                    repair_state="promoted_to_canonical_valid",
+                    result_payload=outcome,
+                )
+                summary["promotedToCanonical"] += affected_count
+                continue
+
+            if outcome["status"] == "confirmed_invalid":
+                for job in related_jobs:
+                    repository.patch_queued_field_job(
+                        job.id,
+                        payload_patch={
+                            "queueTriage": {
+                                "outcome": "cancel_invalid",
+                                "validityClass": "invalid_non_chapter",
+                                "invalidReason": outcome.get("reason") or "identity_semantically_invalid",
+                                "repairOutcome": outcome["status"],
+                            },
+                            "chapterRepair": {
+                                "state": "confirmed_invalid",
+                            },
+                            "contactResolution": {
+                                "queueState": "blocked_invalid",
+                                "validityClass": "invalid_non_chapter",
+                                "reasonCode": outcome.get("reason") or "identity_semantically_invalid",
+                            },
+                        },
+                        status="failed",
+                        last_error=f"Canceled invalid repair candidate: {outcome.get('reason') or 'identity_semantically_invalid'}",
+                        terminal_failure=True,
+                        completed_payload={
+                            "status": "blocked_invalid",
+                            "reasonCode": outcome.get("reason") or "identity_semantically_invalid",
+                            "validityClass": "invalid_non_chapter",
+                        },
+                    )
+                repository.complete_chapter_repair_job(
+                    repair_job,
+                    repair_state="confirmed_invalid",
+                    result_payload=outcome,
+                )
+                summary["confirmedInvalid"] += affected_count
+                continue
+
+            next_state = "downgraded_to_provisional" if outcome["status"] == "downgraded_to_provisional" else "repair_exhausted"
+            delay_seconds = 86_400 if policy_pack.get("force_long_repair_cooldown") else 43_200
+            for job in related_jobs:
+                repository.patch_queued_field_job(
+                    job.id,
+                    payload_patch={
+                        "queueTriage": {
+                            "outcome": "requires_entity_repair",
+                            "validityClass": "repairable_candidate",
+                            "repairReason": outcome.get("reason") or "identity_semantically_incomplete",
+                            "repairOutcome": next_state,
+                        },
+                        "chapterRepair": {
+                            "state": next_state,
+                        },
+                        "contactResolution": {
+                            "queueState": "deferred",
+                            "validityClass": "repairable_candidate",
+                            "reasonCode": outcome.get("reason") or "repair_exhausted",
+                        },
+                    },
+                    status="queued",
+                    scheduled_delay_seconds=delay_seconds,
+                    last_error="Deferred until chapter repair queue finishes",
+                    terminal_failure=False,
+                )
+            repository.complete_chapter_repair_job(
+                repair_job,
+                repair_state=next_state,
+                result_payload=outcome,
+            )
+            if next_state == "downgraded_to_provisional":
+                summary["downgradedToProvisional"] += affected_count
+            else:
+                summary["repairExhausted"] += affected_count
+
+        return summary
 
     def process_field_jobs(
         self,
@@ -1226,6 +1430,14 @@ class CrawlService:
                 limit=max(limit * 6, 120) if source_slug is None else max(limit * 20, 1000),
                 policy_pack=policy_pack,
             )
+            queued_repair_summary = self._process_chapter_repair_queue(
+                repository,
+                source_slug=source_slug,
+                limit=max(1, min(limit, max(1, effective_workers))),
+                policy_pack=policy_pack,
+            )
+            for key, value in queued_repair_summary.items():
+                repair_summary[key] = int(repair_summary.get(key, 0) or 0) + int(value or 0)
 
         if stale_jobs_recovered or stale_graph_runs_recovered:
             log_event(

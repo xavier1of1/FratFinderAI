@@ -1,5 +1,14 @@
 # V4 Platform Architecture (High-Fidelity)
 
+Status: `Transitional`
+
+This document is a migration-period architecture view.
+It shows the current platform layering while explicitly preserving the places where ownership is still transitional rather than fully converged.
+Use it together with:
+
+- `CURRENT_IMPLEMENTED_QUEUE_ARCHITECTURE.md` for the implementation-accurate queue system
+- `V3_SYSTEM_OVERVIEW.md` for the target-state graph-native design
+
 This visual shows the entire platform as a layered runtime system, from operators and APIs down to execution engines and storage.
 
 Goals of this version:

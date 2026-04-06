@@ -12,7 +12,107 @@ class RequestGraphRepository:
     def __init__(self, connection: psycopg.Connection):
         self._connection = connection
 
-    def claim_next_due_request(self, worker_id: str) -> FraternityCrawlRequestRecord | None:
+    def upsert_worker_process(
+        self,
+        *,
+        worker_id: str,
+        workload_lane: str,
+        runtime_owner: str,
+        status: str = "active",
+        lease_seconds: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO worker_processes (
+                    worker_id,
+                    workload_lane,
+                    runtime_owner,
+                    hostname,
+                    process_id,
+                    status,
+                    lease_expires_at,
+                    last_heartbeat_at,
+                    metadata
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    inet_client_addr()::text,
+                    pg_backend_pid(),
+                    %s,
+                    CASE
+                      WHEN %s::int IS NULL THEN NULL
+                      ELSE NOW() + (%s::int * INTERVAL '1 second')
+                    END,
+                    NOW(),
+                    %s
+                )
+                ON CONFLICT (worker_id)
+                DO UPDATE SET
+                    workload_lane = EXCLUDED.workload_lane,
+                    runtime_owner = EXCLUDED.runtime_owner,
+                    hostname = EXCLUDED.hostname,
+                    process_id = EXCLUDED.process_id,
+                    status = EXCLUDED.status,
+                    lease_expires_at = EXCLUDED.lease_expires_at,
+                    last_heartbeat_at = NOW(),
+                    metadata = EXCLUDED.metadata
+                """,
+                (
+                    worker_id,
+                    workload_lane,
+                    runtime_owner,
+                    status,
+                    lease_seconds,
+                    lease_seconds,
+                    Jsonb(metadata or {}),
+                ),
+            )
+        self._connection.commit()
+
+    def heartbeat_worker_process(self, worker_id: str, lease_seconds: int | None = None) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE worker_processes
+                SET
+                    last_heartbeat_at = NOW(),
+                    lease_expires_at = CASE
+                      WHEN %s::int IS NULL THEN lease_expires_at
+                      ELSE NOW() + (%s::int * INTERVAL '1 second')
+                    END,
+                    status = 'active'
+                WHERE worker_id = %s
+                """,
+                (lease_seconds, lease_seconds, worker_id),
+            )
+        self._connection.commit()
+
+    def stop_worker_process(self, worker_id: str, status: str = "stopped") -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE worker_processes
+                SET
+                    status = %s,
+                    lease_expires_at = NULL,
+                    last_heartbeat_at = NOW()
+                WHERE worker_id = %s
+                """,
+                (status, worker_id),
+            )
+        self._connection.commit()
+
+    def claim_next_due_request(
+        self,
+        worker_id: str,
+        *,
+        lease_token: str | None = None,
+        lease_seconds: int | None = None,
+    ) -> FraternityCrawlRequestRecord | None:
         with self._connection.transaction(), self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -21,6 +121,11 @@ class RequestGraphRepository:
                     FROM fraternity_crawl_requests
                     WHERE status = 'queued'
                       AND scheduled_for <= NOW()
+                      AND (
+                        runtime_worker_id IS NULL
+                        OR runtime_lease_expires_at IS NULL
+                        OR runtime_lease_expires_at < NOW()
+                      )
                     ORDER BY priority DESC, scheduled_for ASC
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -31,6 +136,13 @@ class RequestGraphRepository:
                     started_at = COALESCE(started_at, NOW()),
                     finished_at = NULL,
                     last_error = NULL,
+                    runtime_worker_id = %s,
+                    runtime_lease_token = %s,
+                    runtime_lease_expires_at = CASE
+                      WHEN %s::int IS NULL THEN NULL
+                      ELSE NOW() + (%s::int * INTERVAL '1 second')
+                    END,
+                    runtime_last_heartbeat_at = NOW(),
                     updated_at = NOW()
                 FROM next_request
                 WHERE r.id = next_request.id
@@ -46,13 +158,17 @@ class RequestGraphRepository:
                     r.scheduled_for,
                     r.started_at,
                     r.finished_at,
+                    r.runtime_worker_id,
+                    r.runtime_lease_expires_at,
+                    r.runtime_last_heartbeat_at,
                     r.priority,
                     r.config,
                     r.progress,
                     r.last_error,
                     r.created_at,
                     r.updated_at
-                """
+                """,
+                (worker_id, lease_token, lease_seconds, lease_seconds),
             )
             row = cursor.fetchone()
         return self._map_request(row) if row else None
@@ -73,6 +189,9 @@ class RequestGraphRepository:
                     scheduled_for,
                     started_at,
                     finished_at,
+                    runtime_worker_id,
+                    runtime_lease_expires_at,
+                    runtime_last_heartbeat_at,
                     priority,
                     config,
                     progress,
@@ -173,9 +292,15 @@ class RequestGraphRepository:
                     status = 'failed',
                     stage = 'failed',
                     finished_at = NOW(),
-                    last_error = COALESCE(last_error, %s)
+                    last_error = COALESCE(last_error, %s),
+                    runtime_worker_id = NULL,
+                    runtime_lease_token = NULL,
+                    runtime_lease_expires_at = NULL
                 WHERE status = 'running'
-                  AND updated_at < NOW() - (%s::int * INTERVAL '1 minute')
+                  AND (
+                    (runtime_lease_expires_at IS NOT NULL AND runtime_lease_expires_at < NOW())
+                    OR (runtime_lease_expires_at IS NULL AND updated_at < NOW() - (%s::int * INTERVAL '1 minute'))
+                  )
                 """,
                 (
                     'Fraternity crawl request stalled before completion',
@@ -185,6 +310,47 @@ class RequestGraphRepository:
             count = cursor.rowcount
         self._connection.commit()
         return int(count or 0)
+
+    def heartbeat_request_lease(
+        self,
+        *,
+        request_id: str,
+        worker_id: str,
+        lease_token: str,
+        lease_seconds: int,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE fraternity_crawl_requests
+                SET
+                    runtime_lease_expires_at = NOW() + (%s::int * INTERVAL '1 second'),
+                    runtime_last_heartbeat_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s
+                  AND runtime_worker_id = %s
+                  AND runtime_lease_token = %s
+                """,
+                (max(15, int(lease_seconds)), request_id, worker_id, lease_token),
+            )
+        self._connection.commit()
+
+    def release_request_lease(self, *, request_id: str, worker_id: str, lease_token: str) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE fraternity_crawl_requests
+                SET
+                    runtime_worker_id = NULL,
+                    runtime_lease_token = NULL,
+                    runtime_lease_expires_at = NULL
+                WHERE id = %s
+                  AND runtime_worker_id = %s
+                  AND runtime_lease_token = %s
+                """,
+                (request_id, worker_id, lease_token),
+            )
+        self._connection.commit()
 
     def get_latest_crawl_run_for_source(
         self,
@@ -253,16 +419,16 @@ class RequestGraphRepository:
                     COUNT(*) FILTER (WHERE fj.status = 'failed')::int AS failed,
                     COUNT(*) FILTER (
                         WHERE fj.status = 'queued'
-                          AND COALESCE(fj.payload -> 'contactResolution' ->> 'queueState', 'actionable') = 'actionable'
+                          AND COALESCE(fj.queue_state, 'actionable') = 'actionable'
                     )::int AS queued_actionable,
                     COUNT(*) FILTER (
                         WHERE fj.status = 'queued'
-                          AND COALESCE(fj.payload -> 'contactResolution' ->> 'queueState', 'actionable') = 'deferred'
+                          AND COALESCE(fj.queue_state, 'actionable') = 'deferred'
                     )::int AS queued_deferred,
-                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.completed_payload ->> 'status', '') = 'updated')::int AS done_updated,
-                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.completed_payload ->> 'status', '') = 'review_required')::int AS done_review_required,
-                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.completed_payload ->> 'status', '') = 'terminal_no_signal')::int AS done_terminal_no_signal,
-                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.completed_payload ->> 'status', '') = 'provider_degraded')::int AS done_provider_degraded
+                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.terminal_outcome, '') = 'updated')::int AS done_updated,
+                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.terminal_outcome, '') = 'review_required')::int AS done_review_required,
+                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.terminal_outcome, '') = 'terminal_no_signal')::int AS done_terminal_no_signal,
+                    COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.terminal_outcome, '') = 'provider_degraded')::int AS done_provider_degraded
                 FROM field_jobs fj
                 JOIN crawl_runs cr ON cr.id = fj.crawl_run_id
                 JOIN sources s ON s.id = cr.source_id
@@ -556,6 +722,93 @@ class RequestGraphRepository:
         self._connection.commit()
         return str(row['id'])
 
+    def list_provisional_chapters_for_request(
+        self,
+        request_id: str,
+        *,
+        statuses: tuple[str, ...] = ("provisional",),
+        limit: int = 200,
+    ) -> list[ProvisionalChapterRecord]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id::text AS id,
+                    fraternity_id,
+                    source_id,
+                    request_id,
+                    promoted_chapter_id,
+                    slug,
+                    name,
+                    university_name,
+                    city,
+                    state,
+                    country,
+                    website_url,
+                    instagram_url,
+                    contact_email,
+                    status,
+                    promotion_reason,
+                    evidence_payload,
+                    created_at::text AS created_at,
+                    updated_at::text AS updated_at
+                FROM provisional_chapters
+                WHERE request_id = %s
+                  AND status = ANY(%s)
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (request_id, list(statuses), max(1, limit)),
+            )
+            rows = cursor.fetchall()
+        return [
+            ProvisionalChapterRecord(
+                id=str(row["id"]),
+                fraternity_id=str(row["fraternity_id"]),
+                source_id=str(row["source_id"]) if row.get("source_id") else None,
+                request_id=str(row["request_id"]) if row.get("request_id") else None,
+                promoted_chapter_id=str(row["promoted_chapter_id"]) if row.get("promoted_chapter_id") else None,
+                slug=str(row["slug"]),
+                name=str(row["name"]),
+                university_name=row.get("university_name"),
+                city=row.get("city"),
+                state=row.get("state"),
+                country=row.get("country") or "USA",
+                website_url=row.get("website_url"),
+                instagram_url=row.get("instagram_url"),
+                contact_email=row.get("contact_email"),
+                status=str(row["status"]),
+                promotion_reason=row.get("promotion_reason"),
+                evidence_payload=dict(row.get("evidence_payload") or {}),
+                created_at=row.get("created_at"),
+                updated_at=row.get("updated_at"),
+            )
+            for row in rows
+        ]
+
+    def update_provisional_chapter_status(
+        self,
+        provisional_id: str,
+        *,
+        status: str,
+        promotion_reason: str | None = None,
+        promoted_chapter_id: str | None = None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE provisional_chapters
+                SET
+                    status = %s,
+                    promotion_reason = COALESCE(%s, promotion_reason),
+                    promoted_chapter_id = COALESCE(%s, promoted_chapter_id),
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (status, promotion_reason, promoted_chapter_id, provisional_id),
+            )
+        self._connection.commit()
+
     def insert_provider_health_snapshot(
         self,
         *,
@@ -607,6 +860,9 @@ class RequestGraphRepository:
             started_at=row['started_at'].isoformat() if row.get('started_at') else None,
             finished_at=row['finished_at'].isoformat() if row.get('finished_at') else None,
             priority=int(row['priority'] or 0),
+            runtime_worker_id=row.get('runtime_worker_id'),
+            runtime_lease_expires_at=row['runtime_lease_expires_at'].isoformat() if row.get('runtime_lease_expires_at') else None,
+            runtime_last_heartbeat_at=row['runtime_last_heartbeat_at'].isoformat() if row.get('runtime_last_heartbeat_at') else None,
             config=row['config'] or {},
             progress=row['progress'] or {},
             last_error=row['last_error'],

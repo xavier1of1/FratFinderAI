@@ -1,10 +1,12 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
-import { isCampaignRunActive, scheduleCampaignRun, scheduleDueCampaignRuns } from "@/lib/campaign-runner";
+import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
+import { createEvaluationJob } from "@/lib/repositories/evaluation-job-repository";
 import { createCampaignRun, listCampaignRuns, reconcileStaleCampaignRuns } from "@/lib/repositories/campaign-run-repository";
 import type { CampaignRun, CampaignRunConfig } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 const campaignPayloadSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
@@ -47,8 +49,12 @@ function formatDefaultCampaignName(config?: Partial<CampaignRunConfig>): string 
 }
 
 function toCampaignListItem(campaign: CampaignRun): CampaignRun {
+  const runtimeActive =
+    Boolean(campaign.runtimeWorkerId) &&
+    (!campaign.runtimeLeaseExpiresAt || new Date(campaign.runtimeLeaseExpiresAt).getTime() >= Date.now());
   return {
     ...campaign,
+    runtimeActive,
     telemetry: {
       providerHealth: campaign.telemetry.providerHealth ?? null,
       providerHealthHistory: [],
@@ -76,23 +82,10 @@ function toCampaignListItem(campaign: CampaignRun): CampaignRun {
 
 export async function GET(request: NextRequest) {
   try {
-    await reconcileStaleCampaignRuns();
-    await scheduleDueCampaignRuns();
-
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "50");
     const data = await listCampaignRuns(Number.isNaN(limit) ? 50 : Math.min(Math.max(limit, 1), 200));
-    for (const campaign of data) {
-      if (campaign.status === "running" && !isCampaignRunActive(campaign.id)) {
-        await scheduleCampaignRun(campaign.id);
-      }
-    }
-    return apiSuccess(
-      data.map((campaign) => ({
-        ...toCampaignListItem(campaign),
-        runtimeActive: isCampaignRunActive(campaign.id)
-      }))
-    );
+    return apiSuccess(data.map((campaign) => toCampaignListItem(campaign)));
   } catch (error) {
     return toApiErrorResponse(error);
   }
@@ -109,14 +102,15 @@ export async function POST(request: NextRequest) {
       scheduledFor: payload.scheduledFor
     });
 
-    const scheduled = await scheduleCampaignRun(created.id);
-    if (!scheduled) {
-      return apiError({
-        status: 409,
-        code: "campaign_already_running",
-        message: `Campaign ${created.id} is already running.`
-      });
-    }
+    await createEvaluationJob({
+      jobKind: "campaign_run",
+      campaignRunId: created.id,
+      isolationMode: "shared_live_observed",
+      payload: {
+        scheduledFor: created.scheduledFor,
+        programMode: created.config.programMode,
+      },
+    });
 
     const data = (await listCampaignRuns(1)).find((item) => item.id === created.id) ?? created;
     return apiSuccess(data, { status: 202 });

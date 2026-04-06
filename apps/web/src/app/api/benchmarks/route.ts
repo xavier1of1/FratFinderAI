@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
-import { scheduleBenchmarkRun } from "@/lib/benchmark-runner";
+import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
+import { createEvaluationJob } from "@/lib/repositories/evaluation-job-repository";
 import { createBenchmarkRun, failStaleBenchmarkRuns, getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
 import type { BenchmarkFieldName, BenchmarkRunConfig } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
 
 const DEFAULT_RUNTIME_MODE = (() => {
   const value = String(process.env.BENCHMARK_CRAWL_RUNTIME_MODE ?? "adaptive_assisted").trim();
@@ -47,7 +48,8 @@ const benchmarkPayloadSchema = z.object({
   crawlRuntimeMode: z.enum(["legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"]).default(DEFAULT_RUNTIME_MODE),
   fieldJobRuntimeMode: z.enum(["legacy", "langgraph_shadow", "langgraph_primary"]).default(DEFAULT_FIELD_JOB_RUNTIME_MODE),
   fieldJobGraphDurability: z.enum(["exit", "async", "sync"]).default(DEFAULT_FIELD_JOB_GRAPH_DURABILITY),
-  runAdaptiveCrawlBeforeCycles: z.coerce.boolean().default(DEFAULT_WARMUP)
+  runAdaptiveCrawlBeforeCycles: z.coerce.boolean().default(DEFAULT_WARMUP),
+  isolationMode: z.enum(["shared_live_observed", "strict_live_isolated"]).default("shared_live_observed")
 });
 
 function formatDefaultBenchmarkName(fieldName: BenchmarkFieldName): string {
@@ -57,7 +59,6 @@ function formatDefaultBenchmarkName(fieldName: BenchmarkFieldName): string {
 
 export async function GET(request: NextRequest) {
   try {
-    await failStaleBenchmarkRuns();
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "100");
 
@@ -87,7 +88,8 @@ export async function POST(request: NextRequest) {
       crawlRuntimeMode: payload.crawlRuntimeMode,
       fieldJobRuntimeMode: payload.fieldJobRuntimeMode,
       fieldJobGraphDurability: payload.fieldJobGraphDurability,
-      runAdaptiveCrawlBeforeCycles: payload.runAdaptiveCrawlBeforeCycles
+      runAdaptiveCrawlBeforeCycles: payload.runAdaptiveCrawlBeforeCycles,
+      isolationMode: payload.isolationMode
     };
 
     const created = await createBenchmarkRun({
@@ -97,14 +99,17 @@ export async function POST(request: NextRequest) {
       config
     });
 
-    const scheduled = await scheduleBenchmarkRun(created.id);
-    if (!scheduled) {
-      return apiError({
-        status: 409,
-        code: "benchmark_already_running",
-        message: `Benchmark ${created.id} is already running.`
-      });
-    }
+    await createEvaluationJob({
+      jobKind: "benchmark_run",
+      benchmarkRunId: created.id,
+      sourceSlug,
+      isolationMode: payload.isolationMode,
+      payload: {
+        fieldName,
+        sourceSlug,
+        isolationMode: payload.isolationMode,
+      },
+    });
 
     const latest = await getBenchmarkRun(created.id);
     return apiSuccess(latest ?? created, { status: 202 });

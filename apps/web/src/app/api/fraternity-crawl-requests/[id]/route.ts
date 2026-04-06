@@ -6,11 +6,12 @@ import { scheduleDueFraternityCrawlRequests, scheduleFraternityCrawlRequest } fr
 import {
   appendFraternityCrawlRequestEvent,
   getFraternityCrawlRequest,
-  reconcileStaleFraternityCrawlRequests,
   updateFraternityCrawlRequest,
   upsertFraternityRecord,
   upsertSourceRecord
 } from "@/lib/repositories/fraternity-crawl-request-repository";
+
+export const dynamic = "force-dynamic";
 
 const patchSchema = z.object({
   action: z.enum(["confirm", "cancel", "reschedule"]),
@@ -40,9 +41,6 @@ function getDiscoveredSourceUrl(current: Awaited<ReturnType<typeof getFraternity
 
 export async function GET(_: NextRequest, context: { params: { id: string } }) {
   try {
-    await reconcileStaleFraternityCrawlRequests();
-    await scheduleDueFraternityCrawlRequests();
-
     const run = await getFraternityCrawlRequest(context.params.id);
     if (!run) {
       return apiError({ status: 404, code: "not_found", message: `Fraternity crawl request ${context.params.id} not found` });

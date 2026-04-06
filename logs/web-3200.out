@@ -3,3 +3,6 @@
 
  ✓ Starting...
  ✓ Ready in 526ms
+undefined
+D:\VSC Programs\FratFinderAI\apps\web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "next" not found

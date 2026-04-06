@@ -414,7 +414,10 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
     if (recoveryAttempts < 1) {
       try {
         const rediscovered = await discoverFraternitySource(request.fraternityName);
-        const alternateCandidate = pickBestDiscoveryCandidate(rediscovered.candidates, request.sourceUrl);
+        const alternateCandidate = pickBestDiscoveryCandidate(rediscovered.candidates, request.sourceUrl, {
+          fraternityName: request.fraternityName,
+          fraternitySlug: request.fraternitySlug,
+        });
         const alternateUrl = alternateCandidate?.url ?? rediscovered.selectedUrl;
         const normalizedCurrent = (request.sourceUrl ?? "").replace(/\/+$/, "");
         const normalizedAlternate = (alternateUrl ?? "").replace(/\/+$/, "");
@@ -660,7 +663,10 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
       if (recoveryAttempts < 1) {
         try {
           const rediscovered = await discoverFraternitySource(request.fraternityName);
-          const alternateCandidate = pickBestDiscoveryCandidate(rediscovered.candidates, request.sourceUrl);
+          const alternateCandidate = pickBestDiscoveryCandidate(rediscovered.candidates, request.sourceUrl, {
+            fraternityName: request.fraternityName,
+            fraternitySlug: request.fraternitySlug,
+          });
           const alternateUrl = alternateCandidate?.url ?? rediscovered.selectedUrl;
           if (alternateUrl && alternateUrl.replace(/\/+$/, "") !== (request.sourceUrl ?? "").replace(/\/+$/, "")) {
             const alternateQuality = evaluateSourceUrl(alternateUrl);

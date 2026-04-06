@@ -117,6 +117,8 @@ class FieldJobGraphRuntime:
                 error=error_message,
             )
         finally:
+            business_progress_count = aggregate["processed"] + aggregate["requeued"] + aggregate["failed_terminal"]
+            business_status = "progressed" if business_progress_count > 0 else "no_business_progress"
             self._repository.finish_field_job_graph_run(
                 run_id,
                 status=status,
@@ -125,6 +127,8 @@ class FieldJobGraphRuntime:
                     "requeued": aggregate["requeued"],
                     "failedTerminal": aggregate["failed_terminal"],
                     "graphDurability": self._graph_durability,
+                    "businessProgressCount": business_progress_count,
+                    "businessStatus": business_status,
                 },
                 error_message=error_message,
             )

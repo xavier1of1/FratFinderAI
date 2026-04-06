@@ -4,15 +4,16 @@ import { z } from "zod";
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { discoverFraternitySource } from "@/lib/fraternity-discovery";
 import { evaluateSourceUrl } from "@/lib/source-selection";
-import { scheduleDueFraternityCrawlRequests, scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
+import { scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
 import {
   appendFraternityCrawlRequestEvent,
   createFraternityCrawlRequest,
   listFraternityCrawlRequests,
-  reconcileStaleFraternityCrawlRequests,
   upsertFraternityRecord,
   upsertSourceRecord
 } from "@/lib/repositories/fraternity-crawl-request-repository";
+
+export const dynamic = "force-dynamic";
 
 const payloadSchema = z.object({
   fraternityName: z.string().trim().min(2).max(120),
@@ -37,9 +38,6 @@ function slugify(value: string): string {
 
 export async function GET(request: NextRequest) {
   try {
-    await reconcileStaleFraternityCrawlRequests();
-    await scheduleDueFraternityCrawlRequests();
-
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "100");
     const data = await listFraternityCrawlRequests(Number.isNaN(limit) ? 100 : Math.min(Math.max(limit, 1), 500));
@@ -51,8 +49,6 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    await reconcileStaleFraternityCrawlRequests();
-
     const payload = payloadSchema.parse(await request.json());
     const discovery = await discoverFraternitySource(payload.fraternityName);
 

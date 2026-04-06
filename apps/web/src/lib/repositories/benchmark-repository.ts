@@ -71,6 +71,9 @@ interface BenchmarkRunRow {
   id: string;
   name: string;
   status: BenchmarkStatus;
+  runtimeWorkerId: string | null;
+  runtimeLeaseExpiresAt: string | null;
+  runtimeLastHeartbeatAt: string | null;
   fieldName: BenchmarkFieldName;
   sourceSlug: string | null;
   config: BenchmarkRunConfig;
@@ -107,7 +110,12 @@ function normalizeBenchmarkConfig(fieldName: BenchmarkFieldName, sourceSlug: str
     crawlRuntimeMode: runtimeMode,
     fieldJobRuntimeMode,
     fieldJobGraphDurability,
-    runAdaptiveCrawlBeforeCycles: typeof raw.runAdaptiveCrawlBeforeCycles === "boolean" ? raw.runAdaptiveCrawlBeforeCycles : envWarmupDefault()
+    runAdaptiveCrawlBeforeCycles:
+      typeof raw.runAdaptiveCrawlBeforeCycles === "boolean" ? raw.runAdaptiveCrawlBeforeCycles : envWarmupDefault(),
+    isolationMode:
+      raw.isolationMode === "strict_live_isolated" || raw.isolationMode === "shared_live_observed"
+        ? raw.isolationMode
+        : "shared_live_observed",
   };
 }
 
@@ -178,23 +186,53 @@ function normalizeSummary(summary: unknown): BenchmarkRunSummary | null {
     totalProcessed: Number(value.totalProcessed ?? 0),
     totalRequeued: Number(value.totalRequeued ?? 0),
     totalFailedTerminal: Number(value.totalFailedTerminal ?? 0),
+    businessStatus:
+      value.businessStatus === "progressed" || value.businessStatus === "no_business_progress"
+        ? value.businessStatus
+        : undefined,
     jobsPerMinute: Number(value.jobsPerMinute ?? 0),
     avgCycleMs: Number(value.avgCycleMs ?? 0),
     queueDepthStart: Number(value.queueDepthStart ?? 0),
     queueDepthEnd: Number(value.queueDepthEnd ?? 0),
-    queueDepthDelta: Number(value.queueDepthDelta ?? 0)
+    queueDepthDelta: Number(value.queueDepthDelta ?? 0),
+    invalidBlocked: Number(value.invalidBlocked ?? 0),
+    repairableBlocked: Number(value.repairableBlocked ?? 0),
+    repairPromoted: Number(value.repairPromoted ?? 0),
+    reconciledHistorical: Number(value.reconciledHistorical ?? 0),
+    actionableQueueRemaining: Number(value.actionableQueueRemaining ?? 0),
+    preconditions:
+      value.preconditions && typeof value.preconditions === "object"
+        ? (value.preconditions as Record<string, unknown>)
+        : undefined,
+    isolationMode:
+      value.isolationMode === "strict_live_isolated" || value.isolationMode === "shared_live_observed"
+        ? value.isolationMode
+        : undefined,
+    contaminationStatus:
+      value.contaminationStatus === "isolated" || value.contaminationStatus === "shared_live"
+        ? value.contaminationStatus
+        : undefined,
   };
 }
 
 function mapBenchmarkRow(row: BenchmarkRunRow): BenchmarkRunListItem {
+  const summary = normalizeSummary(row.summary);
+  const config = normalizeBenchmarkConfig(row.fieldName, row.sourceSlug, row.config);
+  if (summary?.isolationMode) {
+    config.isolationMode = summary.isolationMode;
+  }
+
   return {
     id: row.id,
     name: row.name,
     status: row.status,
+    runtimeWorkerId: row.runtimeWorkerId,
+    runtimeLeaseExpiresAt: row.runtimeLeaseExpiresAt,
+    runtimeLastHeartbeatAt: row.runtimeLastHeartbeatAt,
     fieldName: row.fieldName,
     sourceSlug: row.sourceSlug,
-    config: normalizeBenchmarkConfig(row.fieldName, row.sourceSlug, row.config),
-    summary: normalizeSummary(row.summary),
+    config,
+    summary,
     samples: normalizeSamples(row.samples),
     shadowDiffs: [],
     startedAt: row.startedAt,
@@ -213,6 +251,9 @@ export async function listBenchmarkRuns(limit = 100): Promise<BenchmarkRunListIt
         id,
         name,
         status,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         target_field_name AS "fieldName",
         source_slug AS "sourceSlug",
         config,
@@ -241,9 +282,15 @@ export async function failStaleBenchmarkRuns(maxAgeMinutes = 10): Promise<number
       SET
         status = 'failed',
         finished_at = NOW(),
-        last_error = COALESCE(last_error, 'Benchmark run stalled before completion')
-      WHERE status IN ('queued', 'running')
-        AND updated_at < NOW() - ($1::int * INTERVAL '1 minute')
+        last_error = COALESCE(last_error, 'Benchmark run stalled before completion'),
+        runtime_worker_id = NULL,
+        runtime_lease_token = NULL,
+        runtime_lease_expires_at = NULL
+      WHERE status = 'running'
+        AND (
+          (runtime_lease_expires_at IS NOT NULL AND runtime_lease_expires_at < NOW())
+          OR (runtime_lease_expires_at IS NULL AND updated_at < NOW() - ($1::int * INTERVAL '1 minute'))
+        )
     `,
     [Math.max(1, maxAgeMinutes)]
   );
@@ -258,6 +305,9 @@ export async function getBenchmarkRun(id: string): Promise<BenchmarkRunListItem 
         id,
         name,
         status,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         target_field_name AS "fieldName",
         source_slug AS "sourceSlug",
         config,
@@ -308,6 +358,9 @@ export async function createBenchmarkRun(params: {
         id,
         name,
         status,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         target_field_name AS "fieldName",
         source_slug AS "sourceSlug",
         config,

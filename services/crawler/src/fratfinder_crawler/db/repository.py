@@ -11,6 +11,7 @@ from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_a
 from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
     ChapterEvidenceRecord,
+    ChapterRepairJob,
     CrawlMetrics,
     EpochMetric,
     ExistingSourceCandidate,
@@ -34,6 +35,42 @@ from fratfinder_crawler.models import (
     SourceRecord,
     VerifiedSourceRecord,
 )
+
+
+def _normalize_field_job_queue_state(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if normalized in {"actionable", "deferred", "blocked_invalid", "blocked_repairable"}:
+        return normalized
+    return "actionable"
+
+
+def _normalize_field_job_validity_class(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    if normalized in {"canonical_valid", "repairable_candidate", "provisional_candidate", "invalid_non_chapter"}:
+        return normalized
+    return None
+
+
+def _extract_field_job_typed_state(
+    payload_patch: dict[str, Any] | None = None,
+    *,
+    completed_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    patch = payload_patch or {}
+    contact_resolution = patch.get("contactResolution") if isinstance(patch.get("contactResolution"), dict) else {}
+    chapter_repair = patch.get("chapterRepair") if isinstance(patch.get("chapterRepair"), dict) else {}
+    queue_triage = patch.get("queueTriage") if isinstance(patch.get("queueTriage"), dict) else {}
+
+    typed: dict[str, Any] = {
+        "queue_state": _normalize_field_job_queue_state(contact_resolution.get("queueState"))
+        if contact_resolution.get("queueState") is not None
+        else None,
+        "validity_class": _normalize_field_job_validity_class(contact_resolution.get("validityClass")),
+        "repair_state": chapter_repair.get("state") if chapter_repair.get("state") else None,
+        "blocked_reason": contact_resolution.get("blockedReason") or queue_triage.get("reason"),
+        "terminal_outcome": completed_payload.get("status") if isinstance(completed_payload, dict) else None,
+    }
+    return typed
 
 
 class CrawlerRepository:
@@ -281,9 +318,9 @@ class CrawlerRepository:
             if last_status == "succeeded":
                 health_confidence = 0.90
             elif last_status == "partial":
-                health_confidence = 0.75
+                health_confidence = 0.40 if row["last_success_at"] is None else 0.75
             elif last_status == "failed":
-                health_confidence = 0.50
+                health_confidence = 0.25 if row["last_success_at"] is None else 0.50
 
             if not row["active"]:
                 health_confidence -= 0.20
@@ -1059,7 +1096,7 @@ class CrawlerRepository:
                     ORDER BY
                         fj.priority DESC,
                         CASE
-                            WHEN COALESCE(fj.payload -> 'contactResolution' ->> 'queueState', 'actionable') = 'deferred' THEN 1
+                            WHEN fj.queue_state = 'deferred' THEN 1
                             ELSE 0
                         END ASC,
                         fj.scheduled_at ASC,
@@ -1095,6 +1132,11 @@ class CrawlerRepository:
                         fj.attempts,
                         fj.max_attempts,
                         fj.priority,
+                        fj.queue_state,
+                        fj.validity_class,
+                        fj.repair_state,
+                        fj.blocked_reason,
+                        fj.terminal_outcome,
                         fj.claim_token
                 )
                 SELECT
@@ -1111,6 +1153,11 @@ class CrawlerRepository:
                     cj.attempts,
                     cj.max_attempts,
                     cj.priority,
+                    cj.queue_state,
+                    cj.validity_class,
+                    cj.repair_state,
+                    cj.blocked_reason,
+                    cj.terminal_outcome,
                     cj.claim_token,
                     c.website_url,
                     c.instagram_url,
@@ -1162,6 +1209,11 @@ class CrawlerRepository:
                 university_name=row["university_name"],
                 crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
                 field_states=row["field_states"] or {},
+                queue_state=row["queue_state"] or "actionable",
+                validity_class=row["validity_class"],
+                repair_state=row["repair_state"],
+                blocked_reason=row["blocked_reason"],
+                terminal_outcome=row["terminal_outcome"],
             )
 
     def list_queued_field_jobs_for_triage(
@@ -1198,6 +1250,11 @@ class CrawlerRepository:
                     fj.attempts,
                     fj.max_attempts,
                     fj.priority,
+                    fj.queue_state,
+                    fj.validity_class,
+                    fj.repair_state,
+                    fj.blocked_reason,
+                    fj.terminal_outcome,
                     c.website_url,
                     c.instagram_url,
                     c.contact_email,
@@ -1218,7 +1275,7 @@ class CrawlerRepository:
                 ORDER BY
                     fj.priority DESC,
                     CASE
-                        WHEN COALESCE(fj.payload -> 'contactResolution' ->> 'queueState', 'actionable') = 'deferred' THEN 1
+                        WHEN fj.queue_state = 'deferred' THEN 1
                         ELSE 0
                     END ASC,
                     fj.scheduled_at ASC,
@@ -1263,6 +1320,11 @@ class CrawlerRepository:
                     university_name=row["university_name"],
                     crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
                     field_states=row["field_states"] or {},
+                    queue_state=row["queue_state"] or "actionable",
+                    validity_class=row["validity_class"],
+                    repair_state=row["repair_state"],
+                    blocked_reason=row["blocked_reason"],
+                    terminal_outcome=row["terminal_outcome"],
                 )
             )
         return jobs
@@ -1279,10 +1341,20 @@ class CrawlerRepository:
         completed_payload: dict[str, Any] | None = None,
     ) -> bool:
         assignments = ["payload = COALESCE(payload, '{}'::jsonb) || %(payload_patch)s"]
+        typed_state = _extract_field_job_typed_state(payload_patch, completed_payload=completed_payload)
         params: dict[str, Any] = {
             "field_job_id": field_job_id,
             "payload_patch": Jsonb(payload_patch or {}),
+            "queue_state": typed_state["queue_state"],
+            "validity_class": typed_state["validity_class"],
+            "repair_state": typed_state["repair_state"],
+            "blocked_reason": typed_state["blocked_reason"],
+            "terminal_outcome": typed_state["terminal_outcome"],
         }
+        assignments.append("queue_state = COALESCE(%(queue_state)s, queue_state, 'actionable')")
+        assignments.append("validity_class = COALESCE(%(validity_class)s, validity_class)")
+        assignments.append("repair_state = COALESCE(%(repair_state)s, repair_state)")
+        assignments.append("blocked_reason = COALESCE(%(blocked_reason)s, blocked_reason)")
         if scheduled_delay_seconds is not None:
             assignments.append("scheduled_at = NOW() + (%(scheduled_delay_seconds)s * INTERVAL '1 second')")
             params["scheduled_delay_seconds"] = max(0, int(scheduled_delay_seconds))
@@ -1296,6 +1368,7 @@ class CrawlerRepository:
                 assignments.append("started_at = NULL")
                 assignments.append("finished_at = NULL")
                 assignments.append("claim_token = NULL")
+                assignments.append("terminal_outcome = NULL")
         if last_error is not None:
             assignments.append("last_error = %(last_error)s")
             params["last_error"] = last_error
@@ -1305,6 +1378,7 @@ class CrawlerRepository:
         if completed_payload is not None:
             assignments.append("completed_payload = %(completed_payload)s")
             params["completed_payload"] = Jsonb(completed_payload)
+            assignments.append("terminal_outcome = COALESCE(%(terminal_outcome)s, terminal_outcome)")
 
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -1357,6 +1431,241 @@ class CrawlerRepository:
             updated = cursor.rowcount
         self._connection.commit()
         return updated > 0
+
+    def enqueue_chapter_repair_job(
+        self,
+        *,
+        chapter_id: str,
+        source_slug: str | None,
+        payload: dict[str, Any],
+        priority: int = 0,
+        max_attempts: int = 3,
+    ) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO chapter_repair_jobs (
+                    chapter_id,
+                    source_slug,
+                    status,
+                    repair_state,
+                    payload,
+                    priority,
+                    max_attempts
+                )
+                VALUES (%s, %s, 'queued', 'queued', %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                RETURNING id
+                """,
+                (
+                    chapter_id,
+                    source_slug,
+                    Jsonb(payload or {}),
+                    max(0, int(priority)),
+                    max(1, int(max_attempts)),
+                ),
+            )
+            created = cursor.fetchone() is not None
+        self._connection.commit()
+        return created
+
+    def claim_next_chapter_repair_job(self, worker_id: str, source_slug: str | None = None) -> ChapterRepairJob | None:
+        source_filter = ""
+        params: dict[str, Any] = {"worker_id": worker_id}
+        if source_slug is not None:
+            source_filter = "AND crj.source_slug = %(source_slug)s"
+            params["source_slug"] = source_slug
+
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                WITH next_job AS (
+                    SELECT crj.id
+                    FROM chapter_repair_jobs crj
+                    WHERE crj.status = 'queued'
+                      AND crj.scheduled_at <= NOW()
+                      AND crj.attempts < crj.max_attempts
+                      {source_filter}
+                    ORDER BY crj.priority DESC, crj.scheduled_at ASC, crj.id ASC
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                ),
+                claimed_job AS (
+                    UPDATE chapter_repair_jobs crj
+                    SET
+                        status = 'running',
+                        repair_state = 'running',
+                        claimed_by = %(worker_id)s,
+                        claim_token = gen_random_uuid(),
+                        started_at = NOW(),
+                        finished_at = NULL,
+                        attempts = attempts + 1
+                    FROM next_job
+                    WHERE crj.id = next_job.id
+                    RETURNING crj.id, crj.chapter_id, crj.source_slug, crj.payload, crj.attempts, crj.max_attempts, crj.priority, crj.claim_token, crj.repair_state
+                )
+                SELECT
+                    cj.id,
+                    cj.chapter_id,
+                    c.slug AS chapter_slug,
+                    c.name AS chapter_name,
+                    cj.source_slug,
+                    cj.payload,
+                    cj.attempts,
+                    cj.max_attempts,
+                    cj.priority,
+                    cj.claim_token,
+                    cj.repair_state,
+                    c.university_name,
+                    c.website_url,
+                    c.instagram_url,
+                    c.contact_email
+                FROM claimed_job cj
+                JOIN chapters c ON c.id = cj.chapter_id
+                """,
+                params,
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+        return ChapterRepairJob(
+            id=str(row["id"]),
+            chapter_id=str(row["chapter_id"]),
+            chapter_slug=row["chapter_slug"],
+            chapter_name=row["chapter_name"],
+            source_slug=row["source_slug"],
+            payload=dict(row["payload"] or {}),
+            attempts=int(row["attempts"]),
+            max_attempts=int(row["max_attempts"]),
+            priority=int(row["priority"]),
+            claim_token=str(row["claim_token"]),
+            repair_state=row["repair_state"],
+            university_name=row["university_name"],
+            website_url=row["website_url"],
+            instagram_url=row["instagram_url"],
+            contact_email=row["contact_email"],
+        )
+
+    def complete_chapter_repair_job(
+        self,
+        job: ChapterRepairJob,
+        *,
+        repair_state: str,
+        result_payload: dict[str, Any] | None = None,
+        error: str | None = None,
+        final_status: str = "done",
+    ) -> None:
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE chapter_repair_jobs
+                SET
+                    status = %s,
+                    repair_state = %s,
+                    finished_at = NOW(),
+                    last_error = %s,
+                    result_payload = %s,
+                    claim_token = NULL
+                WHERE id = %s
+                  AND status = 'running'
+                  AND claim_token = %s
+                """,
+                (
+                    final_status,
+                    repair_state,
+                    error,
+                    Jsonb(result_payload or {}),
+                    job.id,
+                    job.claim_token,
+                ),
+            )
+
+    def list_queued_field_jobs_for_chapter(self, chapter_id: str) -> list[FieldJob]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    fj.id,
+                    fj.chapter_id,
+                    fj.crawl_run_id,
+                    c.slug AS chapter_slug,
+                    c.name AS chapter_name,
+                    f.slug AS fraternity_slug,
+                    s.id AS source_id,
+                    s.slug AS source_slug,
+                    fj.field_name,
+                    fj.payload,
+                    fj.attempts,
+                    fj.max_attempts,
+                    fj.priority,
+                    fj.queue_state,
+                    fj.validity_class,
+                    fj.repair_state,
+                    fj.blocked_reason,
+                    fj.terminal_outcome,
+                    c.website_url,
+                    c.instagram_url,
+                    c.contact_email,
+                    c.university_name,
+                    c.field_states,
+                    s.base_url AS source_base_url,
+                    s.list_path AS source_list_path
+                FROM field_jobs fj
+                JOIN chapters c ON c.id = fj.chapter_id
+                JOIN fraternities f ON f.id = c.fraternity_id
+                LEFT JOIN crawl_runs cr ON cr.id = fj.crawl_run_id
+                LEFT JOIN sources s ON s.id = cr.source_id
+                WHERE fj.chapter_id = %s
+                  AND fj.status = 'queued'
+                ORDER BY fj.priority DESC, fj.scheduled_at ASC, fj.id ASC
+                """,
+                (chapter_id,),
+            )
+            rows = cursor.fetchall()
+
+        jobs: list[FieldJob] = []
+        for row in rows:
+            payload = dict(row["payload"] or {})
+            source_base_url = row["source_base_url"]
+            source_list_path = row["source_list_path"]
+            if isinstance(source_list_path, str) and source_list_path.startswith("http"):
+                payload.setdefault("sourceListUrl", source_list_path)
+            elif isinstance(source_list_path, str) and source_list_path and source_base_url:
+                payload.setdefault("sourceListUrl", f"{source_base_url.rstrip('/')}/{source_list_path.lstrip('/')}")
+            elif source_base_url:
+                payload.setdefault("sourceListUrl", source_base_url)
+
+            jobs.append(
+                FieldJob(
+                    id=str(row["id"]),
+                    chapter_id=str(row["chapter_id"]),
+                    chapter_slug=row["chapter_slug"],
+                    chapter_name=row["chapter_name"],
+                    field_name=row["field_name"],
+                    payload=payload,
+                    attempts=int(row["attempts"]),
+                    max_attempts=int(row["max_attempts"]),
+                    priority=int(row["priority"]),
+                    claim_token="",
+                    source_base_url=source_base_url,
+                    website_url=row["website_url"],
+                    instagram_url=row["instagram_url"],
+                    contact_email=row["contact_email"],
+                    fraternity_slug=row["fraternity_slug"],
+                    source_id=str(row["source_id"]) if row["source_id"] is not None else None,
+                    source_slug=row["source_slug"],
+                    university_name=row["university_name"],
+                    crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
+                    field_states=row["field_states"] or {},
+                    queue_state=row["queue_state"] or "actionable",
+                    validity_class=row["validity_class"],
+                    repair_state=row["repair_state"],
+                    blocked_reason=row["blocked_reason"],
+                    terminal_outcome=row["terminal_outcome"],
+                )
+            )
+        return jobs
 
     def reconcile_stale_field_jobs(self, max_age_minutes: int = 60) -> int:
         stale_minutes = max(1, int(max_age_minutes))
@@ -1644,13 +1953,14 @@ class CrawlerRepository:
                 UPDATE field_jobs
                 SET
                     status = 'done',
+                    terminal_outcome = %s,
                     finished_at = NOW(),
                     last_error = NULL,
                     completed_payload = %s,
                     claim_token = NULL
                 WHERE id = %s
                 """,
-                (Jsonb(completed_payload), job.id),
+                (completed_status, Jsonb(completed_payload), job.id),
             )
 
     def requeue_field_job(
@@ -1662,6 +1972,7 @@ class CrawlerRepository:
         payload_patch: dict[str, Any] | None = None,
     ) -> None:
         payload_patch = payload_patch or {}
+        typed_state = _extract_field_job_typed_state(payload_patch)
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
             cursor.execute(
@@ -1669,6 +1980,11 @@ class CrawlerRepository:
                 UPDATE field_jobs
                 SET
                     status = 'queued',
+                    queue_state = COALESCE(%s, queue_state),
+                    validity_class = COALESCE(%s, validity_class),
+                    repair_state = COALESCE(%s, repair_state),
+                    blocked_reason = COALESCE(%s, blocked_reason),
+                    terminal_outcome = NULL,
                     scheduled_at = NOW() + (%s * INTERVAL '1 second'),
                     started_at = NULL,
                     finished_at = NULL,
@@ -1679,7 +1995,17 @@ class CrawlerRepository:
                     attempts = CASE WHEN %s THEN GREATEST(attempts - 1, 0) ELSE attempts END
                 WHERE id = %s
                 """,
-                (delay_seconds, error, Jsonb(payload_patch), preserve_attempt, job.id),
+                (
+                    typed_state.get("queue_state"),
+                    typed_state.get("validity_class"),
+                    typed_state.get("repair_state"),
+                    typed_state.get("blocked_reason"),
+                    delay_seconds,
+                    error,
+                    Jsonb(payload_patch),
+                    preserve_attempt,
+                    job.id,
+                ),
             )
 
     def fail_field_job_terminal(self, job: FieldJob, error: str) -> None:
@@ -1690,6 +2016,7 @@ class CrawlerRepository:
                 UPDATE field_jobs
                 SET
                     status = 'failed',
+                    terminal_outcome = 'failed',
                     finished_at = NOW(),
                     last_error = %s,
                     claim_token = NULL,

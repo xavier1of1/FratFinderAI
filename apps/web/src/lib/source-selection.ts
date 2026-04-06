@@ -29,6 +29,11 @@ const BLOCKED_HOSTS = new Set([
   "wiktionary.org"
 ]);
 
+const WEAK_HOST_MARKERS = [
+  "dynamic.omegafi.com",
+  "omegafi.com"
+];
+
 const POSITIVE_URL_MARKERS = [
   "chapter",
   "chapters",
@@ -111,6 +116,12 @@ export function evaluateSourceUrl(url: string | null | undefined): SourceQuality
       reasons.push(...weakHits.map((marker) => `weak:${marker}`));
     }
 
+    const weakHostHits = WEAK_HOST_MARKERS.filter((marker) => parsed.hostname.toLowerCase().includes(marker));
+    if (weakHostHits.length > 0) {
+      score -= Math.min(0.7, weakHostHits.length * 0.3);
+      reasons.push(...weakHostHits.map((marker) => `weak_host:${marker}`));
+    }
+
     const path = parsed.pathname.replace(/\/+$/, "");
     if (!path || path === "") {
       score -= 0.12;
@@ -123,7 +134,7 @@ export function evaluateSourceUrl(url: string | null | undefined): SourceQuality
     const boundedScore = Math.max(0, Math.min(1, score));
     return {
       score: boundedScore,
-      isWeak: isBlocked || boundedScore < 0.45 || weakHits.length > 0,
+      isWeak: isBlocked || boundedScore < 0.45 || weakHits.length > 0 || weakHostHits.length > 0,
       isBlocked,
       reasons
     };
@@ -148,6 +159,39 @@ function scoreCandidateText(candidate: FraternityDiscoveryCandidate): number {
   return Math.min(0.24, score);
 }
 
+function normalizeText(value: string | null | undefined): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function compactText(value: string | null | undefined): string {
+  return normalizeText(value).replace(/\s+/g, "");
+}
+
+function candidateHasFraternityContext(
+  candidate: FraternityDiscoveryCandidate,
+  fraternityName?: string | null,
+  fraternitySlug?: string | null
+): boolean {
+  const combined = normalizeText(`${candidate.url} ${candidate.title} ${candidate.snippet}`);
+  const compactCombined = compactText(combined);
+  const normalizedName = normalizeText(fraternityName);
+  const compactSlug = compactText(fraternitySlug ?? fraternityName);
+
+  if (normalizedName && combined.includes(normalizedName)) {
+    return true;
+  }
+
+  if (compactSlug && compactCombined.includes(compactSlug)) {
+    return true;
+  }
+
+  const tokens = normalizedName.split(" ").filter((token) => token.length >= 4);
+  return tokens.length >= 2 && tokens.every((token) => combined.includes(token));
+}
+
 function scoreCandidate(candidate: FraternityDiscoveryCandidate): number {
   const quality = evaluateSourceUrl(candidate.url);
   return Number(candidate.score ?? 0) + quality.score + scoreCandidateText(candidate);
@@ -155,13 +199,22 @@ function scoreCandidate(candidate: FraternityDiscoveryCandidate): number {
 
 export function pickBestDiscoveryCandidate(
   candidates: FraternityDiscoveryCandidate[],
-  currentUrl?: string | null
+  currentUrl?: string | null,
+  fraternityContext?: { fraternityName?: string | null; fraternitySlug?: string | null }
 ): FraternityDiscoveryCandidate | null {
   const current = currentUrl ? currentUrl.replace(/\/+$/, "") : null;
-  const ranked = [...candidates]
+  const rankedCandidates = [...candidates]
     .filter((candidate) => candidate.url.replace(/\/+$/, "") !== current)
     .filter((candidate) => !evaluateSourceUrl(candidate.url).isBlocked)
     .sort((left, right) => scoreCandidate(right) - scoreCandidate(left));
+
+  const contextRanked = fraternityContext
+    ? rankedCandidates.filter((candidate) =>
+        candidateHasFraternityContext(candidate, fraternityContext.fraternityName, fraternityContext.fraternitySlug)
+      )
+    : rankedCandidates;
+
+  const ranked = contextRanked.length > 0 ? contextRanked : rankedCandidates;
   return ranked[0] ?? null;
 }
 
@@ -177,7 +230,10 @@ export function optimizeDiscoveredSource(
       }
     : evaluateSourceUrl(discovery.selectedUrl);
 
-  const fallbackCandidate = pickBestDiscoveryCandidate(discovery.candidates, discovery.selectedUrl);
+  const fallbackCandidate = pickBestDiscoveryCandidate(discovery.candidates, discovery.selectedUrl, {
+    fraternityName: discovery.fraternityName,
+    fraternitySlug: discovery.fraternitySlug,
+  });
 
   if (!fallbackCandidate) {
     return {

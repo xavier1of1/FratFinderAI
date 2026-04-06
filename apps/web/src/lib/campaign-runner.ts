@@ -1,5 +1,7 @@
 import { spawn } from "child_process";
+import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
+import os from "os";
 import path from "path";
 
 import { discoverFraternitySource } from "@/lib/fraternity-discovery";
@@ -34,6 +36,14 @@ import {
   updateCampaignRun,
   updateCampaignRunItem
 } from "@/lib/repositories/campaign-run-repository";
+import {
+  claimCampaignRunLease,
+  heartbeatCampaignRunLease,
+  heartbeatRuntimeWorker,
+  releaseCampaignRunLease,
+  stopRuntimeWorker,
+  upsertRuntimeWorker,
+} from "@/lib/repositories/runtime-worker-repository";
 import type {
   CampaignProviderHealthHistoryPoint,
   CampaignProviderHealthSnapshot,
@@ -51,6 +61,9 @@ import type {
 import { buildDefaultV4ProgramConfig } from "@/lib/v4-program";
 
 const activeCampaignRuns = new Set<string>();
+const CAMPAIGN_WORKER_ID = `campaign-worker:${os.hostname()}:${process.pid}`;
+const CAMPAIGN_WORKER_LEASE_SECONDS = Math.max(30, Number(process.env.CAMPAIGN_WORKER_LEASE_SECONDS ?? 120));
+const CAMPAIGN_HEARTBEAT_INTERVAL_MS = Math.max(10_000, Math.min(60_000, Math.floor(CAMPAIGN_WORKER_LEASE_SECONDS * 500)));
 const TERMINAL_ITEM_STATUSES = new Set(["completed", "failed", "skipped", "canceled"]);
 const DEFAULT_POLICY_VERSION = String(process.env.CRAWLER_POLICY_VERSION ?? "adaptive-v1").trim() || "adaptive-v1";
 const REVIEW_REASON_PLACEHOLDER = "Chapter record appears to be navigation or placeholder text";
@@ -77,6 +90,7 @@ interface AdaptiveTrainEvalResult {
     epoch: number;
     kpis: Record<string, number>;
   }>;
+  unitErrors?: Array<Record<string, unknown>>;
 }
 
 interface V4ProgramSnapshot {
@@ -394,6 +408,15 @@ function buildSummary(params: {
   }
 
   const denominator = Math.max(totalChapters, 1);
+  const queueDepthDelta = params.queueDepthStart - params.queueDepthEnd;
+  const businessStatus =
+    totalProcessed > 0 ||
+    totalRequeued > 0 ||
+    totalFailedTerminal > 0 ||
+    queueDepthDelta > 0 ||
+    Number(params.counts.completed ?? 0) > 0
+      ? "progressed"
+      : "no_business_progress";
   return {
     targetCount: params.run.config.targetCount,
     itemCount: params.run.items.length,
@@ -401,6 +424,7 @@ function buildSummary(params: {
     failedCount: Number(params.counts.failed ?? 0),
     skippedCount: Number(params.counts.skipped ?? 0),
     activeCount: Number(params.counts.running ?? 0) + Number(params.counts.queued ?? 0) + Number(params.counts.request_created ?? 0),
+    businessStatus,
     anyContactSuccessRate: chaptersWithAnyContact / denominator,
     allThreeSuccessRate: chaptersWithAllThree / denominator,
     websiteCoverageRate: websitesFound / denominator,
@@ -409,7 +433,7 @@ function buildSummary(params: {
     jobsPerMinute: (totalProcessed * 60_000) / durationMs,
     queueDepthStart: params.queueDepthStart,
     queueDepthEnd: params.queueDepthEnd,
-    queueDepthDelta: params.queueDepthStart - params.queueDepthEnd,
+    queueDepthDelta,
     totalProcessed,
     totalRequeued,
     totalFailedTerminal,
@@ -513,6 +537,112 @@ async function runAdaptiveTrainEval(params: {
   return {
     ...payload,
     report_path: payload.report_path || reportPath,
+  };
+}
+
+async function runAdaptiveTrainEvalIsolated(params: {
+  runId: string;
+  round: number;
+  trainSourceSlugs: string[];
+  evalSourceSlugs: string[];
+  runtimeMode: string;
+  policyVersion: string;
+  epochsPerRound: number;
+  commandTimeoutMinutes?: number;
+  campaignRunId: string;
+}): Promise<AdaptiveTrainEvalResult> {
+  const unitResults: AdaptiveTrainEvalResult[] = [];
+  const unitErrors: Array<Record<string, unknown>> = [];
+  const evalUnits = (params.evalSourceSlugs.length > 0 ? params.evalSourceSlugs : params.trainSourceSlugs).filter(Boolean);
+
+  for (let index = 0; index < evalUnits.length; index += 1) {
+    const evalSource = evalUnits[index];
+    if (!evalSource) {
+      continue;
+    }
+    const trainSource =
+      params.trainSourceSlugs[index % Math.max(1, params.trainSourceSlugs.length)] ?? evalSource;
+    const unitPolicyVersion = `${params.policyVersion}-u${index + 1}`;
+
+    try {
+      const unitResult = await runAdaptiveTrainEval({
+        runId: params.runId,
+        round: params.round,
+        trainSourceSlugs: [trainSource],
+        evalSourceSlugs: [evalSource],
+        runtimeMode: params.runtimeMode,
+        policyVersion: unitPolicyVersion,
+        epochsPerRound: params.epochsPerRound,
+        commandTimeoutMinutes: params.commandTimeoutMinutes,
+      });
+      unitResults.push(unitResult);
+      await appendCampaignRunEvent({
+        campaignRunId: params.campaignRunId,
+        eventType: "training_round_source_completed",
+        message: `Completed isolated training/eval unit for ${evalSource}`,
+        payload: {
+          round: params.round,
+          trainSource,
+          evalSource,
+          policyVersion: unitPolicyVersion,
+          reportPath: unitResult.report_path,
+          kpis: lastRoundKpis(unitResult),
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      unitErrors.push({
+        trainSource,
+        evalSource,
+        policyVersion: unitPolicyVersion,
+        error: message,
+      });
+      await appendCampaignRunEvent({
+        campaignRunId: params.campaignRunId,
+        eventType: "training_round_source_failed",
+        message: `Isolated training/eval unit failed for ${evalSource}`,
+        payload: {
+          round: params.round,
+          trainSource,
+          evalSource,
+          policyVersion: unitPolicyVersion,
+          error: message,
+        },
+      });
+    }
+  }
+
+  if (unitResults.length === 0) {
+    throw new Error(`All isolated training units failed for round ${params.round}`);
+  }
+
+  const finalRows = unitResults
+    .map((result) => result.rows[result.rows.length - 1])
+    .filter((row): row is AdaptiveTrainEvalResult["rows"][number] => Boolean(row))
+    .map((row, index) => ({ epoch: index + 1, kpis: row.kpis }));
+
+  const slopeSums = new Map<string, number>();
+  for (const result of unitResults) {
+    for (const [key, value] of Object.entries(result.slope ?? {})) {
+      slopeSums.set(key, (slopeSums.get(key) ?? 0) + Number(value ?? 0));
+    }
+  }
+  const averagedSlope = Object.fromEntries(
+    [...slopeSums.entries()].map(([key, value]) => [key, value / unitResults.length])
+  );
+
+  const latest = unitResults[unitResults.length - 1];
+  if (!latest) {
+    throw new Error(`Missing isolated training result for round ${params.round}`);
+  }
+  return {
+    ...latest,
+    epochs: unitResults.length,
+    policy_version: params.policyVersion,
+    report_path: latest.report_path,
+    slope: averagedSlope,
+    rows: finalRows,
+    unitErrors,
   };
 }
 
@@ -1318,7 +1448,7 @@ async function runV4Prelude(run: CampaignRun): Promise<CampaignRun> {
         commandTimeoutMinutes: effectiveConfig.trainingCommandTimeoutMinutes ?? 30,
       },
     });
-    const trainResult = await runAdaptiveTrainEval({
+    const trainResult = await runAdaptiveTrainEvalIsolated({
       runId: run.id,
       round,
       trainSourceSlugs: roundTrainSources,
@@ -1327,6 +1457,7 @@ async function runV4Prelude(run: CampaignRun): Promise<CampaignRun> {
       policyVersion: stagedPolicyVersion,
       epochsPerRound: effectiveConfig.epochsPerRound ?? 1,
       commandTimeoutMinutes: effectiveConfig.trainingCommandTimeoutMinutes,
+      campaignRunId: run.id,
     });
     const latestSnapshot = (
       await listAdaptivePolicySnapshots({
@@ -1505,8 +1636,10 @@ async function finalizeCampaign(run: CampaignRun, status: CampaignRun["status"],
   }
 }
 
-async function executeCampaignRun(runId: string): Promise<void> {
+export async function runCampaignExecution(runId: string): Promise<void> {
   let run: CampaignRun | null = await getCampaignRun(runId);
+  const leaseToken = randomUUID();
+  let heartbeat: NodeJS.Timeout | null = null;
   const failSafely = async (message: string) => {
     const latest = run ?? (await getCampaignRun(runId));
     if (!latest) {
@@ -1516,10 +1649,43 @@ async function executeCampaignRun(runId: string): Promise<void> {
   };
 
   try {
+    await upsertRuntimeWorker({
+      workerId: CAMPAIGN_WORKER_ID,
+      workloadLane: "campaign",
+      runtimeOwner: "evaluation_worker_campaign_runner",
+      leaseSeconds: CAMPAIGN_WORKER_LEASE_SECONDS,
+      metadata: { runId },
+    });
+
     if (!run) {
       return;
     }
+    const claimed = await claimCampaignRunLease({
+      runId,
+      workerId: CAMPAIGN_WORKER_ID,
+      leaseToken,
+      leaseSeconds: CAMPAIGN_WORKER_LEASE_SECONDS,
+    });
+    if (!claimed) {
+      await stopRuntimeWorker(CAMPAIGN_WORKER_ID);
+      return;
+    }
+
+    heartbeat = setInterval(() => {
+      void heartbeatRuntimeWorker(CAMPAIGN_WORKER_ID, CAMPAIGN_WORKER_LEASE_SECONDS);
+      void heartbeatCampaignRunLease({
+        runId,
+        workerId: CAMPAIGN_WORKER_ID,
+        leaseToken,
+        leaseSeconds: CAMPAIGN_WORKER_LEASE_SECONDS,
+      });
+    }, CAMPAIGN_HEARTBEAT_INTERVAL_MS);
+
     if (run.status === "canceled") {
+      if (heartbeat) {
+        clearInterval(heartbeat);
+      }
+      await releaseCampaignRunLease({ runId, workerId: CAMPAIGN_WORKER_ID, leaseToken });
       return;
     }
 
@@ -1648,11 +1814,23 @@ async function executeCampaignRun(runId: string): Promise<void> {
         const finalStatus = completedCount === 0 && failedCount > 0 ? "failed" : "succeeded";
         const finalError = finalStatus === "failed" ? "All campaign items ended in failure." : null;
         await finalizeCampaign(run, finalStatus, finalError);
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
+        await releaseCampaignRunLease({ runId, workerId: CAMPAIGN_WORKER_ID, leaseToken });
+        await stopRuntimeWorker(CAMPAIGN_WORKER_ID);
         return;
       }
 
       if (hasTimedOut) {
         await finalizeCampaign(run, "failed", "Campaign duration exhausted before all items reached a terminal state.");
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
+        await releaseCampaignRunLease({ runId, workerId: CAMPAIGN_WORKER_ID, leaseToken });
+        await stopRuntimeWorker(CAMPAIGN_WORKER_ID);
         return;
       }
 
@@ -1661,6 +1839,13 @@ async function executeCampaignRun(runId: string): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await failSafely(message);
+  } finally {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = null;
+    }
+    await releaseCampaignRunLease({ runId, workerId: CAMPAIGN_WORKER_ID, leaseToken });
+    await stopRuntimeWorker(CAMPAIGN_WORKER_ID);
   }
 }
 
@@ -1671,7 +1856,7 @@ export async function scheduleCampaignRun(runId: string): Promise<boolean> {
 
   activeCampaignRuns.add(runId);
   queueMicrotask(() => {
-    void executeCampaignRun(runId).finally(() => {
+    void runCampaignExecution(runId).finally(() => {
       activeCampaignRuns.delete(runId);
     });
   });

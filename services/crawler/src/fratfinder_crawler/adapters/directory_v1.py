@@ -30,6 +30,7 @@ _ARCHIVE_CONTACT_LABELS = ("website:", "instagram:", "facebook:", "twitter:", "e
 _ADDRESS_PATTERN = re.compile(r"\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b")
 _LABELED_LINK_PATTERN = re.compile(r"(?P<label>Website|Instagram|Facebook|Twitter|Email)\s*:\s*<a[^>]+href=[\"'](?P<href>[^\"']+)", re.IGNORECASE)
 _TITLE_SPLIT_PATTERN = re.compile(r"^(?P<chapter>.+?)\s+[–—-]\s+(?P<university>.+)$")
+_UNIVERSITY_CHAPTER_PATTERN = re.compile(r"^(?P<university>.+?)\s+[–—-]\s+(?P<chapter>.+?)\s+Chapter$", re.IGNORECASE)
 
 _DEFAULT_CARD_SELECTORS = (
     "[data-chapter-card]",
@@ -172,6 +173,48 @@ def _split_combined_heading(title: str | None) -> tuple[str | None, str | None]:
     if not match:
         return title.strip() or None, None
     return match.group("chapter").strip() or None, match.group("university").strip() or None
+
+
+def _extract_repeated_list_stubs(soup: BeautifulSoup, source_url: str) -> list[ChapterStub]:
+    stubs: list[ChapterStub] = []
+    seen: set[tuple[str, str]] = set()
+    matched_items = 0
+    for item in soup.find_all("li"):
+        text = item.get_text(" ", strip=True).replace("\xa0", " ")
+        match = _UNIVERSITY_CHAPTER_PATTERN.match(text)
+        if not match:
+            continue
+
+        matched_items += 1
+        university_name = _title_case_if_loud(match.group("university"))
+        chapter_name = _title_case_if_loud(match.group("chapter"))
+        if not university_name or not chapter_name:
+            continue
+
+        key = (chapter_name.lower(), university_name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+
+        detail_or_outbound, link_score = _pick_best_link(
+            item,
+            source_url,
+            chapter_name=chapter_name,
+            university_name=university_name,
+        )
+        confidence = 0.8 + min(0.12, link_score * 0.12)
+        stubs.append(
+            ChapterStub(
+                chapter_name=chapter_name,
+                university_name=university_name,
+                detail_url=detail_or_outbound or source_url,
+                outbound_chapter_url_candidate=detail_or_outbound,
+                confidence=min(0.99, confidence),
+                provenance="directory_v1:repeated_list",
+            )
+        )
+
+    return stubs if matched_items >= 5 else []
 
 
 def _selector_list(
@@ -346,6 +389,10 @@ class DirectoryV1Adapter:
                         provenance="directory_v1:table",
                     )
                 )
+        if records:
+            return records
+
+        records = _extract_repeated_list_stubs(soup, source_url)
         if records:
             return records
 

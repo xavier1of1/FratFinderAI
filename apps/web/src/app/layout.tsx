@@ -7,7 +7,7 @@ const displayFont = Space_Grotesk({ subsets: ["latin"], variable: "--font-displa
 const monoFont = IBM_Plex_Mono({ subsets: ["latin"], variable: "--font-mono", weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  title: "Frat Finder AI V3.0.0 Dashboard",
+  title: "Frat Finder AI V3.0.1 Dashboard",
   description: "LangGraph-native fraternity crawl operations dashboard"
 };
 
@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="railCard railBrandCard">
               <p className="eyebrow">Frat Finder AI</p>
               <h1>Operator Console</h1>
-              <p className="headerDescription">V3.0.0 request workers, LangGraph evidence flows, and chapter coverage in one operating surface.</p>
+              <p className="headerDescription">V3.0.1 request workers, LangGraph evidence flows, and chapter coverage in one operating surface.</p>
             </div>
             <nav className="railNav" aria-label="Primary">
               {navItems.map((item, index) => (
@@ -61,7 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
               <div className="headerMetaBand">
                 <span className="headerMetaChip">Registry-first discovery</span>
-                <span className="headerMetaChip">V3.0.0 request workers</span>
+                <span className="headerMetaChip">V3.0.1 request workers</span>
                 <span className="headerMetaChip">Search-safe enrichment</span>
                 <span className="headerMetaChip">Review-aware writes</span>
               </div>

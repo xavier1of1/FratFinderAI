@@ -59,7 +59,7 @@ export default async function OverviewPage() {
     <div className="sectionStack">
       <PageIntro
         eyebrow="Overview"
-        title="V3.0.0 command center for sourcing, agents, and review"
+        title="V3.0.1 command center for sourcing, agents, and review"
         description="Use this page to get your bearings fast: whether the V3 worker queue is healthy, how much data is loaded, and where operator attention is needed next."
         meta={[
           `${chapters.length} preview chapters`,

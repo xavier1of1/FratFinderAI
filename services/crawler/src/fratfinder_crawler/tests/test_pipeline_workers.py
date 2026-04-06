@@ -49,13 +49,30 @@ def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
         def __init__(self, connection):
             self._connection = connection
 
+        def upsert_worker_process(self, **kwargs):
+            _ = kwargs
+
+        def heartbeat_worker_process(self, worker_id: str, lease_seconds: int | None = None):
+            _ = worker_id, lease_seconds
+
+        def stop_worker_process(self, worker_id: str, status: str = "stopped"):
+            _ = worker_id, status
+
         def reconcile_stale_requests(self, max_age_minutes: int) -> int:
             assert max_age_minutes == 45
             return 1
 
-        def claim_next_due_request(self, worker_id: str):
+        def claim_next_due_request(self, worker_id: str, *, lease_token: str | None = None, lease_seconds: int | None = None):
             assert worker_id == "local-request-worker"
+            assert lease_token
+            assert lease_seconds == 180
             return claimed.pop(0) if claimed else None
+
+        def release_request_lease(self, *, request_id: str, worker_id: str, lease_token: str):
+            _ = request_id, worker_id, lease_token
+
+        def heartbeat_request_lease(self, *, request_id: str, worker_id: str, lease_token: str, lease_seconds: int):
+            _ = request_id, worker_id, lease_token, lease_seconds
 
     class WorkerService(CrawlService):
         def __init__(self, settings):
@@ -75,6 +92,9 @@ def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
         crawler_v3_request_poll_seconds=1,
         crawler_v3_request_stale_minutes=45,
         crawler_v3_request_worker_id="local-request-worker",
+        crawler_v3_request_worker_runtime_owner="python_request_worker",
+        crawler_v3_request_worker_lease_seconds=180,
+        crawler_v3_request_worker_heartbeat_seconds=30,
         crawler_v3_crawl_runtime_mode="adaptive_primary",
         crawler_v3_field_job_runtime_mode="langgraph_primary",
         crawler_v3_field_job_graph_durability="sync",
@@ -99,6 +119,9 @@ class _QueueTriageRepository:
         self.snippets_by_chapter = snippets_by_chapter or {}
         self.patched: list[dict[str, object]] = []
         self.repairs: list[dict[str, object]] = []
+        self.repair_jobs: list[dict[str, object]] = []
+        self.completed_repair_jobs: list[dict[str, object]] = []
+        self.claimable_repair_jobs: list[object] = []
 
     def list_queued_field_jobs_for_triage(self, *, limit: int = 200, source_slug: str | None = None, field_name: str | None = None):
         _ = limit, source_slug, field_name
@@ -114,6 +137,20 @@ class _QueueTriageRepository:
     def update_chapter_identity_repair(self, **kwargs: object) -> bool:
         self.repairs.append(dict(kwargs))
         return True
+
+    def enqueue_chapter_repair_job(self, **kwargs: object) -> bool:
+        self.repair_jobs.append(dict(kwargs))
+        return True
+
+    def claim_next_chapter_repair_job(self, worker_id: str, source_slug: str | None = None):
+        _ = worker_id, source_slug
+        return self.claimable_repair_jobs.pop(0) if self.claimable_repair_jobs else None
+
+    def list_queued_field_jobs_for_chapter(self, chapter_id: str):
+        return [job for job in self.jobs if job.chapter_id == chapter_id]
+
+    def complete_chapter_repair_job(self, job, **kwargs: object) -> None:
+        self.completed_repair_jobs.append({"job": job, **kwargs})
 
 
 def _field_job(
@@ -186,8 +223,48 @@ def test_reconcile_field_job_queue_repairs_candidate_school_into_actionable():
         policy_pack=service._resolve_field_job_policy_pack("alpha-delta-gamma-main"),
     )
 
-    assert triage["actionableRetained"] == 1
-    assert triage["repairQueued"] == 0
-    assert repair["promotedToCanonical"] == 1
+    assert triage["actionableRetained"] == 0
+    assert triage["repairQueued"] == 1
+    assert repair["queued"] == 1
+    assert repo.repair_jobs[0]["chapter_id"] == "chapter-1"
+    assert repo.patched[0]["payload_patch"]["chapterRepair"]["state"] == "queued"
+
+
+def test_process_chapter_repair_queue_promotes_canonical_and_unblocks_jobs():
+    settings = SimpleNamespace(crawler_field_job_runtime_mode="langgraph_primary", crawler_field_job_graph_durability="sync", crawler_field_job_worker_id="repair-worker")
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[_field_job(university_name=None, payload={"candidateSchoolName": "Example University", "sourceSlug": "alpha-main"})]
+    )
+    repo.claimable_repair_jobs.append(
+        SimpleNamespace(
+            id="repair-1",
+            chapter_id="chapter-1",
+            chapter_slug="chapter-1",
+            chapter_name="Alpha Test",
+            source_slug="alpha-main",
+            payload={"candidateSchoolName": "Example University", "sourceSlug": "alpha-main"},
+            attempts=1,
+            max_attempts=3,
+            priority=0,
+            claim_token="claim-1",
+            repair_state="running",
+            university_name=None,
+            website_url=None,
+            instagram_url=None,
+            contact_email=None,
+        )
+    )
+
+    summary = service._process_chapter_repair_queue(
+        repo,
+        source_slug="alpha-main",
+        limit=2,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-delta-gamma-main"),
+    )
+
+    assert summary["running"] == 1
+    assert summary["promotedToCanonical"] == 1
     assert repo.repairs[0]["university_name"] == "Example University"
+    assert repo.completed_repair_jobs[0]["repair_state"] == "promoted_to_canonical_valid"
     assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"

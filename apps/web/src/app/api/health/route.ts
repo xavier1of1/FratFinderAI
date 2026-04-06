@@ -1,21 +1,18 @@
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
-import { scheduleBenchmarkDriftAlertScan } from "@/lib/benchmark-alerts";
-import { activeCampaignRunCount, scheduleDueCampaignRuns } from "@/lib/campaign-runner";
-import { reconcileStaleCampaignRuns } from "@/lib/repositories/campaign-run-repository";
+import { countActiveRuntimeWorkersByLane } from "@/lib/repositories/runtime-worker-repository";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const reconciledCampaigns = await reconcileStaleCampaignRuns();
-    const scheduledCampaigns = await scheduleDueCampaignRuns();
-    const benchmarkDriftScan = await scheduleBenchmarkDriftAlertScan();
-
+    const activeWorkers = await countActiveRuntimeWorkersByLane(["campaign", "benchmark", "evaluation"]);
     return apiSuccess({
       ok: true,
       runtime: {
-        activeCampaignRuns: activeCampaignRunCount(),
-        reconciledCampaigns,
-        scheduledCampaigns,
-        benchmarkDriftScan,
+        activeCampaignRuns: Number(activeWorkers.campaign ?? 0),
+        activeBenchmarkRuns: Number(activeWorkers.benchmark ?? 0),
+        activeEvaluationWorkers: Number(activeWorkers.evaluation ?? 0),
+        mutatingReadPathsDisabled: true,
       },
       checkedAt: new Date().toISOString()
     });

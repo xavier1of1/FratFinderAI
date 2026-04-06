@@ -10,7 +10,7 @@ from langgraph.graph import END, StateGraph
 
 from fratfinder_crawler.db import CrawlerRepository, RequestGraphRepository
 from fratfinder_crawler.logging_utils import log_event
-from fratfinder_crawler.models import FraternityCrawlRequestRecord
+from fratfinder_crawler.models import FraternityCrawlRequestRecord, NormalizedChapter
 
 
 class RequestGraphState(TypedDict, total=False):
@@ -102,16 +102,21 @@ class RequestSupervisorGraphRuntime:
             "retry_crawl": False,
         }
         final_state = self._graph.invoke(initial_state)
+        progress = final_state.get("progress") or {}
+        records_seen = (progress.get("crawlRun") or {}).get("recordsSeen", 0)
+        queue_remaining = _remaining_actionable_queue(progress)
+        cycles_completed = (final_state.get("cycle_state") or {}).get("cyclesCompleted", 0)
         summary = {
             "requestId": request_id,
             "runtimeMode": self._runtime_mode,
             "terminalReason": final_state.get("terminal_reason"),
             "status": final_state.get("graph_status", "failed"),
             "crawlRuntimeModeUsed": final_state.get("crawl_runtime_mode_used"),
-            "crawlRunId": (final_state.get("progress") or {}).get("crawlRun", {}).get("id"),
-            "recordsSeen": (final_state.get("progress") or {}).get("crawlRun", {}).get("recordsSeen", 0),
-            "queueRemaining": _remaining_actionable_queue(final_state.get("progress")),
-            "cyclesCompleted": (final_state.get("cycle_state") or {}).get("cyclesCompleted", 0),
+            "businessStatus": "progressed" if int(records_seen or 0) > 0 or int(cycles_completed or 0) > 0 or int(queue_remaining or 0) == 0 else "no_business_progress",
+            "crawlRunId": progress.get("crawlRun", {}).get("id"),
+            "recordsSeen": records_seen,
+            "queueRemaining": queue_remaining,
+            "cyclesCompleted": cycles_completed,
         }
         self._request_repository.finish_request_graph_run(
             run_id,
@@ -884,10 +889,89 @@ class RequestSupervisorGraphRuntime:
         provisional = progress.get("provisional") or {}
         provisional.setdefault("evaluated", True)
         provisional.setdefault("autoPromoted", 0)
+        provisional.setdefault("reviewRequired", 0)
+        provisional.setdefault("rejected", 0)
         provisional.setdefault("remaining", 0)
+        request = state.get("request")
+        if request is not None:
+            provisional_rows = self._request_repository.list_provisional_chapters_for_request(request.id)
+            promoted = 0
+            review_required = 0
+            rejected = 0
+            remaining = 0
+            source = next(iter(self._crawler_repository.load_sources(request.source_slug)), None) if request.source_slug else None
+            for item in provisional_rows:
+                has_institution = bool((item.university_name or "").strip())
+                has_contact = any(
+                    bool((value or "").strip())
+                    for value in (item.website_url, item.instagram_url, item.contact_email)
+                )
+                if source is not None and has_institution and has_contact:
+                    field_states = {
+                        key: "found"
+                        for key, value in {
+                            "find_website": item.website_url,
+                            "find_instagram": item.instagram_url,
+                            "find_email": item.contact_email,
+                        }.items()
+                        if value
+                    }
+                    chapter_id = self._crawler_repository.upsert_chapter_discovery(
+                        source,
+                        NormalizedChapter(
+                            fraternity_slug=request.fraternity_slug,
+                            source_slug=request.source_slug,
+                            slug=item.slug,
+                            name=item.name,
+                            university_name=item.university_name,
+                            city=item.city,
+                            state=item.state,
+                            country=item.country or "USA",
+                            website_url=item.website_url,
+                            instagram_url=item.instagram_url,
+                            contact_email=item.contact_email,
+                            chapter_status="active",
+                            field_states=field_states,
+                        ),
+                    )
+                    self._request_repository.update_provisional_chapter_status(
+                        item.id,
+                        status="promoted",
+                        promotion_reason="auto_promoted_contact_and_institution_signal",
+                        promoted_chapter_id=chapter_id,
+                    )
+                    promoted += 1
+                    continue
+
+                if not has_institution and not has_contact:
+                    self._request_repository.update_provisional_chapter_status(
+                        item.id,
+                        status="rejected",
+                        promotion_reason="rejected_missing_institution_and_contact_signal",
+                    )
+                    rejected += 1
+                    continue
+
+                self._request_repository.update_provisional_chapter_status(
+                    item.id,
+                    status="review",
+                    promotion_reason="review_required_missing_official_contact_signal",
+                )
+                review_required += 1
+
+            remaining = len(
+                self._request_repository.list_provisional_chapters_for_request(
+                    request.id,
+                    statuses=("provisional",),
+                )
+            )
+            provisional["autoPromoted"] = promoted
+            provisional["reviewRequired"] = review_required
+            provisional["rejected"] = rejected
+            provisional["remaining"] = remaining
         progress["provisional"] = provisional
-        if state.get("request") is not None:
-            self._request_repository.update_request(state["request"].id, progress=progress)
+        if request is not None:
+            self._request_repository.update_request(request.id, progress=progress)
         return {"progress": progress}
 
     def _finalize(self, state: RequestGraphState) -> dict[str, Any]:

@@ -18,6 +18,9 @@ interface CampaignRunRow {
   id: string;
   name: string;
   status: CampaignRunStatus;
+  runtimeWorkerId: string | null;
+  runtimeLeaseExpiresAt: string | null;
+  runtimeLastHeartbeatAt: string | null;
   scheduledFor: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -105,6 +108,7 @@ const EMPTY_SUMMARY: CampaignRunSummary = {
   failedCount: 0,
   skippedCount: 0,
   activeCount: 0,
+  businessStatus: "no_business_progress",
   anyContactSuccessRate: 0,
   allThreeSuccessRate: 0,
   websiteCoverageRate: 0,
@@ -205,6 +209,10 @@ function normalizeSummary(summary: unknown, targetCount: number): CampaignRunSum
     failedCount: Number(value.failedCount ?? 0),
     skippedCount: Number(value.skippedCount ?? 0),
     activeCount: Number(value.activeCount ?? 0),
+    businessStatus:
+      value.businessStatus === "progressed" || value.businessStatus === "no_business_progress"
+        ? value.businessStatus
+        : "no_business_progress",
     anyContactSuccessRate: Number(value.anyContactSuccessRate ?? 0),
     allThreeSuccessRate: Number(value.allThreeSuccessRate ?? 0),
     websiteCoverageRate: Number(value.websiteCoverageRate ?? 0),
@@ -367,6 +375,9 @@ function mapCampaignRunRow(row: CampaignRunRow, items: CampaignRunItem[], events
     id: row.id,
     name: row.name,
     status: row.status,
+    runtimeWorkerId: row.runtimeWorkerId,
+    runtimeLeaseExpiresAt: row.runtimeLeaseExpiresAt,
+    runtimeLastHeartbeatAt: row.runtimeLastHeartbeatAt,
     scheduledFor: row.scheduledFor,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
@@ -473,7 +484,7 @@ async function listEventsForCampaignRuns(runIds: string[]): Promise<Map<string, 
   return grouped;
 }
 
-export async function listCampaignRuns(limit = 50): Promise<CampaignRun[]> {
+export async function listCampaignRuns(limit = 50, options?: { includeDetails?: boolean }): Promise<CampaignRun[]> {
   const dbPool = getDbPool();
   const { rows } = await dbPool.query<CampaignRunRow>(
     `
@@ -481,6 +492,9 @@ export async function listCampaignRuns(limit = 50): Promise<CampaignRun[]> {
         id,
         name,
         status,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         scheduled_for AS "scheduledFor",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
@@ -497,6 +511,10 @@ export async function listCampaignRuns(limit = 50): Promise<CampaignRun[]> {
     [limit]
   );
 
+  if (!options?.includeDetails) {
+    return rows.map((row) => mapCampaignRunRow(row, [], []));
+  }
+
   const ids = rows.map((row) => row.id);
   const [itemsByRunId, eventsByRunId] = await Promise.all([listItemsForCampaignRuns(ids), listEventsForCampaignRuns(ids)]);
   return rows.map((row) => mapCampaignRunRow(row, itemsByRunId.get(row.id) ?? [], eventsByRunId.get(row.id) ?? []));
@@ -510,6 +528,9 @@ export async function getCampaignRun(id: string): Promise<CampaignRun | null> {
         id,
         name,
         status,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         scheduled_for AS "scheduledFor",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
@@ -560,6 +581,9 @@ export async function createCampaignRun(params: {
         id,
         name,
         status,
+        runtime_worker_id AS "runtimeWorkerId",
+        runtime_lease_expires_at AS "runtimeLeaseExpiresAt",
+        runtime_last_heartbeat_at AS "runtimeLastHeartbeatAt",
         scheduled_for AS "scheduledFor",
         started_at AS "startedAt",
         finished_at AS "finishedAt",
@@ -709,6 +733,11 @@ export async function listQueuedCampaignRunIds(limit = 10): Promise<string[]> {
       FROM campaign_runs
       WHERE status = 'queued'
         AND scheduled_for <= NOW()
+        AND (
+          runtime_worker_id IS NULL
+          OR runtime_lease_expires_at IS NULL
+          OR runtime_lease_expires_at < NOW()
+        )
       ORDER BY scheduled_for ASC, created_at ASC
       LIMIT $1
     `,
@@ -725,9 +754,15 @@ export async function reconcileStaleCampaignRuns(maxAgeMinutes = 45): Promise<nu
       SET
         status = 'failed',
         finished_at = NOW(),
-        last_error = COALESCE(last_error, 'Campaign run stalled before completion')
+        last_error = COALESCE(last_error, 'Campaign run stalled before completion'),
+        runtime_worker_id = NULL,
+        runtime_lease_token = NULL,
+        runtime_lease_expires_at = NULL
       WHERE status = 'running'
-        AND updated_at < NOW() - ($1::int * INTERVAL '1 minute')
+        AND (
+          (runtime_lease_expires_at IS NOT NULL AND runtime_lease_expires_at < NOW())
+          OR (runtime_lease_expires_at IS NULL AND updated_at < NOW() - ($1::int * INTERVAL '1 minute'))
+        )
     `,
     [Math.max(5, maxAgeMinutes)]
   );

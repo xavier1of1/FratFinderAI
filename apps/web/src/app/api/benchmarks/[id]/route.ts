@@ -1,10 +1,11 @@
 import { buildBenchmarkGateReport, findLatestLegacyBaseline } from "@/lib/benchmark-gates";
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
-import { failStaleBenchmarkRuns, getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
+import { getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, context: { params: { id: string } }) {
   try {
-    await failStaleBenchmarkRuns();
     const run = await getBenchmarkRun(context.params.id);
     if (!run) {
       return apiError({

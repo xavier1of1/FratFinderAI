@@ -1,5 +1,13 @@
 # V3 System Overview
 
+Status: `Target`
+
+This diagram is the intended end-state V3 architecture, not a claim that every workload lane is already fully migrated.
+Use it together with:
+
+- `CURRENT_IMPLEMENTED_QUEUE_ARCHITECTURE.md` for the implementation-accurate current state
+- `V4_PLATFORM_ARCHITECTURE.md` for the transitional platform-wide view
+
 This diagram shows the layered composition of the V3 LangGraph architecture and distinguishes:
 
 - graph orchestration

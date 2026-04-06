@@ -386,6 +386,18 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
                 })}
               </div>
 
+              {selectedRequest.stage === "awaiting_confirmation" ? (
+                <div className="benchmarkError" role="status">
+                  <strong>Source confirmation required.</strong>{" "}
+                  {selectedRequest.lastError ?? "The current source did not produce usable chapter discovery results."}
+                  {sourceOverride ? (
+                    <>
+                      {" "}Review or replace the source URL below, then use <strong>Confirm</strong> to rerun the request.
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="benchmarkMetaGrid">
                 <div className="benchmarkMetaCard">
                   <p className="benchmarkMetaLabel">Stage</p>

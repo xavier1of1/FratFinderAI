@@ -128,6 +128,7 @@ export interface ReviewItemAuditLog {
 export type BenchmarkStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type BenchmarkFieldName = "find_website" | "find_email" | "find_instagram" | "all";
+export type BenchmarkIsolationMode = "shared_live_observed" | "strict_live_isolated";
 
 export interface BenchmarkRunConfig {
   fieldName: BenchmarkFieldName;
@@ -140,6 +141,7 @@ export interface BenchmarkRunConfig {
   fieldJobRuntimeMode?: "legacy" | "langgraph_shadow" | "langgraph_primary";
   fieldJobGraphDurability?: "exit" | "async" | "sync";
   runAdaptiveCrawlBeforeCycles?: boolean;
+  isolationMode?: BenchmarkIsolationMode;
 }
 
 export interface BenchmarkCycleSample {
@@ -161,6 +163,7 @@ export interface BenchmarkRunSummary {
   totalProcessed: number;
   totalRequeued: number;
   totalFailedTerminal: number;
+  businessStatus?: "progressed" | "no_business_progress";
   jobsPerMinute: number;
   avgCycleMs: number;
   queueDepthStart: number;
@@ -171,6 +174,9 @@ export interface BenchmarkRunSummary {
   repairPromoted?: number;
   reconciledHistorical?: number;
   actionableQueueRemaining?: number;
+  preconditions?: Record<string, unknown>;
+  isolationMode?: BenchmarkIsolationMode;
+  contaminationStatus?: "isolated" | "shared_live";
 }
 
 export interface BenchmarkShadowDiff {
@@ -207,6 +213,9 @@ export interface BenchmarkRunListItem {
   status: BenchmarkStatus;
   benchmarkKind?: "queue" | "campaign";
   campaignRunId?: string | null;
+  runtimeWorkerId?: string | null;
+  runtimeLeaseExpiresAt?: string | null;
+  runtimeLastHeartbeatAt?: string | null;
   fieldName: BenchmarkFieldName;
   sourceSlug: string | null;
   config: BenchmarkRunConfig;
@@ -351,6 +360,8 @@ export interface FraternityCrawlProgress {
   provisional?: {
     evaluated?: boolean;
     autoPromoted?: number;
+    reviewRequired?: number;
+    rejected?: number;
     remaining?: number;
   };
   chapterSearch?: {
@@ -458,6 +469,24 @@ export interface ProvisionalChapter {
   updatedAt: string;
 }
 
+export interface OpsAlert {
+  id: string;
+  alertScope: "benchmark" | "campaign" | "queue" | "repair" | "provider" | "system";
+  alertType: string;
+  severity: "info" | "warning" | "critical";
+  status: "open" | "resolved";
+  benchmarkRunId: string | null;
+  campaignRunId: string | null;
+  requestId: string | null;
+  sourceSlug: string | null;
+  message: string;
+  fingerprint: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
 export interface ChapterEvidence {
   id: string;
   chapterId: string | null;
@@ -491,13 +520,22 @@ export interface AgentOpsSummary {
   graphRunsFailed: number;
   graphRunsSucceeded: number;
   fieldJobsQueued: number;
+  fieldJobsActionable: number;
   fieldJobsRunning: number;
   fieldJobsDeferred: number;
+  fieldJobsBlockedInvalid: number;
+  fieldJobsBlockedRepairable: number;
+  chapterRepairQueued: number;
+  chapterRepairRunning: number;
+  chapterRepairCompleted: number;
+  chapterRepairHistoricalReconciled: number;
   fieldJobsTerminalNoSignal: number;
   fieldJobsReviewRequired: number;
   fieldJobsUpdated: number;
   provisionalOpen: number;
   provisionalPromoted: number;
+  provisionalReview: number;
+  provisionalRejected: number;
   evidenceTotal: number;
   evidenceReview: number;
   evidenceWrite: number;
@@ -509,6 +547,12 @@ export interface AgentOpsSummary {
   chapterValidityRepairable: number;
   chapterValidityBlockedInvalid: number;
   chapterValidityBlockedRepairable: number;
+  opsAlertsOpen: number;
+  opsAlertsCritical: number;
+  opsAlertsWarning: number;
+  opsAlertsResolvedLast24h: number;
+  opsAlertsOldestOpenMinutes: number;
+  provisionalOldestOpenHours: number;
 }
 
 export interface ChapterSearchRun {
@@ -563,6 +607,9 @@ export interface FraternityCrawlRequest {
   sourceConfidence: number | null;
   status: FraternityCrawlRequestStatus;
   stage: FraternityCrawlRequestStage;
+  runtimeWorkerId?: string | null;
+  runtimeLeaseExpiresAt?: string | null;
+  runtimeLastHeartbeatAt?: string | null;
   scheduledFor: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -730,6 +777,7 @@ export interface CampaignRunSummary {
   failedCount: number;
   skippedCount: number;
   activeCount: number;
+  businessStatus?: "progressed" | "no_business_progress";
   anyContactSuccessRate: number;
   allThreeSuccessRate: number;
   websiteCoverageRate: number;
@@ -821,6 +869,9 @@ export interface CampaignRun {
   name: string;
   status: CampaignRunStatus;
   runtimeActive?: boolean;
+  runtimeWorkerId?: string | null;
+  runtimeLeaseExpiresAt?: string | null;
+  runtimeLastHeartbeatAt?: string | null;
   scheduledFor: string;
   startedAt: string | null;
   finishedAt: string | null;

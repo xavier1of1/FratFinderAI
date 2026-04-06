@@ -77,6 +77,7 @@ _FRATERNITY_HOST_HINTS = {
     "pi-kappa-alpha": ("pikes.org", "pikapp.org"),
     "tau-kappa-epsilon": ("tke.org",),
     "kappa-sigma": ("kappasigma.org",),
+    "theta-xi": ("thetaxi.org",),
 }
 
 _FRATERNITY_SOURCE_HINTS = {
@@ -85,6 +86,7 @@ _FRATERNITY_SOURCE_HINTS = {
     "alpha-tau-omega": "https://ato.org/home-2/ato-map/",
     "pi-kappa-alpha": "https://pikes.org/chapters/",
     "tau-kappa-epsilon": "https://www.tke.org/chapters",
+    "theta-xi": "https://www.thetaxi.org/chapters-and-colonies/",
 }
 
 _FRATERNITY_CONTEXT_MARKERS = (
@@ -127,6 +129,11 @@ _WEAK_SOURCE_PATH_MARKERS = (
     "portal",
     "login",
     "account",
+)
+
+_WEAK_SOURCE_HOST_MARKERS = (
+    "dynamic.omegafi.com",
+    "omegafi.com",
 )
 
 _GREEK_SYMBOLS = {
@@ -815,8 +822,12 @@ def _evaluate_existing_source_candidate(
         reasons.append("blocked_host")
     if candidate.parser_key in _INVALID_EXISTING_SOURCE_PARSER_KEYS:
         reasons.append("unsupported_parser")
+    if any(marker in host for marker in _WEAK_SOURCE_HOST_MARKERS):
+        reasons.append("hosted_member_portal")
     if any(marker in path for marker in _WEAK_SOURCE_PATH_MARKERS):
         reasons.append("member_or_alumni_path")
+    if candidate.last_run_status in {"partial", "failed"} and not candidate.last_success_at:
+        reasons.append("no_success_history")
 
     fraternity_compact = _compact(fraternity_name)
     host_text = _compact(host)

@@ -431,6 +431,34 @@ def test_discover_source_rejects_weak_existing_member_path_and_uses_curated_hint
     assert any(step.get("step") == "rejected_existing_source_candidate" for step in result.resolution_trace)
 
 
+def test_discover_source_rejects_existing_source_with_no_success_history_and_uses_theta_xi_hint():
+    repository = StubDiscoveryRepository(
+        existing_sources=[
+            ExistingSourceCandidate(
+                source_slug="theta-xi-main",
+                list_url="https://thetaxi.dynamic.omegafi.com/mythetaxi/",
+                base_url="https://thetaxi.dynamic.omegafi.com",
+                source_type="html_directory",
+                parser_key="directory_v1",
+                active=True,
+                last_run_status="partial",
+                last_success_at=None,
+                confidence=0.75,
+            )
+        ],
+    )
+
+    result = discover_source("Theta Xi", StubSearchClient({}), repository=repository)
+
+    assert result.selected_url == "https://www.thetaxi.org/chapters-and-colonies/"
+    assert result.source_provenance == "search"
+    assert result.selected_candidate_rationale == "curated_hint_safe_fallback"
+    rejected_step = next(
+        step for step in result.resolution_trace if step.get("step") == "rejected_existing_source_candidate"
+    )
+    assert "no_success_history" in (rejected_step.get("reasons") or [])
+
+
 def test_discover_source_uses_curated_hint_over_noisy_alumni_search_result():
     repository = StubDiscoveryRepository(
         verified_source=VerifiedSourceRecord(

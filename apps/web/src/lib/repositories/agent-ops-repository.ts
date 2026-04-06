@@ -1,6 +1,7 @@
 import { getDbPool } from "../db";
 import { normalizeInstagramUrl } from "../social";
-import type { AgentOpsSummary, ChapterEvidence, ChapterSearchRun, ProvisionalChapter, RequestGraphRun } from "../types";
+import type { AgentOpsSummary, ChapterEvidence, ChapterSearchRun, OpsAlert, ProvisionalChapter, RequestGraphRun } from "../types";
+import { getOpsAlertSummary, listOpsAlerts } from "./ops-alert-repository";
 
 export async function listRequestGraphRuns(limit = 100): Promise<RequestGraphRun[]> {
   const dbPool = getDbPool();
@@ -167,6 +168,10 @@ export async function listChapterSearchRuns(limit = 50): Promise<ChapterSearchRu
   }));
 }
 
+export async function listOpsAlertsForAgentOps(limit = 50): Promise<OpsAlert[]> {
+  return listOpsAlerts(limit);
+}
+
 export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
   const dbPool = getDbPool();
   const { rows } = await dbPool.query<{
@@ -180,13 +185,23 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
     graph_runs_failed: string | number;
     graph_runs_succeeded: string | number;
     field_jobs_queued: string | number;
+    field_jobs_actionable: string | number;
     field_jobs_running: string | number;
     field_jobs_deferred: string | number;
+    field_jobs_blocked_invalid: string | number;
+    field_jobs_blocked_repairable: string | number;
+    chapter_repair_queued: string | number;
+    chapter_repair_running: string | number;
+    chapter_repair_completed: string | number;
+    chapter_repair_historical_reconciled: string | number;
     field_jobs_terminal_no_signal: string | number;
     field_jobs_review_required: string | number;
     field_jobs_updated: string | number;
     provisional_open: string | number;
     provisional_promoted: string | number;
+    provisional_review: string | number;
+    provisional_rejected: string | number;
+    provisional_oldest_open_hours: string | number | null;
     evidence_total: string | number;
     evidence_review: string | number;
     evidence_write: string | number;
@@ -211,13 +226,30 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
         (SELECT COUNT(*) FROM request_graph_runs WHERE status = 'failed') AS graph_runs_failed,
         (SELECT COUNT(*) FROM request_graph_runs WHERE status = 'succeeded') AS graph_runs_succeeded,
         (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued') AS field_jobs_queued,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'actionable') AS field_jobs_actionable,
         (SELECT COUNT(*) FROM field_jobs WHERE status = 'running') AS field_jobs_running,
-        (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(payload -> 'contactResolution' ->> 'queueState', 'actionable') = 'deferred') AS field_jobs_deferred,
-        (SELECT COUNT(*) FROM field_jobs WHERE status = 'done' AND COALESCE(completed_payload ->> 'status', '') = 'terminal_no_signal') AS field_jobs_terminal_no_signal,
-        (SELECT COUNT(*) FROM field_jobs WHERE status = 'done' AND COALESCE(completed_payload ->> 'status', '') = 'review_required') AS field_jobs_review_required,
-        (SELECT COUNT(*) FROM field_jobs WHERE status = 'done' AND COALESCE(completed_payload ->> 'status', '') = 'updated') AS field_jobs_updated,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'deferred') AS field_jobs_deferred,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_invalid') AS field_jobs_blocked_invalid,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_repairable') AS field_jobs_blocked_repairable,
+        (SELECT COUNT(*) FROM chapter_repair_jobs WHERE status = 'queued') AS chapter_repair_queued,
+        (SELECT COUNT(*) FROM chapter_repair_jobs WHERE status = 'running') AS chapter_repair_running,
+        (SELECT COUNT(*) FROM chapter_repair_jobs WHERE status = 'done') AS chapter_repair_completed,
+        (
+          SELECT COUNT(*)
+          FROM chapter_repair_jobs
+          WHERE CASE
+            WHEN payload ? 'origin' THEN payload ->> 'origin'
+            ELSE 'historical_queue_reconciliation'
+          END = 'historical_queue_reconciliation'
+        ) AS chapter_repair_historical_reconciled,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'done' AND COALESCE(terminal_outcome, '') = 'terminal_no_signal') AS field_jobs_terminal_no_signal,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'done' AND COALESCE(terminal_outcome, '') = 'review_required') AS field_jobs_review_required,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'done' AND COALESCE(terminal_outcome, '') = 'updated') AS field_jobs_updated,
         (SELECT COUNT(*) FROM provisional_chapters WHERE status = 'provisional') AS provisional_open,
         (SELECT COUNT(*) FROM provisional_chapters WHERE status = 'promoted') AS provisional_promoted,
+        (SELECT COUNT(*) FROM provisional_chapters WHERE status = 'review') AS provisional_review,
+        (SELECT COUNT(*) FROM provisional_chapters WHERE status = 'rejected') AS provisional_rejected,
+        (SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 3600), 0)::int FROM provisional_chapters WHERE status = 'provisional') AS provisional_oldest_open_hours,
         (SELECT COUNT(*) FROM chapter_evidence) AS evidence_total,
         (SELECT COUNT(*) FROM chapter_evidence WHERE evidence_status = 'review') AS evidence_review,
         (SELECT COUNT(*) FROM chapter_evidence WHERE evidence_status = 'write') AS evidence_write,
@@ -233,6 +265,7 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
   );
 
   const row = rows[0];
+  const opsAlerts = await getOpsAlertSummary();
   return {
     requestQueueQueued: Number(row?.request_queue_queued ?? 0),
     requestQueueRunning: Number(row?.request_queue_running ?? 0),
@@ -244,13 +277,22 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
     graphRunsFailed: Number(row?.graph_runs_failed ?? 0),
     graphRunsSucceeded: Number(row?.graph_runs_succeeded ?? 0),
     fieldJobsQueued: Number(row?.field_jobs_queued ?? 0),
+    fieldJobsActionable: Number(row?.field_jobs_actionable ?? 0),
     fieldJobsRunning: Number(row?.field_jobs_running ?? 0),
     fieldJobsDeferred: Number(row?.field_jobs_deferred ?? 0),
+    fieldJobsBlockedInvalid: Number(row?.field_jobs_blocked_invalid ?? 0),
+    fieldJobsBlockedRepairable: Number(row?.field_jobs_blocked_repairable ?? 0),
+    chapterRepairQueued: Number(row?.chapter_repair_queued ?? 0),
+    chapterRepairRunning: Number(row?.chapter_repair_running ?? 0),
+    chapterRepairCompleted: Number(row?.chapter_repair_completed ?? 0),
+    chapterRepairHistoricalReconciled: Number(row?.chapter_repair_historical_reconciled ?? 0),
     fieldJobsTerminalNoSignal: Number(row?.field_jobs_terminal_no_signal ?? 0),
     fieldJobsReviewRequired: Number(row?.field_jobs_review_required ?? 0),
     fieldJobsUpdated: Number(row?.field_jobs_updated ?? 0),
     provisionalOpen: Number(row?.provisional_open ?? 0),
     provisionalPromoted: Number(row?.provisional_promoted ?? 0),
+    provisionalReview: Number(row?.provisional_review ?? 0),
+    provisionalRejected: Number(row?.provisional_rejected ?? 0),
     evidenceTotal: Number(row?.evidence_total ?? 0),
     evidenceReview: Number(row?.evidence_review ?? 0),
     evidenceWrite: Number(row?.evidence_write ?? 0),
@@ -261,6 +303,12 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
     chapterValidityInvalid: Number(row?.chapter_validity_invalid ?? 0),
     chapterValidityRepairable: Number(row?.chapter_validity_repairable ?? 0),
     chapterValidityBlockedInvalid: Number(row?.chapter_validity_blocked_invalid ?? 0),
-    chapterValidityBlockedRepairable: Number(row?.chapter_validity_blocked_repairable ?? 0)
+    chapterValidityBlockedRepairable: Number(row?.chapter_validity_blocked_repairable ?? 0),
+    opsAlertsOpen: opsAlerts.openTotal,
+    opsAlertsCritical: opsAlerts.openCritical,
+    opsAlertsWarning: opsAlerts.openWarning,
+    opsAlertsResolvedLast24h: opsAlerts.resolvedLast24h,
+    opsAlertsOldestOpenMinutes: opsAlerts.oldestOpenMinutes,
+    provisionalOldestOpenHours: Number(row?.provisional_oldest_open_hours ?? 0),
   };
 }

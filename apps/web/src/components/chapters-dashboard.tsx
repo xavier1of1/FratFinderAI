@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { TagPill } from "@/components/tag-pill";
 import { instagramHandleFromUrl } from "@/lib/social";
@@ -73,6 +74,7 @@ function normalizeStateCode(value: string | null | undefined): string | null {
 }
 const DEFAULT_RERUN_FIELDS: ChapterFieldName[] = ["find_website", "find_email", "find_instagram"];
 const MAX_VISIBLE_STATE_DOTS = 24;
+const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000];
 
 function fieldTone(state: string | undefined): "neutral" | "info" | "warning" {
   if (state === "found") return "info";
@@ -129,7 +131,10 @@ export function ChaptersDashboard({
   totalChapterCount: initialTotalChapterCount,
   fraternityOptions: initialFraternityOptions,
   stateOptions: initialStateOptions,
-  statusOptions: initialStatusOptions
+  statusOptions: initialStatusOptions,
+  currentPage,
+  pageSize,
+  totalPages
 }: {
   chapters: ChapterListItem[];
   mapSummary: ChapterMapStateSummary[];
@@ -137,7 +142,13 @@ export function ChaptersDashboard({
   fraternityOptions: string[];
   stateOptions: string[];
   statusOptions: string[];
+  currentPage: number;
+  pageSize: number;
+  totalPages: number;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [chapters, setChapters] = useState<ChapterListItem[]>(initialChapters);
   const [totalChapterCount, setTotalChapterCount] = useState<number>(Math.max(initialTotalChapterCount, initialChapters.length));
   const [nameFilter, setNameFilter] = useState("");
@@ -154,6 +165,26 @@ export function ChaptersDashboard({
   const [isSaving, setIsSaving] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const pageNumbers = useMemo(() => {
+    if (totalPages <= 1) {
+      return [1];
+    }
+    const pages = new Set<number>([1, totalPages]);
+    for (let page = Math.max(1, currentPage - 2); page <= Math.min(totalPages, currentPage + 2); page += 1) {
+      pages.add(page);
+    }
+    return Array.from(pages).sort((a, b) => a - b);
+  }, [currentPage, totalPages]);
+
+  const pageRangeSummary = useMemo(() => {
+    if (totalChapterCount === 0) {
+      return "No chapters available.";
+    }
+    const start = (currentPage - 1) * pageSize + 1;
+    const end = Math.min(totalChapterCount, start + chapters.length - 1);
+    return `Showing chapters ${start}-${end} of ${totalChapterCount}.`;
+  }, [chapters.length, currentPage, pageSize, totalChapterCount]);
 
   const fraternityOptions = useMemo(
     () => Array.from(new Set([...initialFraternityOptions, ...chapters.map((chapter) => chapter.fraternitySlug)])).sort(),
@@ -240,6 +271,20 @@ export function ChaptersDashboard({
     );
   }
 
+  function updatePagination(nextPage: number, nextPageSize = pageSize) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", String(Math.max(1, Math.min(nextPage, totalPages))));
+    params.set("pageSize", String(nextPageSize));
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
+  function changePageSize(nextPageSize: number) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("pageSize", String(nextPageSize));
+    params.set("page", "1");
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
   async function requestRerun() {
     if (!selectedIds.length || !rerunFields.length) {
       return;
@@ -322,7 +367,8 @@ export function ChaptersDashboard({
         <div className="chaptersHeaderRow">
           <div>
             <h2>Chapters</h2>
-            <p className="muted mapNote">Showing {filteredChapters.length} of {chapters.length} loaded chapters{totalChapterCount > chapters.length ? ` (${totalChapterCount} total in database)` : ""}.</p>
+            <p className="muted mapNote">{pageRangeSummary}</p>
+            <p className="muted mapNote">Filtered to {filteredChapters.length} of {chapters.length} chapters loaded on this page.</p>
             <p className="muted mapNote">Map counts use normalized state data across the full chapter dataset.</p>
           </div>
           <div className="mapLegend">
@@ -564,6 +610,57 @@ export function ChaptersDashboard({
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="chaptersHeaderRow" style={{ marginTop: 20, alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          <div className="fieldStack" style={{ minWidth: 180 }}>
+            <label htmlFor="chapters-page-size">Page Size</label>
+            <select
+              id="chapters-page-size"
+              className="filterSelect"
+              value={pageSize}
+              onChange={(event) => changePageSize(Number(event.target.value))}
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option} chapters
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="buttonRow" style={{ flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="buttonSecondary"
+              disabled={currentPage <= 1}
+              onClick={() => updatePagination(currentPage - 1)}
+            >
+              Previous Page
+            </button>
+            {pageNumbers.map((page, index) => {
+              const previousPage = pageNumbers[index - 1];
+              const showGap = previousPage !== undefined && page - previousPage > 1;
+              return (
+                <div key={page} style={{ display: "contents" }}>
+                  {showGap ? <span className="muted" style={{ alignSelf: "center" }}>...</span> : null}
+                  <button
+                    type="button"
+                    className={`buttonSecondary toggleButton${page === currentPage ? " isActiveFilter" : ""}`}
+                    onClick={() => updatePagination(page)}
+                  >
+                    {page}
+                  </button>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              className="buttonSecondary"
+              disabled={currentPage >= totalPages}
+              onClick={() => updatePagination(currentPage + 1)}
+            >
+              Next Page
+            </button>
+          </div>
         </div>
       </section>
     </div>

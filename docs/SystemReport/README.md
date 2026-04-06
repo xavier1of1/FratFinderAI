@@ -27,6 +27,10 @@ The review was written with the product mission in mind:
   - Diagrams, queue topology sketches, KPI tables, and summary visuals for the current vs target architecture.
 - [Evidence Index](./EVIDENCE_INDEX.md)
   - Files, logs, APIs, and database snapshots used during the audit.
+- [Implementation Phases 2026-04-06](./IMPLEMENTATION_PHASES_2026-04-06.md)
+  - Phase-by-phase deliverables, acceptance criteria, and final exit conditions for the queue-architecture recovery program.
+- [Program Closeout 2026-04-06](./PROGRAM_CLOSEOUT_2026-04-06.md)
+  - Final closeout tying the findings, implementation phases, acceptance criteria, and implemented end state together.
 
 ## Snapshot Date
 
@@ -51,3 +55,4 @@ Use this folder as:
 - a current-state architecture record
 - a gap analysis between product strategy and implementation
 - a planning input for the next major queue/control-plane refactor
+- the closeout record for the April 6, 2026 queue-architecture recovery program

@@ -1,5 +1,5 @@
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
-import { scheduleCampaignRun } from "@/lib/campaign-runner";
+import { createEvaluationJob } from "@/lib/repositories/evaluation-job-repository";
 import { getCampaignRun, reconcileStaleCampaignRuns, updateCampaignRun } from "@/lib/repositories/campaign-run-repository";
 
 export async function POST(_request: Request, context: { params: { id: string } }) {
@@ -25,7 +25,14 @@ export async function POST(_request: Request, context: { params: { id: string } 
       lastError: null
     });
 
-    await scheduleCampaignRun(campaign.id);
+    await createEvaluationJob({
+      jobKind: "campaign_run",
+      campaignRunId: campaign.id,
+      isolationMode: "shared_live_observed",
+      payload: {
+        resumedAt: new Date().toISOString(),
+      },
+    });
     const refreshed = await getCampaignRun(campaign.id);
     return apiSuccess(refreshed ?? campaign, { status: 202 });
   } catch (error) {

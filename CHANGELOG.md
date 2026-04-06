@@ -1,3 +1,120 @@
+## [3.0.1] - 2026-04-06
+
+### Added
+- Added `docs/SystemReport/IMPLEMENTATION_PHASES_2026-04-06.md` to define the queue-architecture recovery program by phase, including deliverables, acceptance criteria, and final exit conditions.
+- Added `docs/SystemReport/PROGRAM_CLOSEOUT_2026-04-06.md` as the final closeout record for the completed queue-architecture recovery program.
+- Added `POST /api/ops/runtime-maintenance` as a temporary explicit maintenance surface for runtime mutations that were previously hidden in read paths.
+- Added web regression coverage in `apps/web/src/app/api/read-only-routes.test.ts` to prove key operational GET routes are observational only.
+- Added `apps/web/vitest.config.ts` so route-level web tests can resolve the app's `@/` alias consistently.
+- Added `infra/supabase/migrations/0021_runtime_worker_leases.sql` to introduce durable runtime worker leasing via `worker_processes` plus lease columns on benchmark, campaign, and crawl-request runs.
+- Added `apps/web/src/lib/repositories/runtime-worker-repository.ts` for durable worker registration, lease claim, heartbeat, and release behavior in the web runtime.
+- Added `infra/supabase/migrations/0022_field_job_typed_queue_state.sql` to promote hot `field_jobs` queue semantics into first-class relational columns.
+- Added `infra/supabase/migrations/0023_chapter_repair_jobs.sql` to create a durable `chapter_repair_jobs` lane for repairable chapter entities.
+- Added `infra/supabase/migrations/0024_evaluation_jobs.sql` to create a durable `evaluation_jobs` lane for benchmark and campaign execution ownership.
+- Added `infra/supabase/migrations/0025_ops_alerts.sql` to create a durable `ops_alerts` table for benchmark, campaign, queue, repair, provider, and system incidents.
+- Added `services/crawler/src/fratfinder_crawler/tests/test_field_job_graph_runtime.py` to cover business-progress semantics for graph-native contact execution.
+- Added `apps/web/src/lib/repositories/evaluation-job-repository.ts` plus the standalone evaluation worker entrypoints:
+  - `apps/web/src/lib/evaluation-worker.ts`
+  - `apps/web/scripts/evaluation-worker.ts`
+- Added `apps/web/package.json` worker script `worker:evaluation` so evaluation work can run outside the web server process.
+- Added `apps/web/src/lib/repositories/ops-alert-repository.ts` for persisted operator-alert lifecycle management.
+- Added `docs/Diagrams/CURRENT_IMPLEMENTED_QUEUE_ARCHITECTURE.md` as the implementation-accurate queue-system architecture view.
+
+### Changed
+- Theta Xi source discovery now rejects stale hosted member-portal sources with no success history and prefers the official ThetaXi.org chapter directory hint instead of retrying the dead-end OmegaFi source.
+- `directory_v1` now extracts repeated `University – Chapter` list entries, which fixes Theta Xi-style national chapter pages that are plain repeated HTML lists instead of cards or tables.
+- The web source optimizer now requires fraternity-context matches before upgrading to a different generic chapter-listing candidate, preventing unrelated recovery jumps like the invalid Kappa Kappa Psi fallback observed during Theta Xi validation.
+- The fraternity intake request detail view now surfaces `awaiting_confirmation` requests as an explicit source-confirmation hold instead of looking like a silent stall.
+- `GET /api/fraternity-crawl-requests` and `GET /api/fraternity-crawl-requests/[id]` are now read-only and `force-dynamic`, aligning the fraternity intake APIs with the rest of the non-mutating operational surfaces.
+- `GET /api/campaign-runs` is now read-only and no longer reconciles stale campaigns, schedules due campaigns, or auto-resumes detached running campaigns.
+- `GET /api/campaign-runs/[id]` is now read-only and no longer auto-schedules queued or detached running campaigns.
+- `GET /api/benchmarks`, `GET /api/benchmarks/[id]`, and `GET /api/benchmarks/[id]/export` no longer fail stale benchmark runs as a side effect of being read.
+- `GET /api/runs` and `GET /api/agent-ops` no longer fail stale crawl runs during dashboard reads.
+- `GET /api/health` is now observational only and no longer reconciles campaigns, schedules due campaigns, or triggers benchmark alert scans.
+- `docs/SystemReport/README.md` now includes the implementation-program document in the System Report package.
+- Benchmark and campaign execution now claim durable DB leases, heartbeat them while active, and recover stale runs using lease expiry rather than web-memory ownership alone.
+- The Python request worker now registers durable request-lane worker identity, claims leased request ownership, heartbeats long-running request executions, and releases request leases on completion.
+- Web request, benchmark, and campaign repositories now expose runtime worker/lease metadata, and stale reconciliation now respects lease expiry when present.
+- Field-job claim ordering, triage ordering, request queue snapshots, and Agent Ops queue metrics now use typed `field_jobs` columns (`queue_state`, `terminal_outcome`, related typed metadata) instead of reconstructing hot operational state from nested JSON.
+- The crawler field-job runtime now carries typed queue state on `FieldJob` objects while keeping legacy JSON for compatibility and diagnostics.
+- Repairable chapter entities now enqueue durable repair jobs instead of relying only on inline field-job triage, and `process-field-jobs` processes that repair queue before resuming deferred contact work.
+- Agent Ops now exposes queued and running chapter-repair counts so repair is visible as its own lane instead of an implied side effect.
+- Field-job graph run summaries now distinguish runtime completion from business progress by recording `businessStatus` and `businessProgressCount`.
+- Benchmark and campaign POST flows now enqueue durable evaluation jobs instead of directly scheduling execution in the web process.
+- Campaign resume now re-enqueues durable evaluation work instead of resuming through the old in-memory scheduler path.
+- The new evaluation worker now owns benchmark/campaign execution, captures persisted preconditions, and writes isolation metadata into benchmark summaries.
+- V4 campaign training rounds now execute isolated per-source adaptive train/eval units so one failing source unit does not kill the entire round by default.
+- Health reporting now reads active campaign/benchmark/evaluation worker state from durable worker leases instead of local in-memory scheduler sets.
+- Evaluation-worker failures and strict-isolation unavailability now emit real `ops_alerts`, and successful evaluation reruns resolve matching alerts by fingerprint prefix.
+- Agent Ops now exposes:
+  - open/critical/warning/resolved alert counts
+  - oldest open alert age
+  - oldest open provisional age
+  - recent ops-alert rows
+  - actionable/deferred/blocked/repair queue-lane counts
+  - explicit historical queue-reconciliation count
+- Provisional chapter workflow now supports explicit `promoted`, `review`, and `rejected` outcomes through the request graph instead of leaving all provisionals in `open`.
+- `listCampaignRuns()` now returns lightweight summary rows by default; campaign items and events are loaded only through detail reads.
+- Benchmark, campaign, and request summaries now distinguish runtime completion from business progress via `businessStatus`.
+- `docs/Diagrams/README.md`, `V3_SYSTEM_OVERVIEW.md`, and `V4_PLATFORM_ARCHITECTURE.md` now explicitly distinguish `Implemented`, `Transitional`, and `Target` architecture views.
+- Web `lint` and `typecheck` scripts now run against `apps/web/tsconfig.typecheck.json`, keeping validation stable even when Next rewrites the main tsconfig to include `.next/types`.
+- Fixed `ops_alerts` resolution in the evaluation-worker path by explicitly typing the `resolvedReason` parameter inside `jsonb_build_object`, preventing strict-isolation and benchmark completion flows from failing on PostgreSQL parameter type inference.
+- Marked the primary operational API routes as `force-dynamic` and normalized benchmark isolation-mode reads from persisted summary data, fixing stale health/operator responses and preventing benchmark history from displaying misleading default isolation metadata.
+- Explicitly stop benchmark and campaign worker-process records when executions finish or abort so health/status views do not report phantom active workers until lease expiry.
+
+### Validated
+- Validated Phase 1 read-path safety with:
+  - `pnpm --filter @fratfinder/web test`
+  - `pnpm --filter @fratfinder/web typecheck`
+  - `pnpm --filter @fratfinder/web build`
+- Validated Phase 2 durable worker ownership with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py -q`
+  - `pnpm --filter @fratfinder/web typecheck`
+  - `pnpm --filter @fratfinder/web test`
+  - `pnpm --filter @fratfinder/web build`
+- Applied the lease migration locally and verified `worker_processes` plus runtime lease columns on `benchmark_runs` and `fraternity_crawl_requests`.
+- Validated Phase 3 typed queue-state foundation with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py -q`
+  - `pnpm --filter @fratfinder/web typecheck`
+  - `pnpm --filter @fratfinder/web test`
+  - `pnpm --filter @fratfinder/web build`
+- Applied the typed queue-state migration locally and verified direct relational queryability of `field_jobs.queue_state` and `field_jobs.terminal_outcome`.
+- Validated Phase 4 first-class repair queue with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py -q`
+  - `pnpm --filter @fratfinder/web typecheck`
+  - `pnpm --filter @fratfinder/web test`
+  - `pnpm --filter @fratfinder/web build`
+- Applied the repair-lane migration locally and verified the `chapter_repair_jobs` table exists in the development database.
+- Validated Phase 5 graph-native contact-resolution semantics with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_field_job_graph_runtime.py services/crawler/src/fratfinder_crawler/tests/test_field_job_supervisor_graph.py -q`
+  - `pnpm --filter @fratfinder/web build`
+  - `pnpm --filter @fratfinder/web typecheck`
+  - `pnpm --filter @fratfinder/web test`
+- Validated Phase 6 durable evaluation lane with:
+  - `pnpm --filter @fratfinder/web test`
+  - `pnpm --filter @fratfinder/web typecheck`
+  - `pnpm --filter @fratfinder/web build`
+- Applied the evaluation-jobs migration locally and verified the `evaluation_jobs` table and indexes.
+- Ran real evaluation-worker smoke tests that created, claimed, executed, and completed benchmark evaluation jobs in:
+  - shared mode
+  - strict live isolated mode
+- Applied the ops-alert migration locally and validated real strict-isolation failure incidents for:
+  - one benchmark evaluation job
+  - one campaign evaluation job
+  Both produced visible warning `ops_alerts`.
+- Validated a live provisional-workflow smoke request that produced:
+  - one `promoted` provisional chapter
+  - one `review` provisional chapter
+  - one `rejected` provisional chapter
+- Validated campaign summary/detail split live:
+  - campaign summary list rows return empty `items/events`
+  - campaign detail reads still return full drill-down payloads
+- Validated the final convergence set with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_request_graph_runtime.py -q`
+  - `pnpm --filter @fratfinder/web test`
+  - `pnpm --filter @fratfinder/web build`
+  - `pnpm --filter @fratfinder/web typecheck`
+
 ## [3.0.0] - 2026-04-04
 
 ### Added

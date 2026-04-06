@@ -49,4 +49,40 @@ describe("optimizeDiscoveredSource", () => {
     expect(optimized.fallbackReason).toContain("upgraded_source_selection");
     expect(optimized.resolutionTrace.some((entry) => entry.step === "optimized_source_selection")).toBe(true);
   });
+
+  it("does not upgrade a good chapter source to an unrelated generic chapter listing", () => {
+    const discovery: FraternitySourceDiscoveryResult = {
+      fraternityName: "Theta Xi",
+      fraternitySlug: "theta-xi",
+      selectedUrl: "https://www.thetaxi.org/chapters-and-colonies/",
+      selectedConfidence: 0.85,
+      confidenceTier: "high",
+      sourceProvenance: "search",
+      fallbackReason: "existing_source_invalid",
+      resolutionTrace: [],
+      candidates: [
+        {
+          title: "Chapter Listing - Kappa Kappa Psi",
+          url: "https://www.kkpsi.org/about/chapters-districts/chapter-listing-2/",
+          snippet: "Find chapter listings by school and district.",
+          provider: "search",
+          rank: 1,
+          score: 0.69,
+        },
+        {
+          title: "Theta Xi Fraternity Join",
+          url: "https://www.thetaxi.org/join/",
+          snippet: "Join Theta Xi Fraternity and learn more about the national organization.",
+          provider: "search",
+          rank: 2,
+          score: 0.99,
+        }
+      ]
+    };
+
+    const optimized = optimizeDiscoveredSource(discovery);
+
+    expect(optimized.selectedUrl).toBe("https://www.thetaxi.org/chapters-and-colonies/");
+    expect(optimized.selectedUrl).not.toContain("kkpsi.org");
+  });
 });
