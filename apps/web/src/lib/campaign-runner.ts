@@ -1,9 +1,10 @@
 import { spawn } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import path from "path";
 
 import { discoverFraternitySource } from "@/lib/fraternity-discovery";
 import { scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
+import { getAdaptiveInsights } from "@/lib/repositories/adaptive-repository";
 import { evaluateSourceUrl } from "@/lib/source-selection";
 import {
   appendFraternityCrawlRequestEvent,
@@ -20,10 +21,13 @@ import {
   countCampaignRunItemsByStatus,
   emptyCampaignProviderHealthSnapshot,
   getCampaignRun,
+  getFieldJobQueueDiagnostics,
   getFieldJobQueueDepth,
   getPreferredCampaignSourceForFraternity,
+  getReviewReasonBreakdown,
   getSourceCoverageSnapshot,
   insertCampaignItems,
+  listAdaptivePolicySnapshots,
   listQueuedCampaignRunIds,
   reconcileStaleCampaignRuns,
   selectCampaignFraternities,
@@ -38,14 +42,20 @@ import type {
   CampaignRunItem,
   CampaignRunSummary,
   CampaignScorecard,
+  CampaignAcceptanceGateCheck,
   FraternityCrawlRequest,
   FraternityCrawlRequestConfig,
   FraternityCrawlRequestStage,
   FraternityCrawlRequestStatus
 } from "@/lib/types";
+import { buildDefaultV4ProgramConfig } from "@/lib/v4-program";
 
 const activeCampaignRuns = new Set<string>();
 const TERMINAL_ITEM_STATUSES = new Set(["completed", "failed", "skipped", "canceled"]);
+const DEFAULT_POLICY_VERSION = String(process.env.CRAWLER_POLICY_VERSION ?? "adaptive-v1").trim() || "adaptive-v1";
+const REVIEW_REASON_PLACEHOLDER = "Chapter record appears to be navigation or placeholder text";
+const REVIEW_REASON_NAME_OVERLONG = "Chapter record name exceeded max supported length";
+const REVIEW_REASON_SLUG_OVERLONG = "Chapter record slug exceeded max supported length";
 
 interface CommandResult {
   stdout: string;
@@ -54,6 +64,37 @@ interface CommandResult {
 
 interface SearchPreflightResult extends CampaignProviderHealthSnapshot {
   probeOutcomes?: Array<Record<string, unknown>>;
+}
+
+interface AdaptiveTrainEvalResult {
+  epochs: number;
+  runtime_mode: string;
+  policy_version: string;
+  cohort_label: string;
+  report_path: string;
+  slope: Record<string, number>;
+  rows: Array<{
+    epoch: number;
+    kpis: Record<string, number>;
+  }>;
+}
+
+interface V4ProgramSnapshot {
+  capturedAt: string;
+  queueQueued: number;
+  oldestQueuedAgeMinutes: number | null;
+  placeholderReviewCount: number;
+  overlongReviewCount: number;
+  delayedRewardEventCount: number;
+  delayedRewardTotal: number;
+  guardrailHitRate: number;
+  validMissingCount: number;
+  verifiedWebsiteCount: number;
+  topReviewReasons: Array<{ reason: string; count: number }>;
+}
+
+function toJsonRecord(value: V4ProgramSnapshot | null): Record<string, unknown> | null {
+  return value ? JSON.parse(JSON.stringify(value)) as Record<string, unknown> : null;
 }
 
 function delay(ms: number): Promise<void> {
@@ -161,14 +202,19 @@ function parseTrailingJson<T>(output: string): T {
   throw new Error(`Could not parse trailing JSON payload from output: ${trimmed.slice(-600)}`);
 }
 
-function buildDefaultRequestConfig(campaignConfig: CampaignRunConfig, concurrency: number): FraternityCrawlRequestConfig {
+function buildDefaultRequestConfig(
+  campaignConfig: CampaignRunConfig,
+  concurrency: number,
+  crawlPolicyVersion: string | null = null
+): FraternityCrawlRequestConfig {
   const workers = Math.max(3, Math.min(12, concurrency <= 1 ? 5 : 8));
   const limitPerCycle = Math.max(30, Math.min(120, concurrency <= 1 ? 40 : 60));
   return {
     fieldJobWorkers: workers,
     fieldJobLimitPerCycle: limitPerCycle,
     maxEnrichmentCycles: Math.max(18, Math.min(60, Math.round(campaignConfig.maxDurationMinutes / 3.5))),
-    pauseMs: 750
+    pauseMs: 750,
+    crawlPolicyVersion,
   };
 }
 
@@ -395,6 +441,262 @@ async function runSearchPreflight(probes = 4): Promise<SearchPreflightResult> {
   };
 }
 
+function resolveReportPath(relativePath: string): string {
+  return path.join(findRepositoryRoot(), relativePath);
+}
+
+function sumReviewReasons(
+  reasons: Array<{ reason: string; count: number }>,
+  targets: string[]
+): number {
+  const targetSet = new Set(targets.map((item) => item.toLowerCase()));
+  return reasons
+    .filter((item) => targetSet.has(item.reason.toLowerCase()))
+    .reduce((total, item) => total + item.count, 0);
+}
+
+async function captureV4ProgramSnapshot(sourceSlugs: string[], windowDays: number, createdAfter?: string | null): Promise<V4ProgramSnapshot> {
+  const [queueDiagnostics, reviewReasons, adaptiveInsights] = await Promise.all([
+    getFieldJobQueueDiagnostics(sourceSlugs),
+    getReviewReasonBreakdown({ sourceSlugs, windowDays, createdAfter, limit: 20 }),
+    getAdaptiveInsights({ sourceSlugs, runtimeMode: "adaptive_primary", windowDays, limit: 25 }),
+  ]);
+
+  return {
+    capturedAt: new Date().toISOString(),
+    queueQueued: queueDiagnostics.queuedTotal,
+    oldestQueuedAgeMinutes: queueDiagnostics.oldestQueuedAgeMinutes,
+    placeholderReviewCount: sumReviewReasons(reviewReasons, [REVIEW_REASON_PLACEHOLDER]),
+    overlongReviewCount: sumReviewReasons(reviewReasons, [REVIEW_REASON_NAME_OVERLONG, REVIEW_REASON_SLUG_OVERLONG]),
+    delayedRewardEventCount: adaptiveInsights.delayedRewardEventCount,
+    delayedRewardTotal: adaptiveInsights.delayedRewardTotal,
+    guardrailHitRate: adaptiveInsights.guardrailHitRate,
+    validMissingCount: adaptiveInsights.validMissingCount,
+    verifiedWebsiteCount: adaptiveInsights.verifiedWebsiteCount,
+    topReviewReasons: adaptiveInsights.topReviewReasons,
+  };
+}
+
+async function runAdaptiveTrainEval(params: {
+  runId: string;
+  round: number;
+  trainSourceSlugs: string[];
+  evalSourceSlugs: string[];
+  runtimeMode: string;
+  policyVersion: string;
+  epochsPerRound: number;
+  commandTimeoutMinutes?: number;
+}): Promise<AdaptiveTrainEvalResult> {
+  const reportPath = `docs/reports/V4_RL_PROGRAM_${params.runId}_ROUND_${String(params.round).padStart(2, "0")}.md`;
+  const command = [
+    "-m",
+    "fratfinder_crawler.cli",
+    "adaptive-train-eval",
+    "--epochs",
+    String(params.epochsPerRound),
+    "--train-sources",
+    params.trainSourceSlugs.join(","),
+    "--eval-sources",
+    params.evalSourceSlugs.join(","),
+    "--runtime-mode",
+    params.runtimeMode,
+    "--cohort-label",
+    `v4-program-${params.runId}`,
+    "--policy-version",
+    params.policyVersion,
+    "--report-path",
+    reportPath,
+  ];
+  const timeoutMinutes = Math.max(5, Math.floor(params.commandTimeoutMinutes ?? 30));
+  const output = await runPythonCommand(command, timeoutMinutes * 60_000);
+  const payload = parseTrailingJson<AdaptiveTrainEvalResult>(`${output.stdout}\n${output.stderr}`);
+  return {
+    ...payload,
+    report_path: payload.report_path || reportPath,
+  };
+}
+
+function selectRoundSources(
+  sourceSlugs: string[],
+  round: number,
+  totalRounds: number,
+  explicitBatchSize?: number
+): string[] {
+  if (sourceSlugs.length === 0) {
+    return [];
+  }
+
+  const maxBatchSize = sourceSlugs.length;
+  const computedBatchSize = Math.max(1, Math.ceil(sourceSlugs.length / Math.max(1, totalRounds)));
+  const batchSize = Math.min(
+    maxBatchSize,
+    Math.max(1, Math.floor(explicitBatchSize ?? computedBatchSize))
+  );
+  const startIndex = ((Math.max(1, round) - 1) * batchSize) % sourceSlugs.length;
+  const selected: string[] = [];
+  for (let index = 0; index < batchSize; index += 1) {
+    const slug = sourceSlugs[(startIndex + index) % sourceSlugs.length];
+    if (!slug) {
+      continue;
+    }
+    if (!selected.includes(slug)) {
+      selected.push(slug);
+    }
+  }
+  return selected;
+}
+
+function lastRoundKpis(result: AdaptiveTrainEvalResult): Record<string, number> {
+  return result.rows[result.rows.length - 1]?.kpis ?? {};
+}
+
+function computePromotionReason(params: {
+  kpis: Record<string, number>;
+  baseline: V4ProgramSnapshot;
+  current: V4ProgramSnapshot;
+  bestBalancedScore: number;
+}): { promoted: boolean; reason: string } {
+  const balancedScore = Number(params.kpis.balancedScore ?? 0);
+  const improvedBalanced = balancedScore > params.bestBalancedScore + 0.0001;
+  const queueDidNotWorsen = params.current.queueQueued <= params.baseline.queueQueued;
+  const reviewDidNotWorsen =
+    params.current.placeholderReviewCount <= params.baseline.placeholderReviewCount &&
+    params.current.overlongReviewCount <= params.baseline.overlongReviewCount;
+  if (improvedBalanced && queueDidNotWorsen && reviewDidNotWorsen) {
+    return { promoted: true, reason: "balanced_score_queue_and_review_gates_passed" };
+  }
+  if (!improvedBalanced) {
+    return { promoted: false, reason: "balanced_score_not_improved" };
+  }
+  if (!queueDidNotWorsen) {
+    return { promoted: false, reason: "queue_efficiency_regressed" };
+  }
+  return { promoted: false, reason: "precision_safety_regressed" };
+}
+
+function driftFromSnapshots(
+  baseline: V4ProgramSnapshot,
+  current: V4ProgramSnapshot
+): Array<{ reason: string; baselineCount: number; latestCount: number; delta: number }> {
+  const reasons = new Map<string, number>();
+  for (const entry of baseline.topReviewReasons) {
+    reasons.set(entry.reason, 0);
+  }
+  for (const entry of current.topReviewReasons) {
+    reasons.set(entry.reason, 0);
+  }
+  return [...reasons.keys()].map((reason) => ({
+    reason,
+    baselineCount: baseline.topReviewReasons.find((item) => item.reason === reason)?.count ?? 0,
+    latestCount: current.topReviewReasons.find((item) => item.reason === reason)?.count ?? 0,
+    delta:
+      (current.topReviewReasons.find((item) => item.reason === reason)?.count ?? 0) -
+      (baseline.topReviewReasons.find((item) => item.reason === reason)?.count ?? 0),
+  })).sort((left, right) => right.delta - left.delta);
+}
+
+function buildAcceptanceGate(params: {
+  run: CampaignRun;
+  baseline: V4ProgramSnapshot | null;
+  finalSnapshot: V4ProgramSnapshot;
+}): { passed: boolean; checks: CampaignAcceptanceGateCheck[] } {
+  const completed = params.run.items.filter((item) => TERMINAL_ITEM_STATUSES.has(item.status)).length;
+  const succeeded = params.run.items.filter((item) => item.status === "completed").length;
+  const failed = params.run.items.filter((item) => item.status === "failed").length;
+  const totalRecordsSeen = params.run.items.reduce((total, item) => total + Math.max(item.scorecard.chaptersDiscovered, 0), 0);
+  const lowConfidenceRate =
+    totalRecordsSeen > 0
+      ? (params.finalSnapshot.placeholderReviewCount + params.finalSnapshot.overlongReviewCount) / totalRecordsSeen
+      : 0;
+  const queueImprovement = params.baseline
+    ? params.baseline.queueQueued > 0
+      ? (params.baseline.queueQueued - params.finalSnapshot.queueQueued) / params.baseline.queueQueued
+      : 0
+    : 0;
+  const checks: CampaignAcceptanceGateCheck[] = [
+    {
+      label: "Terminal requests",
+      value: `${completed}/${params.run.items.length}`,
+      target: `${params.run.items.length}/${params.run.items.length}`,
+      passed: completed === params.run.items.length,
+    },
+    {
+      label: "Succeeded requests",
+      value: `${succeeded}`,
+      target: ">= 18",
+      passed: succeeded >= 18,
+    },
+    {
+      label: "Failed requests",
+      value: `${failed}`,
+      target: "= 0",
+      passed: failed === 0,
+    },
+    {
+      label: "Low-confidence review rate",
+      value: `${(lowConfidenceRate * 100).toFixed(2)}%`,
+      target: "< 3.00%",
+      passed: lowConfidenceRate < 0.03,
+    },
+    {
+      label: "Queue improvement",
+      value: `${(queueImprovement * 100).toFixed(1)}%`,
+      target: ">= 50.0%",
+      passed: queueImprovement >= 0.5,
+    },
+    {
+      label: "Delayed rewards present",
+      value: `${params.finalSnapshot.delayedRewardEventCount}`,
+      target: "> 0",
+      passed: params.finalSnapshot.delayedRewardEventCount > 0,
+    },
+  ];
+  return {
+    passed: checks.every((check) => check.passed),
+    checks,
+  };
+}
+
+function writeV4FinalReport(params: {
+  run: CampaignRun;
+  baseline: V4ProgramSnapshot | null;
+  finalSnapshot: V4ProgramSnapshot;
+  reportPath: string;
+}): void {
+  const promotionDecisions = params.run.telemetry.promotionDecisions ?? [];
+  const lines = [
+    `# V4 RL Improvement Report (${new Date().toISOString()})`,
+    "",
+    `- Campaign: \`${params.run.name}\``,
+    `- Campaign ID: \`${params.run.id}\``,
+    `- Active policy version: \`${params.run.telemetry.activePolicyVersion ?? DEFAULT_POLICY_VERSION}\``,
+    `- Active policy snapshot: \`${params.run.telemetry.activePolicySnapshotId ?? "n/a"}\``,
+    "",
+    "## Baseline",
+    "```json",
+    JSON.stringify(params.baseline, null, 2),
+    "```",
+    "",
+    "## Final Snapshot",
+    "```json",
+    JSON.stringify(params.finalSnapshot, null, 2),
+    "```",
+    "",
+    "## Promotion Decisions",
+    "```json",
+    JSON.stringify(promotionDecisions, null, 2),
+    "```",
+    "",
+    "## Remaining Failure Modes",
+    "```json",
+    JSON.stringify(params.run.telemetry.reviewReasonDrift ?? [], null, 2),
+    "```",
+  ];
+  const absolutePath = resolveReportPath(params.reportPath);
+  mkdirSync(path.dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, `${lines.join("\n")}\n`, "utf-8");
+}
+
 async function ensureCampaignItems(run: CampaignRun): Promise<CampaignRun> {
   if (run.items.length > 0) {
     return run;
@@ -522,7 +824,11 @@ async function createRequestForItem(run: CampaignRun, item: CampaignRunItem, con
   });
 
   const baseline = await getSourceCoverageSnapshot(sourceSlug);
-  const config = buildDefaultRequestConfig(run.config, concurrency);
+  const config = buildDefaultRequestConfig(
+    run.config,
+    concurrency,
+    run.telemetry.activePolicyVersion ?? DEFAULT_POLICY_VERSION
+  );
   const request = await createFraternityCrawlRequest({
     fraternityName: selectedSource.fraternityName,
     fraternitySlug: selectedSource.fraternitySlug,
@@ -579,7 +885,8 @@ async function createRequestForItem(run: CampaignRun, item: CampaignRunItem, con
       cohort: item.cohort,
       baselineCoverage: baseline,
       selectionReason: selectedSource.selectionReason,
-      sourceQuality: selectedQuality
+      sourceQuality: selectedQuality,
+      policyVersion: config.crawlPolicyVersion
     }
   });
 
@@ -620,7 +927,8 @@ async function createRequestForItem(run: CampaignRun, item: CampaignRunItem, con
       sourceSlug,
       baselineCoverage: baseline,
       sourceProvenance: selectedSource.sourceProvenance,
-      selectionReason: selectedSource.selectionReason
+      selectionReason: selectedSource.selectionReason,
+      policyVersion: config.crawlPolicyVersion
     }
   });
 
@@ -815,6 +1123,306 @@ async function maybeTuneCampaign(run: CampaignRun, lastTuneAtMs: number): Promis
   return now;
 }
 
+function extractSourceSlugsForRun(run: CampaignRun): string[] {
+  if (run.telemetry.cohortManifest && run.telemetry.cohortManifest.length > 0) {
+    return [...run.telemetry.cohortManifest];
+  }
+  if (run.config.frozenSourceSlugs && run.config.frozenSourceSlugs.length > 0) {
+    return [...run.config.frozenSourceSlugs];
+  }
+  const fromEvents = new Set<string>();
+  for (const event of run.events) {
+    const sourceSlug = (event.payload as Record<string, unknown>).sourceSlug;
+    if (typeof sourceSlug === "string" && sourceSlug.trim()) {
+      fromEvents.add(sourceSlug.trim());
+    }
+  }
+  if (fromEvents.size > 0) {
+    return [...fromEvents];
+  }
+  return run.items
+    .map((item) => `${item.fraternitySlug}-main`)
+    .filter(Boolean);
+}
+
+function splitTrainEvalSources(sourceSlugs: string[]): { train: string[]; eval: string[] } {
+  const midpoint = Math.max(1, Math.ceil(sourceSlugs.length * 0.6));
+  return {
+    train: sourceSlugs.slice(0, midpoint),
+    eval: sourceSlugs.slice(midpoint),
+  };
+}
+
+async function syncV4LiveTelemetry(run: CampaignRun): Promise<CampaignRun> {
+  if (run.config.programMode !== "v4_rl_improvement") {
+    return run;
+  }
+  const sourceSlugs = extractSourceSlugsForRun(run);
+  if (sourceSlugs.length === 0) {
+    return run;
+  }
+  const baseline = (run.telemetry.baselineSnapshot ?? null) as V4ProgramSnapshot | null;
+  const finalSnapshot = await captureV4ProgramSnapshot(
+    sourceSlugs,
+    run.config.reviewWindowDays ?? 14,
+    run.startedAt ?? run.createdAt
+  );
+  const thresholdMinutes = run.config.queueStallThresholdMinutes ?? 15;
+  const existingAlert = run.telemetry.queueStallAlert ?? {
+    active: false,
+    since: null,
+    reason: null,
+    queuedDepth: 0,
+    lastProcessedTotal: run.summary.totalProcessed,
+  };
+  let nextAlert = existingAlert;
+  if (run.summary.totalProcessed > existingAlert.lastProcessedTotal) {
+    nextAlert = {
+      active: false,
+      since: null,
+      reason: null,
+      queuedDepth: finalSnapshot.queueQueued,
+      lastProcessedTotal: run.summary.totalProcessed,
+    };
+  } else if (finalSnapshot.queueQueued > 0) {
+    const since = existingAlert.since ?? new Date().toISOString();
+    const stalledMs = Date.now() - new Date(since).getTime();
+    nextAlert = {
+      active: stalledMs >= thresholdMinutes * 60_000,
+      since,
+      reason: stalledMs >= thresholdMinutes * 60_000 ? "no_meaningful_processed_job_movement" : null,
+      queuedDepth: finalSnapshot.queueQueued,
+      lastProcessedTotal: existingAlert.lastProcessedTotal,
+    };
+  }
+
+  const nextTelemetry = {
+    ...run.telemetry,
+    delayedRewardHealth: {
+      delayedRewardEventCount: finalSnapshot.delayedRewardEventCount,
+      delayedRewardTotal: finalSnapshot.delayedRewardTotal,
+      placeholderReviewCount: finalSnapshot.placeholderReviewCount,
+      overlongReviewCount: finalSnapshot.overlongReviewCount,
+      guardrailHitRate: finalSnapshot.guardrailHitRate,
+      validMissingCount: finalSnapshot.validMissingCount,
+      verifiedWebsiteCount: finalSnapshot.verifiedWebsiteCount,
+      topDelayedActions: (await getAdaptiveInsights({
+        sourceSlugs,
+        runtimeMode: run.config.runtimeMode ?? "adaptive_primary",
+        windowDays: run.config.reviewWindowDays ?? 14,
+        limit: 25,
+      })).delayedAttribution.slice(0, 8),
+    },
+    reviewReasonDrift: baseline ? driftFromSnapshots(baseline, finalSnapshot) : [],
+    finalSnapshot: toJsonRecord(finalSnapshot),
+    queueStallAlert: nextAlert,
+  };
+  await updateCampaignRun({
+    id: run.id,
+    telemetry: nextTelemetry,
+  });
+  if (nextAlert.active && !existingAlert.active) {
+    await appendCampaignRunEvent({
+      campaignRunId: run.id,
+      eventType: "queue_stall_alert",
+      message: "Queue stall detected during the live campaign window",
+      payload: nextAlert as unknown as Record<string, unknown>,
+    });
+  }
+  return (await getCampaignRun(run.id)) ?? run;
+}
+
+async function runV4Prelude(run: CampaignRun): Promise<CampaignRun> {
+  if (run.config.programMode !== "v4_rl_improvement") {
+    return run;
+  }
+  if (run.telemetry.programPhase === "live_campaign" || run.telemetry.programPhase === "completed") {
+    return run;
+  }
+
+  const effectiveConfig = {
+    ...buildDefaultV4ProgramConfig(),
+    ...run.config,
+    frozenSourceSlugs:
+      run.config.frozenSourceSlugs && run.config.frozenSourceSlugs.length > 0
+        ? run.config.frozenSourceSlugs
+        : buildDefaultV4ProgramConfig().frozenSourceSlugs,
+  } as CampaignRunConfig;
+  const sourceSlugs = effectiveConfig.frozenSourceSlugs ?? [];
+  const baselineSnapshot = await captureV4ProgramSnapshot(sourceSlugs, effectiveConfig.reviewWindowDays ?? 14);
+  const initialTelemetry = {
+    ...run.telemetry,
+    cohortManifest: sourceSlugs,
+    baselineSnapshot: toJsonRecord(baselineSnapshot),
+    delayedRewardHealth: {
+      delayedRewardEventCount: baselineSnapshot.delayedRewardEventCount,
+      delayedRewardTotal: baselineSnapshot.delayedRewardTotal,
+      placeholderReviewCount: baselineSnapshot.placeholderReviewCount,
+      overlongReviewCount: baselineSnapshot.overlongReviewCount,
+      guardrailHitRate: baselineSnapshot.guardrailHitRate,
+      validMissingCount: baselineSnapshot.validMissingCount,
+      verifiedWebsiteCount: baselineSnapshot.verifiedWebsiteCount,
+      topDelayedActions: [],
+    },
+    programPhase: "training" as const,
+    programStartedAt: run.telemetry.programStartedAt ?? new Date().toISOString(),
+    activePolicyVersion: run.telemetry.activePolicyVersion ?? DEFAULT_POLICY_VERSION,
+    activePolicySnapshotId: run.telemetry.activePolicySnapshotId ?? null,
+    promotionDecisions: run.telemetry.promotionDecisions ?? [],
+  };
+  await updateCampaignRun({
+    id: run.id,
+    config: effectiveConfig,
+    telemetry: initialTelemetry,
+  });
+  await appendCampaignRunEvent({
+    campaignRunId: run.id,
+    eventType: "v4_baseline_frozen",
+    message: "Frozen V4 cohort and captured baseline telemetry",
+    payload: {
+      sourceSlugs,
+      baselineSnapshot,
+    },
+  });
+
+  const { train, eval: evalSourcesRaw } = splitTrainEvalSources(sourceSlugs);
+  const evalSources = evalSourcesRaw.length > 0 ? evalSourcesRaw : sourceSlugs.slice(-Math.max(1, Math.floor(sourceSlugs.length / 3)));
+  let bestBalancedScore = Number.NEGATIVE_INFINITY;
+  const totalRounds = effectiveConfig.trainingRounds ?? 3;
+
+  for (let round = 1; round <= totalRounds; round += 1) {
+    const stagedPolicyVersion = `${DEFAULT_POLICY_VERSION}-${run.id.slice(0, 8)}-r${round}`;
+    const roundTrainSources = selectRoundSources(
+      train,
+      round,
+      totalRounds,
+      effectiveConfig.trainingSourceBatchSize
+    );
+    const roundEvalSources = selectRoundSources(
+      evalSources,
+      round,
+      totalRounds,
+      effectiveConfig.evalSourceBatchSize
+    );
+    await appendCampaignRunEvent({
+      campaignRunId: run.id,
+      eventType: "training_round_started",
+      message: `Starting V4 training round ${round}`,
+      payload: {
+        round,
+        stagedPolicyVersion,
+        trainSources: roundTrainSources,
+        evalSources: roundEvalSources,
+        fullTrainSources: train,
+        fullEvalSources: evalSources,
+        commandTimeoutMinutes: effectiveConfig.trainingCommandTimeoutMinutes ?? 30,
+      },
+    });
+    const trainResult = await runAdaptiveTrainEval({
+      runId: run.id,
+      round,
+      trainSourceSlugs: roundTrainSources,
+      evalSourceSlugs: roundEvalSources,
+      runtimeMode: effectiveConfig.runtimeMode ?? "adaptive_primary",
+      policyVersion: stagedPolicyVersion,
+      epochsPerRound: effectiveConfig.epochsPerRound ?? 1,
+      commandTimeoutMinutes: effectiveConfig.trainingCommandTimeoutMinutes,
+    });
+    const latestSnapshot = (
+      await listAdaptivePolicySnapshots({
+        policyVersion: stagedPolicyVersion,
+        runtimeMode: effectiveConfig.runtimeMode ?? "adaptive_primary",
+        limit: 1,
+      })
+    )[0] ?? null;
+    const currentSnapshot = await captureV4ProgramSnapshot(sourceSlugs, effectiveConfig.reviewWindowDays ?? 14);
+    const kpis = lastRoundKpis(trainResult);
+    const promotion = computePromotionReason({
+      kpis,
+      baseline: baselineSnapshot,
+      current: currentSnapshot,
+      bestBalancedScore,
+    });
+    const decision = {
+      round,
+      stagedPolicyVersion,
+      snapshotId: latestSnapshot?.id ?? null,
+      promoted: effectiveConfig.checkpointPromotionEnabled ? promotion.promoted : false,
+      reason: promotion.reason,
+      balancedScore: Number(kpis.balancedScore ?? 0),
+      queueQueued: currentSnapshot.queueQueued,
+      placeholderReviewCount: currentSnapshot.placeholderReviewCount,
+      overlongReviewCount: currentSnapshot.overlongReviewCount,
+      createdAt: new Date().toISOString(),
+    };
+    const nextTelemetry = {
+      ...((await getCampaignRun(run.id))?.telemetry ?? initialTelemetry),
+      cohortManifest: sourceSlugs,
+      baselineSnapshot: toJsonRecord(baselineSnapshot),
+      delayedRewardHealth: {
+        delayedRewardEventCount: currentSnapshot.delayedRewardEventCount,
+        delayedRewardTotal: currentSnapshot.delayedRewardTotal,
+        placeholderReviewCount: currentSnapshot.placeholderReviewCount,
+        overlongReviewCount: currentSnapshot.overlongReviewCount,
+        guardrailHitRate: currentSnapshot.guardrailHitRate,
+        validMissingCount: currentSnapshot.validMissingCount,
+        verifiedWebsiteCount: currentSnapshot.verifiedWebsiteCount,
+        topDelayedActions: [],
+      },
+      reviewReasonDrift: driftFromSnapshots(baselineSnapshot, currentSnapshot),
+      promotionDecisions: [...(((await getCampaignRun(run.id))?.telemetry.promotionDecisions ?? initialTelemetry.promotionDecisions) ?? []), decision],
+    };
+    if (decision.promoted) {
+      bestBalancedScore = Math.max(bestBalancedScore, decision.balancedScore);
+      nextTelemetry.activePolicyVersion = stagedPolicyVersion;
+      nextTelemetry.activePolicySnapshotId = latestSnapshot?.id ?? null;
+    }
+    await updateCampaignRun({
+      id: run.id,
+      telemetry: nextTelemetry,
+    });
+    await appendCampaignRunEvent({
+      campaignRunId: run.id,
+      eventType: decision.promoted ? "policy_promoted" : "policy_not_promoted",
+      message: decision.promoted
+        ? `Promoted staged snapshot from round ${round}`
+        : `Did not promote staged snapshot from round ${round}`,
+      payload: {
+        decision,
+        trainResult: {
+          policyVersion: trainResult.policy_version,
+          reportPath: trainResult.report_path,
+          slope: trainResult.slope,
+          kpis,
+        },
+      },
+    });
+    await appendCampaignRunEvent({
+      campaignRunId: run.id,
+      eventType: "training_round_completed",
+      message: `Completed V4 training round ${round}`,
+      payload: {
+        round,
+        stagedPolicyVersion,
+        trainSources: roundTrainSources,
+        evalSources: roundEvalSources,
+        reportPath: trainResult.report_path,
+        balancedScore: Number(kpis.balancedScore ?? 0),
+      },
+    });
+  }
+
+  await updateCampaignRun({
+    id: run.id,
+    telemetry: {
+      ...((await getCampaignRun(run.id))?.telemetry ?? initialTelemetry),
+      cohortManifest: sourceSlugs,
+      programPhase: "live_campaign",
+    },
+  });
+  return (await getCampaignRun(run.id)) ?? run;
+}
+
 async function finalizeCampaign(run: CampaignRun, status: CampaignRun["status"], lastError: string | null): Promise<void> {
   const queueDepthEnd = await getFieldJobQueueDepth();
   const counts = await countCampaignRunItemsByStatus(run.id);
@@ -847,6 +1455,54 @@ async function finalizeCampaign(run: CampaignRun, status: CampaignRun["status"],
       lastError
     }
   });
+
+  if (run.config.programMode === "v4_rl_improvement") {
+    const refreshed = await getCampaignRun(run.id);
+    if (refreshed) {
+      const sourceSlugs = extractSourceSlugsForRun(refreshed);
+      const finalSnapshot = await captureV4ProgramSnapshot(
+        sourceSlugs,
+        refreshed.config.reviewWindowDays ?? 14,
+        refreshed.startedAt ?? refreshed.createdAt
+      );
+      const baselineSnapshot = (refreshed.telemetry.baselineSnapshot ?? null) as V4ProgramSnapshot | null;
+      const acceptance = buildAcceptanceGate({
+        run: refreshed,
+        baseline: baselineSnapshot,
+        finalSnapshot,
+      });
+      const nextTelemetry = {
+        ...refreshed.telemetry,
+        finalSnapshot: toJsonRecord(finalSnapshot),
+        acceptanceGate: {
+          passed: acceptance.passed,
+          checks: acceptance.checks,
+          baselineSnapshot: toJsonRecord(baselineSnapshot),
+          finalSnapshot: toJsonRecord(finalSnapshot),
+        },
+        reviewReasonDrift: baselineSnapshot ? driftFromSnapshots(baselineSnapshot, finalSnapshot) : [],
+        programPhase: "completed" as const,
+      };
+      await updateCampaignRun({
+        id: refreshed.id,
+        telemetry: nextTelemetry,
+      });
+      await appendCampaignRunEvent({
+        campaignRunId: refreshed.id,
+        eventType: "acceptance_gate_evaluated",
+        message: acceptance.passed ? "V4 acceptance gate passed" : "V4 acceptance gate did not pass",
+        payload: {
+          checks: acceptance.checks,
+        },
+      });
+      writeV4FinalReport({
+        run: (await getCampaignRun(refreshed.id)) ?? refreshed,
+        baseline: baselineSnapshot,
+        finalSnapshot,
+        reportPath: `docs/reports/V4_RL_IMPROVEMENT_${refreshed.id}.md`,
+      });
+    }
+  }
 }
 
 async function executeCampaignRun(runId: string): Promise<void> {
@@ -895,22 +1551,7 @@ async function executeCampaignRun(runId: string): Promise<void> {
       return;
     }
 
-    run = await ensureCampaignItems(run);
-    const queueDepthStart = await getFieldJobQueueDepth();
-    await updateCampaignRun({
-      id: run.id,
-      summary: {
-        ...run.summary,
-        targetCount: run.config.targetCount,
-        itemCount: run.items.length,
-        queueDepthStart,
-        queueDepthEnd: queueDepthStart,
-        queueDepthDelta: 0
-      }
-    });
-    run = (await getCampaignRun(run.id)) ?? run;
-
-  if (run.config.preflightRequired) {
+    if (run.config.preflightRequired) {
     const preflight = await runSearchPreflight(4);
     const startingConcurrency = preflight.healthy ? run.config.activeConcurrency : Math.max(1, run.config.activeConcurrency - 1);
     const queueDepth = await getFieldJobQueueDepth();
@@ -946,6 +1587,22 @@ async function executeCampaignRun(runId: string): Promise<void> {
       }
     }
 
+    run = await runV4Prelude(run);
+    run = await ensureCampaignItems(run);
+    const queueDepthStart = await getFieldJobQueueDepth();
+    await updateCampaignRun({
+      id: run.id,
+      summary: {
+        ...run.summary,
+        targetCount: run.config.targetCount,
+        itemCount: run.items.length,
+        queueDepthStart,
+        queueDepthEnd: queueDepthStart,
+        queueDepthDelta: 0
+      }
+    });
+    run = (await getCampaignRun(run.id)) ?? run;
+
     let lastCheckpointAtMs = Date.now();
     let lastTuneAtMs = Date.now();
 
@@ -974,6 +1631,7 @@ async function executeCampaignRun(runId: string): Promise<void> {
 
       run = (await getCampaignRun(run.id)) ?? run;
       run = await refreshRunningSummary(run, queueDepthStart);
+      run = await syncV4LiveTelemetry(run);
       lastCheckpointAtMs = await maybeEmitCheckpoint(run, queueDepthStart, lastCheckpointAtMs);
       lastTuneAtMs = await maybeTuneCampaign(run, lastTuneAtMs);
       run = (await getCampaignRun(run.id)) ?? run;

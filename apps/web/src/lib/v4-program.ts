@@ -1,0 +1,50 @@
+import type { CampaignRunConfig } from "@/lib/types";
+
+export const V4_FROZEN_SOURCE_SLUGS = [
+  "acacia-main",
+  "alpha-chi-rho-main",
+  "alpha-delta-gamma-main",
+  "alpha-delta-phi-main",
+  "alpha-gamma-rho-main",
+  "alpha-tau-omega-main",
+  "beta-upsilon-chi-main",
+  "chi-psi-main",
+  "delta-kappa-epsilon-main",
+  "delta-sigma-phi-main",
+  "delta-tau-delta-main",
+  "delta-upsilon-main",
+  "kappa-delta-rho-main",
+  "lambda-chi-alpha-main",
+  "phi-gamma-delta-main",
+  "pi-kappa-alpha-main",
+  "sigma-alpha-epsilon-main",
+  "sigma-chi-main",
+  "sigma-phi-society-main",
+  "tau-kappa-epsilon-main",
+] as const;
+
+export function buildDefaultV4ProgramConfig(): Partial<CampaignRunConfig> {
+  return {
+    targetCount: V4_FROZEN_SOURCE_SLUGS.length,
+    controlCount: 0,
+    activeConcurrency: 4,
+    maxDurationMinutes: 240,
+    checkpointIntervalMs: 5 * 60_000,
+    tuningIntervalMs: 15 * 60_000,
+    itemPollIntervalMs: 15_000,
+    preflightRequired: true,
+    autoTuningEnabled: true,
+    programMode: "v4_rl_improvement",
+    runtimeMode: "adaptive_primary",
+    fieldJobRuntimeMode: "langgraph_primary",
+    frozenSourceSlugs: [...V4_FROZEN_SOURCE_SLUGS],
+    trainingRounds: 3,
+    epochsPerRound: 1,
+    trainingSourceBatchSize: 4,
+    evalSourceBatchSize: 3,
+    trainingCommandTimeoutMinutes: 30,
+    checkpointPromotionEnabled: true,
+    queueStallThresholdMinutes: 15,
+    reviewWindowDays: 14,
+  };
+}

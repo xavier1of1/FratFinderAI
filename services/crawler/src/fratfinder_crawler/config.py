@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     crawler_field_job_stale_claim_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_STALE_CLAIM_MINUTES")
     crawler_field_job_graph_run_stale_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_GRAPH_RUN_STALE_MINUTES")
     crawler_field_job_runtime_mode: str = Field(
-        default="legacy",
+        default="langgraph_primary",
         alias="Agent:FIELD_JOB_RUNTIME_MODE",
         validation_alias=AliasChoices("Agent:FIELD_JOB_RUNTIME_MODE", "CRAWLER_FIELD_JOB_RUNTIME_MODE"),
     )
@@ -91,6 +91,20 @@ class Settings(BaseSettings):
     crawler_llm_max_calls_per_run: int = Field(default=3, alias="CRAWLER_LLM_MAX_CALLS_PER_RUN")
     crawler_runtime_mode: str = Field(default="legacy", alias="CRAWLER_RUNTIME_MODE")
     crawler_adaptive_enabled: bool = Field(default=False, alias="CRAWLER_ADAPTIVE_ENABLED")
+    crawler_v3_enabled: bool = Field(default=False, alias="CRAWLER_V3_ENABLED")
+    crawler_v3_execution_mode: str = Field(default="worker_service", alias="CRAWLER_V3_EXECUTION_MODE")
+    crawler_v3_request_worker_id: str = Field(default="local-request-worker", alias="CRAWLER_V3_REQUEST_WORKER_ID")
+    crawler_v3_request_poll_seconds: int = Field(default=5, alias="CRAWLER_V3_REQUEST_POLL_SECONDS")
+    crawler_v3_request_batch_limit: int = Field(default=10, alias="CRAWLER_V3_REQUEST_BATCH_LIMIT")
+    crawler_v3_request_stale_minutes: int = Field(default=45, alias="CRAWLER_V3_REQUEST_STALE_MINUTES")
+    crawler_v3_free_recovery_attempts: int = Field(default=3, alias="CRAWLER_V3_FREE_RECOVERY_ATTEMPTS")
+    crawler_v3_crawl_runtime_mode: str = Field(default="adaptive_primary", alias="CRAWLER_V3_CRAWL_RUNTIME_MODE")
+    crawler_v3_field_job_runtime_mode: str = Field(default="langgraph_primary", alias="CRAWLER_V3_FIELD_JOB_RUNTIME_MODE")
+    crawler_v3_field_job_graph_durability: str = Field(default="sync", alias="CRAWLER_V3_FIELD_JOB_GRAPH_DURABILITY")
+    crawler_v3_paid_search_enabled: bool = Field(default=False, alias="CRAWLER_V3_PAID_SEARCH_ENABLED")
+    crawler_v3_llm_enabled: bool = Field(default=False, alias="CRAWLER_V3_LLM_ENABLED")
+    crawler_v3_provisional_promotion_mode: str = Field(default="single_strong_official", alias="CRAWLER_V3_PROVISIONAL_PROMOTION_MODE")
+    crawler_v3_reward_weights: str = Field(default='{"precision":0.45,"coverage":0.35,"efficiency":0.2}', alias="CRAWLER_V3_REWARD_WEIGHTS")
     crawler_frontier_max_pages_per_source: int = Field(default=40, alias="CRAWLER_FRONTIER_MAX_PAGES_PER_SOURCE")
     crawler_frontier_max_depth: int = Field(default=3, alias="CRAWLER_FRONTIER_MAX_DEPTH")
     crawler_frontier_max_pages_per_template: int = Field(default=8, alias="CRAWLER_FRONTIER_MAX_PAGES_PER_TEMPLATE")

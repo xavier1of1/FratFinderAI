@@ -35,6 +35,42 @@ export interface RuntimeComparisonResult {
   };
 }
 
+export interface ChapterSearchComparisonSummary {
+  family: RuntimeFamily;
+  runCount: number;
+  avgCanonicalCreated: number;
+  avgProvisionalCreated: number;
+  avgRejected: number;
+  avgNationalFollowed: number;
+  avgInstitutionalFollowed: number;
+  avgChapterOwnedSkipped: number;
+  avgBroaderWebFollowed: number;
+  avgWallTimeMs: number;
+}
+
+export interface ChapterSearchComparisonResult {
+  scopeLabel: string;
+  totalRuns: number;
+  legacy: ChapterSearchComparisonSummary;
+  adaptive: ChapterSearchComparisonSummary;
+  deltas: {
+    avgCanonicalCreated: number;
+    avgProvisionalCreated: number;
+    avgRejected: number;
+    avgNationalFollowed: number;
+    avgInstitutionalFollowed: number;
+    avgChapterOwnedSkipped: number;
+    avgBroaderWebFollowed: number;
+    avgWallTimeMs: number;
+  };
+  gates: Array<{
+    label: string;
+    value: string;
+    target: string;
+    passed: boolean;
+  }>;
+}
+
 interface RuntimeComparisonOptions {
   sourceSlug?: string | null;
   sourceSlugs?: string[] | null;
@@ -104,6 +140,49 @@ function summarize(family: RuntimeFamily, runs: CrawlRunListItem[]): RuntimeComp
   };
 }
 
+function summarizeChapterSearch(family: RuntimeFamily, runs: CrawlRunListItem[]): ChapterSearchComparisonSummary {
+  const chapterSearchRuns = runs.filter((run) => run.chapterSearch);
+  const runCount = chapterSearchRuns.length;
+
+  const totals = chapterSearchRuns.reduce(
+    (accumulator, run) => {
+      const chapterSearch = run.chapterSearch ?? {};
+      accumulator.canonical += chapterSearch.canonicalChaptersCreated ?? 0;
+      accumulator.provisional += chapterSearch.provisionalChaptersCreated ?? 0;
+      accumulator.rejected += chapterSearch.candidatesRejected ?? 0;
+      accumulator.national += chapterSearch.nationalTargetsFollowed ?? 0;
+      accumulator.institutional += chapterSearch.institutionalTargetsFollowed ?? 0;
+      accumulator.skipped += chapterSearch.chapterOwnedTargetsSkipped ?? 0;
+      accumulator.broader += chapterSearch.broaderWebTargetsFollowed ?? 0;
+      accumulator.wallTime += chapterSearch.chapterSearchWallTimeMs ?? 0;
+      return accumulator;
+    },
+    {
+      canonical: 0,
+      provisional: 0,
+      rejected: 0,
+      national: 0,
+      institutional: 0,
+      skipped: 0,
+      broader: 0,
+      wallTime: 0,
+    }
+  );
+
+  return {
+    family,
+    runCount,
+    avgCanonicalCreated: average(totals.canonical, runCount),
+    avgProvisionalCreated: average(totals.provisional, runCount),
+    avgRejected: average(totals.rejected, runCount),
+    avgNationalFollowed: average(totals.national, runCount),
+    avgInstitutionalFollowed: average(totals.institutional, runCount),
+    avgChapterOwnedSkipped: average(totals.skipped, runCount),
+    avgBroaderWebFollowed: average(totals.broader, runCount),
+    avgWallTimeMs: average(totals.wallTime, runCount),
+  };
+}
+
 export function computeRuntimeComparison(
   runs: CrawlRunListItem[],
   options?: RuntimeComparisonOptions
@@ -145,6 +224,78 @@ export function computeRuntimeComparison(
       avgCrawlSessions: adaptive.avgCrawlSessions - legacy.avgCrawlSessions,
       avgLlmCalls: adaptive.avgLlmCalls - legacy.avgLlmCalls
     }
+  };
+}
+
+export function computeChapterSearchComparison(
+  runs: CrawlRunListItem[],
+  options?: RuntimeComparisonOptions
+): ChapterSearchComparisonResult {
+  const providedSlugs = options?.sourceSlugs?.filter((slug): slug is string => Boolean(slug && slug.trim())) ?? [];
+  const sourceSlugSet = new Set(providedSlugs);
+  if (options?.sourceSlug?.trim()) {
+    sourceSlugSet.add(options.sourceSlug.trim());
+  }
+
+  const scopedRuns = sourceSlugSet.size
+    ? runs.filter((run) => run.sourceSlug && sourceSlugSet.has(run.sourceSlug))
+    : runs;
+
+  const chapterSearchRuns = scopedRuns.filter((run) => run.chapterSearch);
+  const legacyRuns = chapterSearchRuns.filter((run) => toRuntimeFamily(run.runtimeMode) === "legacy");
+  const adaptiveRuns = chapterSearchRuns.filter((run) => toRuntimeFamily(run.runtimeMode) === "adaptive");
+  const legacy = summarizeChapterSearch("legacy", legacyRuns);
+  const adaptive = summarizeChapterSearch("adaptive", adaptiveRuns);
+
+  const scopeLabel = sourceSlugSet.size === 0
+    ? "all sources"
+    : sourceSlugSet.size === 1
+      ? ([...sourceSlugSet][0] ?? "all sources")
+      : `${sourceSlugSet.size} campaign sources`;
+
+  const gates = [
+    {
+      label: "External fanout clamp",
+      value: `${adaptive.avgChapterOwnedSkipped.toFixed(1)} skipped/run`,
+      target: "> 0 skipped external chapter sites on adaptive runs",
+      passed: adaptive.runCount > 0 && adaptive.avgChapterOwnedSkipped > 0,
+    },
+    {
+      label: "Broader-web clamp",
+      value: `${adaptive.avgBroaderWebFollowed.toFixed(1)} followed/run`,
+      target: "= 0 broader-web targets during chapter search",
+      passed: adaptive.runCount > 0 && adaptive.avgBroaderWebFollowed === 0,
+    },
+    {
+      label: "Institutional before wider web",
+      value: `${adaptive.avgInstitutionalFollowed.toFixed(1)} institutional/run`,
+      target: "institutional follow available before wider-web fanout",
+      passed: adaptive.runCount > 0 && (adaptive.avgInstitutionalFollowed > 0 || adaptive.avgBroaderWebFollowed === 0),
+    },
+    {
+      label: "Search wall time",
+      value: `${Math.round(adaptive.avgWallTimeMs)}ms/run`,
+      target: "<= 5000ms average chapter-search wall time",
+      passed: adaptive.runCount > 0 && adaptive.avgWallTimeMs <= 5000,
+    },
+  ];
+
+  return {
+    scopeLabel,
+    totalRuns: chapterSearchRuns.length,
+    legacy,
+    adaptive,
+    deltas: {
+      avgCanonicalCreated: adaptive.avgCanonicalCreated - legacy.avgCanonicalCreated,
+      avgProvisionalCreated: adaptive.avgProvisionalCreated - legacy.avgProvisionalCreated,
+      avgRejected: adaptive.avgRejected - legacy.avgRejected,
+      avgNationalFollowed: adaptive.avgNationalFollowed - legacy.avgNationalFollowed,
+      avgInstitutionalFollowed: adaptive.avgInstitutionalFollowed - legacy.avgInstitutionalFollowed,
+      avgChapterOwnedSkipped: adaptive.avgChapterOwnedSkipped - legacy.avgChapterOwnedSkipped,
+      avgBroaderWebFollowed: adaptive.avgBroaderWebFollowed - legacy.avgBroaderWebFollowed,
+      avgWallTimeMs: adaptive.avgWallTimeMs - legacy.avgWallTimeMs,
+    },
+    gates,
   };
 }
 

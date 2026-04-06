@@ -25,12 +25,24 @@ interface ProcessFieldJobResult {
   processed: number;
   requeued: number;
   failedTerminal: number;
+  queueTriage?: {
+    invalidCancelled?: number;
+    repairQueued?: number;
+  };
+  chapterRepair?: {
+    promotedToCanonical?: number;
+    reconciledHistorical?: number;
+  };
 }
 
 interface BenchmarkTotals {
   processed: number;
   requeued: number;
   failedTerminal: number;
+  invalidBlocked: number;
+  repairableBlocked: number;
+  repairPromoted: number;
+  reconciledHistorical: number;
 }
 
 interface CrawlWarmupResult {
@@ -128,7 +140,25 @@ function parseProcessFieldJobsOutput(output: string): ProcessFieldJobResult {
     const processed = Number(payload.processed ?? 0);
     const requeued = Number(payload.requeued ?? 0);
     const failedTerminal = Number(payload.failed_terminal ?? payload.failedTerminal ?? 0);
-    return { processed, requeued, failedTerminal };
+    const queueTriage = (payload.queue_triage ?? payload.queueTriage ?? null) as Record<string, unknown> | null;
+    const chapterRepair = (payload.chapter_repair ?? payload.chapterRepair ?? null) as Record<string, unknown> | null;
+    return {
+      processed,
+      requeued,
+      failedTerminal,
+      queueTriage: queueTriage
+        ? {
+            invalidCancelled: Number(queueTriage.invalidCancelled ?? 0),
+            repairQueued: Number(queueTriage.repairQueued ?? 0)
+          }
+        : undefined,
+      chapterRepair: chapterRepair
+        ? {
+            promotedToCanonical: Number(chapterRepair.promotedToCanonical ?? 0),
+            reconciledHistorical: Number(chapterRepair.reconciledHistorical ?? 0)
+          }
+        : undefined
+    };
   } catch {
     const processed = readLastNumericValue(output, "processed");
     const requeued = readLastNumericValue(output, "requeued");
@@ -349,7 +379,12 @@ function buildSummary(params: {
     avgCycleMs,
     queueDepthStart: params.startSnapshot.queued,
     queueDepthEnd: params.endSnapshot.queued,
-    queueDepthDelta: params.startSnapshot.queued - params.endSnapshot.queued
+    queueDepthDelta: params.startSnapshot.queued - params.endSnapshot.queued,
+    invalidBlocked: params.totals.invalidBlocked,
+    repairableBlocked: params.totals.repairableBlocked,
+    repairPromoted: params.totals.repairPromoted,
+    reconciledHistorical: params.totals.reconciledHistorical,
+    actionableQueueRemaining: params.endSnapshot.queued
   };
 }
 
@@ -359,7 +394,11 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
   const totals: BenchmarkTotals = {
     processed: 0,
     requeued: 0,
-    failedTerminal: 0
+    failedTerminal: 0,
+    invalidBlocked: 0,
+    repairableBlocked: 0,
+    repairPromoted: 0,
+    reconciledHistorical: 0
   };
   let startSnapshot: BenchmarkQueueSnapshot = {
     queued: 0,
@@ -396,6 +435,10 @@ async function executeBenchmarkRun(runId: string): Promise<void> {
       totals.processed += result.processed;
       totals.requeued += result.requeued;
       totals.failedTerminal += result.failedTerminal;
+      totals.invalidBlocked += result.queueTriage?.invalidCancelled ?? 0;
+      totals.repairableBlocked += result.queueTriage?.repairQueued ?? 0;
+      totals.repairPromoted += result.chapterRepair?.promotedToCanonical ?? 0;
+      totals.reconciledHistorical += result.chapterRepair?.reconciledHistorical ?? 0;
 
       endSnapshot = await getFieldJobStatusSnapshot({
         fieldName: config.fieldName,

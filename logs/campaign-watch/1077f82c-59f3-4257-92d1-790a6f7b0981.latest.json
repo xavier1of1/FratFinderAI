@@ -1,0 +1,31 @@
+{
+    "capturedAt":  "2026-04-05T10:38:24.2771224-04:00",
+    "campaignId":  "1077f82c-59f3-4257-92d1-790a6f7b0981",
+    "status":  "failed",
+    "runtimeActive":  false,
+    "lastError":  "Command timed out after 1800000ms: python -m fratfinder_crawler.cli adaptive-train-eval --epochs 1 --train-sources acacia-main,alpha-chi-rho-main,alpha-delta-gamma-main,alpha-delta-phi-main --eval-sources kappa-delta-rho-main,lambda-chi-alpha-main,phi-gamma-delta-main --runtime-mode adaptive_primary --cohort-label v4-program-1077f82c-59f3-4257-92d1-790a6f7b0981 --policy-version adaptive-v1-1077f82c-r1 --report-path docs/reports/V4_RL_PROGRAM_1077f82c-59f3-4257-92d1-790a6f7b0981_ROUND_01.md",
+    "itemCount":  0,
+    "eventCount":  5,
+    "completedCount":  0,
+    "failedCount":  0,
+    "skippedCount":  0,
+    "activeCount":  0,
+    "jobsPerMinute":  0,
+    "queueDepthStart":  13034,
+    "queueDepthEnd":  13034,
+    "queueDepthDelta":  0,
+    "totalProcessed":  0,
+    "totalRequeued":  0,
+    "checkpointCount":  0,
+    "activePolicyVersion":  null,
+    "activePolicySnapshotId":  0,
+    "delayedRewardHealth":  null,
+    "queueStallAlert":  null,
+    "latestEventTypes":  [
+                             "acceptance_gate_evaluated",
+                             "campaign_failed",
+                             "training_round_started",
+                             "v4_baseline_frozen",
+                             "campaign_started"
+                         ]
+}

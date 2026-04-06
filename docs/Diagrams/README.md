@@ -16,6 +16,12 @@ All diagrams are authored in Markdown with embedded Mermaid so they can live in 
 
 ## Diagram Set
 
+- [V3 Latest Architecture Explained](./V3_LATEST_ARCHITECTURE_EXPLAINED.md): sentence-heavy, implementation-accurate walkthrough of how the current V3 crawler works end to end.
+- [V3 Queue Processes](./V3_QUEUE_PROCESSES.md): request queue lifecycle, worker claim loop, and backpressure signals.
+- [V3 Decision Trees](./V3_DECISION_TREES.md): source recovery, crawl fallback, evidence write routing, and enrichment continuation logic.
+- [V3 Interfaces And State](./V3_INTERFACES_AND_STATE.md): DB state model, API projection, and frontend integration contract.
+- [V4 Platform Architecture (High-Fidelity)](./V4_PLATFORM_ARCHITECTURE.md): full platform layering from operator entrypoints through runtimes, deterministic tooling, contracts, and storage.
+- [V4 LangGraph Logic Map (Current Runtime)](./V4_LANGGRAPH_LOGIC_MAP.md): exact runtime-selection path and both implemented LangGraph topologies, including the current non-graph field-job path.
 - [V3 System Overview](./V3_SYSTEM_OVERVIEW.md): layered architecture showing entrypoints, supervisor graphs, worker graphs, tool layers, memory, and storage.
 - [V3 Source Worker Graph](./V3_SOURCE_WORKER_GRAPH.md): end-to-end source crawl worker execution graph with loops, actions, and persistence points.
 - [V3 Chapter Resolution Graph](./V3_CHAPTER_RESOLUTION_GRAPH.md): chapter/entity resolution subgraph for website, email, Instagram, review, and defer decisions.

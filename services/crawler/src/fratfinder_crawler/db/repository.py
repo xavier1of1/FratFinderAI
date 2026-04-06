@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -9,6 +10,7 @@ from psycopg.types.json import Jsonb
 from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
 from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
+    ChapterEvidenceRecord,
     CrawlMetrics,
     EpochMetric,
     ExistingSourceCandidate,
@@ -25,6 +27,7 @@ from fratfinder_crawler.models import (
     NormalizedChapter,
     PageObservation,
     ProvenanceRecord,
+    ProvisionalChapterRecord,
     RewardEvent,
     ReviewItemCandidate,
     TemplateProfile,
@@ -691,6 +694,278 @@ class CrawlerRepository:
             )
         self._connection.commit()
 
+    def insert_chapter_evidence(self, record: ChapterEvidenceRecord) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO chapter_evidence (
+                    chapter_id,
+                    chapter_slug,
+                    fraternity_slug,
+                    source_slug,
+                    request_id,
+                    crawl_run_id,
+                    field_name,
+                    candidate_value,
+                    confidence,
+                    trust_tier,
+                    evidence_status,
+                    source_url,
+                    source_snippet,
+                    provider,
+                    query,
+                    related_website_url,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    record.chapter_id,
+                    record.chapter_slug,
+                    record.fraternity_slug,
+                    record.source_slug,
+                    record.request_id,
+                    record.crawl_run_id,
+                    record.field_name,
+                    record.candidate_value,
+                    record.confidence,
+                    record.trust_tier,
+                    record.evidence_status,
+                    record.source_url,
+                    record.source_snippet,
+                    record.provider,
+                    record.query,
+                    record.related_website_url,
+                    Jsonb(record.metadata),
+                ),
+            )
+        self._connection.commit()
+
+    def upsert_provisional_chapter(
+        self,
+        *,
+        fraternity_id: str,
+        slug: str,
+        name: str,
+        status: str = "provisional",
+        source_id: str | None = None,
+        request_id: str | None = None,
+        university_name: str | None = None,
+        city: str | None = None,
+        state: str | None = None,
+        country: str = "USA",
+        website_url: str | None = None,
+        instagram_url: str | None = None,
+        contact_email: str | None = None,
+        promotion_reason: str | None = None,
+        promoted_chapter_id: str | None = None,
+        evidence_payload: dict[str, Any] | None = None,
+    ) -> str:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO provisional_chapters (
+                    fraternity_id,
+                    source_id,
+                    request_id,
+                    promoted_chapter_id,
+                    slug,
+                    name,
+                    university_name,
+                    city,
+                    state,
+                    country,
+                    website_url,
+                    instagram_url,
+                    contact_email,
+                    status,
+                    promotion_reason,
+                    evidence_payload
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (fraternity_id, slug)
+                DO UPDATE SET
+                    source_id = COALESCE(EXCLUDED.source_id, provisional_chapters.source_id),
+                    request_id = COALESCE(EXCLUDED.request_id, provisional_chapters.request_id),
+                    promoted_chapter_id = COALESCE(EXCLUDED.promoted_chapter_id, provisional_chapters.promoted_chapter_id),
+                    name = EXCLUDED.name,
+                    university_name = COALESCE(EXCLUDED.university_name, provisional_chapters.university_name),
+                    city = COALESCE(EXCLUDED.city, provisional_chapters.city),
+                    state = COALESCE(EXCLUDED.state, provisional_chapters.state),
+                    country = COALESCE(EXCLUDED.country, provisional_chapters.country),
+                    website_url = COALESCE(EXCLUDED.website_url, provisional_chapters.website_url),
+                    instagram_url = COALESCE(EXCLUDED.instagram_url, provisional_chapters.instagram_url),
+                    contact_email = COALESCE(EXCLUDED.contact_email, provisional_chapters.contact_email),
+                    status = EXCLUDED.status,
+                    promotion_reason = COALESCE(EXCLUDED.promotion_reason, provisional_chapters.promotion_reason),
+                    evidence_payload = COALESCE(provisional_chapters.evidence_payload, '{}'::jsonb) || EXCLUDED.evidence_payload,
+                    updated_at = NOW()
+                RETURNING id
+                """,
+                (
+                    fraternity_id,
+                    source_id,
+                    request_id,
+                    promoted_chapter_id,
+                    slug,
+                    name,
+                    university_name,
+                    city,
+                    state,
+                    country,
+                    website_url,
+                    instagram_url,
+                    contact_email,
+                    status,
+                    promotion_reason,
+                    Jsonb(evidence_payload or {}),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return str(row["id"])
+
+    def apply_inline_enrichment_result(
+        self,
+        *,
+        chapter_id: str,
+        chapter_slug: str,
+        fraternity_slug: str | None,
+        source_slug: str | None,
+        source_id: str | None,
+        crawl_run_id: int | None,
+        chapter_updates: dict[str, str],
+        completed_payload: dict[str, Any],
+        field_state_updates: dict[str, str] | None = None,
+        provenance_records: list[ProvenanceRecord] | None = None,
+    ) -> None:
+        field_state_updates = field_state_updates or {}
+        provenance_records = provenance_records or []
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            if chapter_updates or field_state_updates:
+                cursor.execute(
+                    """
+                    UPDATE chapters
+                    SET
+                        website_url = CASE
+                            WHEN %(website_url)s::text IS NULL THEN website_url
+                            WHEN website_url IS NULL THEN %(website_url)s::text
+                            WHEN website_url !~* '^https?://' THEN %(website_url)s::text
+                            ELSE website_url
+                        END,
+                        instagram_url = COALESCE(instagram_url, %(instagram_url)s),
+                        contact_email = COALESCE(contact_email, %(contact_email)s),
+                        university_name = COALESCE(university_name, %(university_name)s),
+                        chapter_status = COALESCE(%(chapter_status)s, chapter_status),
+                        field_states = COALESCE(field_states, '{}'::jsonb) || %(field_states)s,
+                        updated_at = NOW()
+                    WHERE id = %(chapter_id)s
+                    """,
+                    {
+                        "chapter_id": chapter_id,
+                        "website_url": chapter_updates.get("website_url"),
+                        "instagram_url": chapter_updates.get("instagram_url"),
+                        "contact_email": chapter_updates.get("contact_email"),
+                        "university_name": chapter_updates.get("university_name"),
+                        "chapter_status": chapter_updates.get("chapter_status"),
+                        "field_states": Jsonb(field_state_updates),
+                    },
+                )
+
+            completed_status = str(completed_payload.get("status") or "observed")
+            provider = completed_payload.get("provider") or completed_payload.get("source_provider")
+            query = completed_payload.get("query")
+            related_website_url = completed_payload.get("related_website_url")
+
+            for record in provenance_records:
+                payload = asdict(record)
+                self._contracts.validate_provenance(
+                    {
+                        "sourceSlug": payload["source_slug"],
+                        "sourceUrl": payload["source_url"],
+                        "fieldName": payload["field_name"],
+                        "fieldValue": payload["field_value"],
+                        "sourceSnippet": payload["source_snippet"],
+                        "confidence": payload["confidence"],
+                    }
+                )
+                if source_id is None or crawl_run_id is None:
+                    continue
+                cursor.execute(
+                    """
+                    INSERT INTO chapter_provenance (
+                        chapter_id,
+                        source_id,
+                        crawl_run_id,
+                        field_name,
+                        field_value,
+                        source_url,
+                        source_snippet,
+                        confidence
+                    )
+                    VALUES (%(chapter_id)s, %(source_id)s, %(crawl_run_id)s, %(field_name)s, %(field_value)s, %(source_url)s, %(source_snippet)s, %(confidence)s)
+                    """,
+                    {
+                        "chapter_id": chapter_id,
+                        "source_id": source_id,
+                        "crawl_run_id": crawl_run_id,
+                        "field_name": record.field_name,
+                        "field_value": record.field_value,
+                        "source_url": record.source_url,
+                        "source_snippet": record.source_snippet,
+                        "confidence": record.confidence,
+                    },
+                )
+                evidence_status = "accepted" if completed_status == "updated" else "review" if completed_status == "review_required" else "observed"
+                trust_tier = "strong_official" if record.confidence >= 0.95 else "high" if record.confidence >= 0.85 else "medium" if record.confidence >= 0.7 else "low"
+                cursor.execute(
+                    """
+                    INSERT INTO chapter_evidence (
+                        chapter_id,
+                        chapter_slug,
+                        fraternity_slug,
+                        source_slug,
+                        crawl_run_id,
+                        field_name,
+                        candidate_value,
+                        confidence,
+                        trust_tier,
+                        evidence_status,
+                        source_url,
+                        source_snippet,
+                        provider,
+                        query,
+                        related_website_url,
+                        metadata
+                    )
+                    VALUES (%(chapter_id)s, %(chapter_slug)s, %(fraternity_slug)s, %(source_slug)s, %(crawl_run_id)s, %(field_name)s, %(candidate_value)s, %(confidence)s, %(trust_tier)s, %(evidence_status)s, %(source_url)s, %(source_snippet)s, %(provider)s, %(query)s, %(related_website_url)s, %(metadata)s)
+                    """,
+                    {
+                        "chapter_id": chapter_id,
+                        "chapter_slug": chapter_slug,
+                        "fraternity_slug": fraternity_slug,
+                        "source_slug": source_slug,
+                        "crawl_run_id": crawl_run_id,
+                        "field_name": record.field_name,
+                        "candidate_value": record.field_value,
+                        "confidence": record.confidence,
+                        "trust_tier": trust_tier,
+                        "evidence_status": evidence_status,
+                        "source_url": record.source_url,
+                        "source_snippet": record.source_snippet,
+                        "provider": provider,
+                        "query": query,
+                        "related_website_url": related_website_url if record.field_name != "website_url" else None,
+                        "metadata": Jsonb(
+                            {
+                                "runtime": "inline_v3",
+                                "completedStatus": completed_status,
+                                "fieldState": field_state_updates.get(record.field_name),
+                            }
+                        ),
+                    },
+                )
+
     def create_field_jobs(
         self,
         chapter_id: str,
@@ -783,6 +1058,10 @@ class CrawlerRepository:
  {email_dependency_filter}
                     ORDER BY
                         fj.priority DESC,
+                        CASE
+                            WHEN COALESCE(fj.payload -> 'contactResolution' ->> 'queueState', 'actionable') = 'deferred' THEN 1
+                            ELSE 0
+                        END ASC,
                         fj.scheduled_at ASC,
                         CASE fj.field_name
                             WHEN 'find_website' THEN 0
@@ -884,6 +1163,200 @@ class CrawlerRepository:
                 crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
                 field_states=row["field_states"] or {},
             )
+
+    def list_queued_field_jobs_for_triage(
+        self,
+        *,
+        limit: int = 200,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+    ) -> list[FieldJob]:
+        source_filter = ""
+        field_name_filter = ""
+        params: dict[str, Any] = {"limit": max(1, limit)}
+        if source_slug is not None:
+            source_filter = "AND s.slug = %(source_slug)s"
+            params["source_slug"] = source_slug
+        if field_name is not None:
+            field_name_filter = "AND fj.field_name = %(field_name)s"
+            params["field_name"] = field_name
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    fj.id,
+                    fj.chapter_id,
+                    fj.crawl_run_id,
+                    c.slug AS chapter_slug,
+                    c.name AS chapter_name,
+                    f.slug AS fraternity_slug,
+                    s.id AS source_id,
+                    s.slug AS source_slug,
+                    fj.field_name,
+                    fj.payload,
+                    fj.attempts,
+                    fj.max_attempts,
+                    fj.priority,
+                    c.website_url,
+                    c.instagram_url,
+                    c.contact_email,
+                    c.university_name,
+                    c.field_states,
+                    s.base_url AS source_base_url,
+                    s.list_path AS source_list_path
+                FROM field_jobs fj
+                JOIN chapters c ON c.id = fj.chapter_id
+                JOIN fraternities f ON f.id = c.fraternity_id
+                LEFT JOIN crawl_runs cr ON cr.id = fj.crawl_run_id
+                LEFT JOIN sources s ON s.id = cr.source_id
+                WHERE fj.status = 'queued'
+                  AND fj.scheduled_at <= NOW()
+                  AND fj.attempts < fj.max_attempts
+                  {field_name_filter}
+                  {source_filter}
+                ORDER BY
+                    fj.priority DESC,
+                    CASE
+                        WHEN COALESCE(fj.payload -> 'contactResolution' ->> 'queueState', 'actionable') = 'deferred' THEN 1
+                        ELSE 0
+                    END ASC,
+                    fj.scheduled_at ASC,
+                    fj.id ASC
+                LIMIT %(limit)s
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+
+        jobs: list[FieldJob] = []
+        for row in rows:
+            payload = dict(row["payload"] or {})
+            source_base_url = row["source_base_url"]
+            source_list_path = row["source_list_path"]
+            if isinstance(source_list_path, str) and source_list_path.startswith("http"):
+                payload.setdefault("sourceListUrl", source_list_path)
+            elif isinstance(source_list_path, str) and source_list_path and source_base_url:
+                payload.setdefault("sourceListUrl", f"{source_base_url.rstrip('/')}/{source_list_path.lstrip('/')}")
+            elif source_base_url:
+                payload.setdefault("sourceListUrl", source_base_url)
+
+            jobs.append(
+                FieldJob(
+                    id=str(row["id"]),
+                    chapter_id=str(row["chapter_id"]),
+                    chapter_slug=row["chapter_slug"],
+                    chapter_name=row["chapter_name"],
+                    field_name=row["field_name"],
+                    payload=payload,
+                    attempts=int(row["attempts"]),
+                    max_attempts=int(row["max_attempts"]),
+                    priority=int(row["priority"]),
+                    claim_token="",
+                    source_base_url=source_base_url,
+                    website_url=row["website_url"],
+                    instagram_url=row["instagram_url"],
+                    contact_email=row["contact_email"],
+                    fraternity_slug=row["fraternity_slug"],
+                    source_id=str(row["source_id"]) if row["source_id"] is not None else None,
+                    source_slug=row["source_slug"],
+                    university_name=row["university_name"],
+                    crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
+                    field_states=row["field_states"] or {},
+                )
+            )
+        return jobs
+
+    def patch_queued_field_job(
+        self,
+        field_job_id: str,
+        *,
+        payload_patch: dict[str, Any] | None = None,
+        scheduled_delay_seconds: int | None = None,
+        status: str | None = None,
+        last_error: str | None = None,
+        terminal_failure: bool | None = None,
+        completed_payload: dict[str, Any] | None = None,
+    ) -> bool:
+        assignments = ["payload = COALESCE(payload, '{}'::jsonb) || %(payload_patch)s"]
+        params: dict[str, Any] = {
+            "field_job_id": field_job_id,
+            "payload_patch": Jsonb(payload_patch or {}),
+        }
+        if scheduled_delay_seconds is not None:
+            assignments.append("scheduled_at = NOW() + (%(scheduled_delay_seconds)s * INTERVAL '1 second')")
+            params["scheduled_delay_seconds"] = max(0, int(scheduled_delay_seconds))
+        if status is not None:
+            assignments.append("status = %(status)s")
+            params["status"] = status
+            if status == "failed":
+                assignments.append("finished_at = NOW()")
+                assignments.append("claim_token = NULL")
+            elif status == "queued":
+                assignments.append("started_at = NULL")
+                assignments.append("finished_at = NULL")
+                assignments.append("claim_token = NULL")
+        if last_error is not None:
+            assignments.append("last_error = %(last_error)s")
+            params["last_error"] = last_error
+        if terminal_failure is not None:
+            assignments.append("terminal_failure = %(terminal_failure)s")
+            params["terminal_failure"] = terminal_failure
+        if completed_payload is not None:
+            assignments.append("completed_payload = %(completed_payload)s")
+            params["completed_payload"] = Jsonb(completed_payload)
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE field_jobs
+                SET {", ".join(assignments)}
+                WHERE id = %(field_job_id)s
+                  AND status = 'queued'
+                """,
+                params,
+            )
+            updated = cursor.rowcount
+        self._connection.commit()
+        return updated > 0
+
+    def update_chapter_identity_repair(
+        self,
+        *,
+        chapter_id: str,
+        university_name: str | None = None,
+        field_state_updates: dict[str, str] | None = None,
+        validity_class: str | None = None,
+        repair_metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        field_state_updates = field_state_updates or {}
+        repair_metadata = dict(repair_metadata or {})
+        if validity_class is not None:
+            repair_metadata["validityClass"] = validity_class
+        if not university_name and not field_state_updates and not repair_metadata:
+            return False
+        repair_metadata["repairedAt"] = datetime.now().isoformat()
+        if repair_metadata:
+            field_state_updates.setdefault("entity_repair", "completed")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE chapters
+                SET
+                    university_name = COALESCE(%(university_name)s, university_name),
+                    field_states = COALESCE(field_states, '{}'::jsonb) || %(field_states)s,
+                    updated_at = NOW()
+                WHERE id = %(chapter_id)s
+                """,
+                {
+                    "chapter_id": chapter_id,
+                    "university_name": university_name,
+                    "field_states": Jsonb(field_state_updates),
+                },
+            )
+            updated = cursor.rowcount
+        self._connection.commit()
+        return updated > 0
 
     def reconcile_stale_field_jobs(self, max_age_minutes: int = 60) -> int:
         stale_minutes = max(1, int(max_age_minutes))
@@ -1072,6 +1545,11 @@ class CrawlerRepository:
                     },
                 )
 
+            completed_status = str(completed_payload.get("status") or "observed")
+            provider = completed_payload.get("provider") or completed_payload.get("source_provider")
+            query = completed_payload.get("query")
+            related_website_url = completed_payload.get("related_website_url")
+
             for record in provenance_records:
                 payload = asdict(record)
                 self._contracts.validate_provenance(
@@ -1109,6 +1587,55 @@ class CrawlerRepository:
                         "source_url": record.source_url,
                         "source_snippet": record.source_snippet,
                         "confidence": record.confidence,
+                    },
+                )
+                evidence_status = "accepted" if completed_status == "updated" else "review" if completed_status == "review_required" else "observed"
+                trust_tier = "strong_official" if record.confidence >= 0.95 else "high" if record.confidence >= 0.85 else "medium" if record.confidence >= 0.7 else "low"
+                cursor.execute(
+                    """
+                    INSERT INTO chapter_evidence (
+                        chapter_id,
+                        chapter_slug,
+                        fraternity_slug,
+                        source_slug,
+                        crawl_run_id,
+                        field_name,
+                        candidate_value,
+                        confidence,
+                        trust_tier,
+                        evidence_status,
+                        source_url,
+                        source_snippet,
+                        provider,
+                        query,
+                        related_website_url,
+                        metadata
+                    )
+                    VALUES (%(chapter_id)s, %(chapter_slug)s, %(fraternity_slug)s, %(source_slug)s, %(crawl_run_id)s, %(field_name)s, %(candidate_value)s, %(confidence)s, %(trust_tier)s, %(evidence_status)s, %(source_url)s, %(source_snippet)s, %(provider)s, %(query)s, %(related_website_url)s, %(metadata)s)
+                    """,
+                    {
+                        "chapter_id": job.chapter_id,
+                        "chapter_slug": job.chapter_slug,
+                        "fraternity_slug": job.fraternity_slug,
+                        "source_slug": job.source_slug,
+                        "crawl_run_id": job.crawl_run_id,
+                        "field_name": record.field_name,
+                        "candidate_value": record.field_value,
+                        "confidence": record.confidence,
+                        "trust_tier": trust_tier,
+                        "evidence_status": evidence_status,
+                        "source_url": record.source_url,
+                        "source_snippet": record.source_snippet,
+                        "provider": provider,
+                        "query": query,
+                        "related_website_url": related_website_url if record.field_name != "website_url" else None,
+                        "metadata": Jsonb(
+                            {
+                                "fieldJobId": job.id,
+                                "completedStatus": completed_status,
+                                "fieldState": field_state_updates.get(record.field_name),
+                            }
+                        ),
                     },
                 )
 
@@ -2328,6 +2855,7 @@ class CrawlerRepository:
             "right": right,
             "actionDeltas": action_deltas,
         }
+
 
 
 

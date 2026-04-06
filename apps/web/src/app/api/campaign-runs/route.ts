@@ -4,7 +4,7 @@ import { z } from "zod";
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { isCampaignRunActive, scheduleCampaignRun, scheduleDueCampaignRuns } from "@/lib/campaign-runner";
 import { createCampaignRun, listCampaignRuns, reconcileStaleCampaignRuns } from "@/lib/repositories/campaign-run-repository";
-import type { CampaignRunConfig } from "@/lib/types";
+import type { CampaignRun, CampaignRunConfig } from "@/lib/types";
 
 const campaignPayloadSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
@@ -20,7 +20,19 @@ const campaignPayloadSchema = z.object({
       itemPollIntervalMs: z.coerce.number().int().min(5_000).max(120_000).optional(),
       preflightRequired: z.boolean().optional(),
       autoTuningEnabled: z.boolean().optional(),
-      controlFraternitySlugs: z.array(z.string().trim().min(1).max(160)).max(20).optional()
+      controlFraternitySlugs: z.array(z.string().trim().min(1).max(160)).max(20).optional(),
+      programMode: z.enum(["standard", "v4_rl_improvement"]).optional(),
+      runtimeMode: z.enum(["legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"]).optional(),
+      fieldJobRuntimeMode: z.enum(["legacy", "langgraph_shadow", "langgraph_primary"]).optional(),
+      frozenSourceSlugs: z.array(z.string().trim().min(1).max(160)).max(30).optional(),
+      trainingRounds: z.coerce.number().int().min(1).max(6).optional(),
+      epochsPerRound: z.coerce.number().int().min(1).max(8).optional(),
+      trainingSourceBatchSize: z.coerce.number().int().min(1).max(20).optional(),
+      evalSourceBatchSize: z.coerce.number().int().min(1).max(20).optional(),
+      trainingCommandTimeoutMinutes: z.coerce.number().int().min(5).max(180).optional(),
+      checkpointPromotionEnabled: z.boolean().optional(),
+      queueStallThresholdMinutes: z.coerce.number().int().min(5).max(120).optional(),
+      reviewWindowDays: z.coerce.number().int().min(1).max(90).optional()
     })
     .optional()
 });
@@ -28,7 +40,38 @@ const campaignPayloadSchema = z.object({
 function formatDefaultCampaignName(config?: Partial<CampaignRunConfig>): string {
   const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19);
   const size = config?.targetCount ?? 20;
+  if (config?.programMode === "v4_rl_improvement") {
+    return `V4 RL improvement program ${timestamp}`;
+  }
   return `${size}-fraternity campaign ${timestamp}`;
+}
+
+function toCampaignListItem(campaign: CampaignRun): CampaignRun {
+  return {
+    ...campaign,
+    telemetry: {
+      providerHealth: campaign.telemetry.providerHealth ?? null,
+      providerHealthHistory: [],
+      activeConcurrency: campaign.telemetry.activeConcurrency,
+      lastCheckpointAt: campaign.telemetry.lastCheckpointAt ?? null,
+      lastTuneAt: campaign.telemetry.lastTuneAt ?? null,
+      runtimeNotes: [],
+      cohortManifest: [],
+      activePolicyVersion: campaign.telemetry.activePolicyVersion ?? null,
+      activePolicySnapshotId: campaign.telemetry.activePolicySnapshotId ?? null,
+      promotionDecisions: [],
+      queueStallAlert: campaign.telemetry.queueStallAlert ?? null,
+      delayedRewardHealth: campaign.telemetry.delayedRewardHealth ?? null,
+      reviewReasonDrift: [],
+      acceptanceGate: campaign.telemetry.acceptanceGate ?? null,
+      baselineSnapshot: null,
+      finalSnapshot: null,
+      programPhase: campaign.telemetry.programPhase,
+      programStartedAt: campaign.telemetry.programStartedAt ?? null,
+    },
+    items: [],
+    events: [],
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -46,7 +89,7 @@ export async function GET(request: NextRequest) {
     }
     return apiSuccess(
       data.map((campaign) => ({
-        ...campaign,
+        ...toCampaignListItem(campaign),
         runtimeActive: isCampaignRunActive(campaign.id)
       }))
     );

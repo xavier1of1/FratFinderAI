@@ -1,6 +1,6 @@
 # FratFinderAI — Comprehensive Project Report
 
-> Generated: 2026-03-31 | Current version: 0.10.0
+> Generated: 2026-03-31 | Current version: 3.0.0
 
 ---
 

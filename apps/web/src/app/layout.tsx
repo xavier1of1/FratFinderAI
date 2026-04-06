@@ -7,14 +7,15 @@ const displayFont = Space_Grotesk({ subsets: ["latin"], variable: "--font-displa
 const monoFont = IBM_Plex_Mono({ subsets: ["latin"], variable: "--font-mono", weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  title: "Frat Finder AI Dashboard",
-  description: "Source-aware chapter discovery operations dashboard"
+  title: "Frat Finder AI V3.0.0 Dashboard",
+  description: "LangGraph-native fraternity crawl operations dashboard"
 };
 
 const navItems = [
   { href: "/", label: "Overview" },
   { href: "/chapters", label: "Chapters" },
   { href: "/runs", label: "Crawl Runs" },
+  { href: "/agent-ops", label: "Agent Ops" },
   { href: "/review-items", label: "Review Queue" },
   { href: "/benchmarks", label: "Benchmarks" },
   { href: "/campaigns", label: "Campaigns" },
@@ -32,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="railCard railBrandCard">
               <p className="eyebrow">Frat Finder AI</p>
               <h1>Operator Console</h1>
-              <p className="headerDescription">Source discovery, chapter coverage, and enrichment quality in one operating surface.</p>
+              <p className="headerDescription">V3.0.0 request workers, LangGraph evidence flows, and chapter coverage in one operating surface.</p>
             </div>
             <nav className="railNav" aria-label="Primary">
               {navItems.map((item, index) => (
@@ -60,6 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
               <div className="headerMetaBand">
                 <span className="headerMetaChip">Registry-first discovery</span>
+                <span className="headerMetaChip">V3.0.0 request workers</span>
                 <span className="headerMetaChip">Search-safe enrichment</span>
                 <span className="headerMetaChip">Review-aware writes</span>
               </div>

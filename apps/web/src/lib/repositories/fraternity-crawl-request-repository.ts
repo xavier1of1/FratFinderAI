@@ -42,7 +42,8 @@ const DEFAULT_CONFIG: FraternityCrawlRequestConfig = {
   fieldJobWorkers: 8,
   fieldJobLimitPerCycle: 50,
   maxEnrichmentCycles: 24,
-  pauseMs: 500
+  pauseMs: 500,
+  crawlPolicyVersion: null
 };
 
 function normalizeConfig(config: unknown): FraternityCrawlRequestConfig {
@@ -59,7 +60,10 @@ function normalizeConfig(config: unknown): FraternityCrawlRequestConfig {
     maxEnrichmentCycles: Number.isFinite(value.maxEnrichmentCycles)
       ? Math.max(1, Number(value.maxEnrichmentCycles))
       : DEFAULT_CONFIG.maxEnrichmentCycles,
-    pauseMs: Number.isFinite(value.pauseMs) ? Math.max(0, Number(value.pauseMs)) : DEFAULT_CONFIG.pauseMs
+    pauseMs: Number.isFinite(value.pauseMs) ? Math.max(0, Number(value.pauseMs)) : DEFAULT_CONFIG.pauseMs,
+    crawlPolicyVersion: typeof value.crawlPolicyVersion === "string" && value.crawlPolicyVersion.trim()
+      ? value.crawlPolicyVersion.trim()
+      : null
   };
 }
 

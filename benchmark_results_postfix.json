@@ -1,0 +1,290 @@
+{
+    "success":  true,
+    "data":  {
+                 "run":  {
+                             "id":  "699e1efc-091d-4450-8417-f710a68fb21a",
+                             "name":  "PKA website V3 post-fix benchmark 2026-04-06",
+                             "status":  "running",
+                             "fieldName":  "find_website",
+                             "sourceSlug":  "pi-kappa-alpha-main",
+                             "config":  {
+                                            "fieldName":  "find_website",
+                                            "sourceSlug":  "pi-kappa-alpha-main",
+                                            "workers":  2,
+                                            "limitPerCycle":  8,
+                                            "cycles":  4,
+                                            "pauseMs":  250,
+                                            "crawlRuntimeMode":  "adaptive_primary",
+                                            "fieldJobRuntimeMode":  "langgraph_primary",
+                                            "fieldJobGraphDurability":  "sync",
+                                            "runAdaptiveCrawlBeforeCycles":  false
+                                        },
+                             "summary":  null,
+                             "samples":  [
+
+                                         ],
+                             "shadowDiffs":  [
+
+                                             ],
+                             "startedAt":  "2026-04-06T17:44:01.190Z",
+                             "finishedAt":  null,
+                             "lastError":  null,
+                             "createdAt":  "2026-04-06T17:44:01.186Z",
+                             "updatedAt":  "2026-04-06T17:44:01.190Z"
+                         },
+                 "baseline":  {
+                                  "id":  "27c2a453-c45e-4e8a-b180-31d1fda645e1",
+                                  "name":  "PKA website legacy medium benchmark 2026-04-06",
+                                  "status":  "succeeded",
+                                  "fieldName":  "find_website",
+                                  "sourceSlug":  "pi-kappa-alpha-main",
+                                  "config":  {
+                                                 "fieldName":  "find_website",
+                                                 "sourceSlug":  "pi-kappa-alpha-main",
+                                                 "workers":  2,
+                                                 "limitPerCycle":  8,
+                                                 "cycles":  4,
+                                                 "pauseMs":  250,
+                                                 "crawlRuntimeMode":  "legacy",
+                                                 "fieldJobRuntimeMode":  "legacy",
+                                                 "fieldJobGraphDurability":  "sync",
+                                                 "runAdaptiveCrawlBeforeCycles":  false
+                                             },
+                                  "summary":  {
+                                                  "elapsedMs":  136537,
+                                                  "cyclesCompleted":  4,
+                                                  "totalProcessed":  30,
+                                                  "totalRequeued":  2,
+                                                  "totalFailedTerminal":  0,
+                                                  "jobsPerMinute":  13.183239707918,
+                                                  "avgCycleMs":  34134.25,
+                                                  "queueDepthStart":  1135,
+                                                  "queueDepthEnd":  1105,
+                                                  "queueDepthDelta":  30
+                                              },
+                                  "samples":  [
+                                                  {
+                                                      "cycle":  1,
+                                                      "startedAt":  "2026-04-06T15:00:36.626Z",
+                                                      "durationMs":  99759,
+                                                      "processed":  7,
+                                                      "requeued":  1,
+                                                      "failedTerminal":  0,
+                                                      "queued":  1128,
+                                                      "running":  0,
+                                                      "done":  16,
+                                                      "failed":  0
+                                                  },
+                                                  {
+                                                      "cycle":  2,
+                                                      "startedAt":  "2026-04-06T15:02:16.636Z",
+                                                      "durationMs":  25218,
+                                                      "processed":  7,
+                                                      "requeued":  1,
+                                                      "failedTerminal":  0,
+                                                      "queued":  1121,
+                                                      "running":  0,
+                                                      "done":  23,
+                                                      "failed":  0
+                                                  },
+                                                  {
+                                                      "cycle":  3,
+                                                      "startedAt":  "2026-04-06T15:02:42.116Z",
+                                                      "durationMs":  5345,
+                                                      "processed":  8,
+                                                      "requeued":  0,
+                                                      "failedTerminal":  0,
+                                                      "queued":  1113,
+                                                      "running":  0,
+                                                      "done":  31,
+                                                      "failed":  0
+                                                  },
+                                                  {
+                                                      "cycle":  4,
+                                                      "startedAt":  "2026-04-06T15:02:47.727Z",
+                                                      "durationMs":  5408,
+                                                      "processed":  8,
+                                                      "requeued":  0,
+                                                      "failedTerminal":  0,
+                                                      "queued":  1105,
+                                                      "running":  0,
+                                                      "done":  39,
+                                                      "failed":  0
+                                                  }
+                                              ],
+                                  "shadowDiffs":  [
+
+                                                  ],
+                                  "startedAt":  "2026-04-06T15:00:36.598Z",
+                                  "finishedAt":  "2026-04-06T15:02:53.138Z",
+                                  "lastError":  null,
+                                  "createdAt":  "2026-04-06T15:00:36.594Z",
+                                  "updatedAt":  "2026-04-06T15:02:53.138Z"
+                              },
+                 "gateReport":  null
+             }
+}
+{
+    "success":  true,
+    "data":  {
+                 "run":  {
+                             "id":  "532e7477-1d11-4de2-83a0-8bcf6337e597",
+                             "name":  "SAE website V3 post-fix benchmark 2026-04-06",
+                             "status":  "running",
+                             "fieldName":  "find_website",
+                             "sourceSlug":  "sigma-alpha-epsilon-main",
+                             "config":  {
+                                            "fieldName":  "find_website",
+                                            "sourceSlug":  "sigma-alpha-epsilon-main",
+                                            "workers":  2,
+                                            "limitPerCycle":  8,
+                                            "cycles":  4,
+                                            "pauseMs":  250,
+                                            "crawlRuntimeMode":  "adaptive_primary",
+                                            "fieldJobRuntimeMode":  "langgraph_primary",
+                                            "fieldJobGraphDurability":  "sync",
+                                            "runAdaptiveCrawlBeforeCycles":  false
+                                        },
+                             "summary":  null,
+                             "samples":  [
+
+                                         ],
+                             "shadowDiffs":  [
+
+                                             ],
+                             "startedAt":  "2026-04-06T17:44:06.344Z",
+                             "finishedAt":  null,
+                             "lastError":  null,
+                             "createdAt":  "2026-04-06T17:44:06.342Z",
+                             "updatedAt":  "2026-04-06T17:44:06.344Z"
+                         },
+                 "baseline":  {
+                                  "id":  "0745c585-4dbc-4141-bd19-1ca9fe1e8b78",
+                                  "name":  "SAE website legacy medium benchmark 2026-04-06",
+                                  "status":  "succeeded",
+                                  "fieldName":  "find_website",
+                                  "sourceSlug":  "sigma-alpha-epsilon-main",
+                                  "config":  {
+                                                 "fieldName":  "find_website",
+                                                 "sourceSlug":  "sigma-alpha-epsilon-main",
+                                                 "workers":  2,
+                                                 "limitPerCycle":  8,
+                                                 "cycles":  4,
+                                                 "pauseMs":  250,
+                                                 "crawlRuntimeMode":  "legacy",
+                                                 "fieldJobRuntimeMode":  "legacy",
+                                                 "fieldJobGraphDurability":  "sync",
+                                                 "runAdaptiveCrawlBeforeCycles":  false
+                                             },
+                                  "summary":  {
+                                                  "elapsedMs":  61398,
+                                                  "cyclesCompleted":  4,
+                                                  "totalProcessed":  32,
+                                                  "totalRequeued":  0,
+                                                  "totalFailedTerminal":  0,
+                                                  "jobsPerMinute":  31.271376917814912,
+                                                  "avgCycleMs":  15349.5,
+                                                  "queueDepthStart":  925,
+                                                  "queueDepthEnd":  893,
+                                                  "queueDepthDelta":  32
+                                              },
+                                  "samples":  [
+                                                  {
+                                                      "cycle":  1,
+                                                      "startedAt":  "2026-04-06T15:24:31.823Z",
+                                                      "durationMs":  28325,
+                                                      "processed":  8,
+                                                      "requeued":  0,
+                                                      "failedTerminal":  0,
+                                                      "queued":  917,
+                                                      "running":  0,
+                                                      "done":  17,
+                                                      "failed":  0
+                                                  },
+                                                  {
+                                                      "cycle":  2,
+                                                      "startedAt":  "2026-04-06T15:25:00.413Z",
+                                                      "durationMs":  10399,
+                                                      "processed":  8,
+                                                      "requeued":  0,
+                                                      "failedTerminal":  0,
+                                                      "queued":  909,
+                                                      "running":  0,
+                                                      "done":  25,
+                                                      "failed":  0
+                                                  },
+                                                  {
+                                                      "cycle":  3,
+                                                      "startedAt":  "2026-04-06T15:25:11.077Z",
+                                                      "durationMs":  11139,
+                                                      "processed":  8,
+                                                      "requeued":  0,
+                                                      "failedTerminal":  0,
+                                                      "queued":  901,
+                                                      "running":  0,
+                                                      "done":  33,
+                                                      "failed":  0
+                                                  },
+                                                  {
+                                                      "cycle":  4,
+                                                      "startedAt":  "2026-04-06T15:25:22.477Z",
+                                                      "durationMs":  10708,
+                                                      "processed":  8,
+                                                      "requeued":  0,
+                                                      "failedTerminal":  0,
+                                                      "queued":  893,
+                                                      "running":  0,
+                                                      "done":  41,
+                                                      "failed":  0
+                                                  }
+                                              ],
+                                  "shadowDiffs":  [
+
+                                                  ],
+                                  "startedAt":  "2026-04-06T15:24:31.788Z",
+                                  "finishedAt":  "2026-04-06T15:25:33.187Z",
+                                  "lastError":  null,
+                                  "createdAt":  "2026-04-06T15:24:31.784Z",
+                                  "updatedAt":  "2026-04-06T15:25:33.187Z"
+                              },
+                 "gateReport":  null
+             }
+}
+{
+    "success":  true,
+    "data":  {
+                 "run":  {
+                             "id":  "74807e42-2a10-4dcb-b858-84499d4af09f",
+                             "name":  "ADG website V3 post-fix benchmark 2026-04-06",
+                             "status":  "running",
+                             "fieldName":  "find_website",
+                             "sourceSlug":  "alpha-delta-gamma-main",
+                             "config":  {
+                                            "fieldName":  "find_website",
+                                            "sourceSlug":  "alpha-delta-gamma-main",
+                                            "workers":  2,
+                                            "limitPerCycle":  8,
+                                            "cycles":  4,
+                                            "pauseMs":  250,
+                                            "crawlRuntimeMode":  "adaptive_primary",
+                                            "fieldJobRuntimeMode":  "langgraph_primary",
+                                            "fieldJobGraphDurability":  "sync",
+                                            "runAdaptiveCrawlBeforeCycles":  false
+                                        },
+                             "summary":  null,
+                             "samples":  [
+
+                                         ],
+                             "shadowDiffs":  [
+
+                                             ],
+                             "startedAt":  "2026-04-06T17:44:11.391Z",
+                             "finishedAt":  null,
+                             "lastError":  null,
+                             "createdAt":  "2026-04-06T17:44:11.389Z",
+                             "updatedAt":  "2026-04-06T17:44:11.391Z"
+                         },
+                 "baseline":  null,
+                 "gateReport":  null
+             }
+}

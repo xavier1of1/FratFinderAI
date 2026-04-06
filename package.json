@@ -1,7 +1,7 @@
 {
   "name": "frat-finder-ai",
   "private": true,
-  "version": "2.1.1",
+  "version": "3.0.0",
   "packageManager": "pnpm@9.12.3",
   "scripts": {
     "dev:web": "pnpm --filter @fratfinder/web dev",

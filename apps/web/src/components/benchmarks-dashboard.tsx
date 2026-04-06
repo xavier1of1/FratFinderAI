@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { MetricCard } from "@/components/metric-card";
 import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
-import { computeRuntimeComparison } from "@/lib/runtime-comparison";
+import { computeChapterSearchComparison, computeRuntimeComparison } from "@/lib/runtime-comparison";
 import type {
   AdaptiveEpochMetric,
   BenchmarkFieldName,
@@ -13,6 +13,7 @@ import type {
   BenchmarkAlertSummary,
   BenchmarkGateReport,
   BenchmarkRunConfig,
+  BenchmarkRunSummary,
   BenchmarkRunListItem,
   CrawlRunListItem,
   FieldJobGraphRunDetail,
@@ -109,6 +110,24 @@ function formatNumber(value: number | null | undefined, digits = 0): string {
     return "0";
   }
   return value.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+}
+
+function computeQueueEfficiency(summary: BenchmarkRunSummary | null | undefined): {
+  totalEvents: number;
+  requeueRate: number;
+  terminalRate: number;
+  burnDown: number;
+} {
+  const totalProcessed = Number(summary?.totalProcessed ?? 0);
+  const totalRequeued = Number(summary?.totalRequeued ?? 0);
+  const totalFailedTerminal = Number(summary?.totalFailedTerminal ?? 0);
+  const totalEvents = Math.max(totalProcessed + totalRequeued + totalFailedTerminal, 1);
+  return {
+    totalEvents,
+    requeueRate: totalRequeued / totalEvents,
+    terminalRate: totalFailedTerminal / totalEvents,
+    burnDown: Math.max(0, Math.abs(Number(summary?.queueDepthDelta ?? 0))),
+  };
 }
 
 
@@ -523,11 +542,86 @@ export function BenchmarksDashboard({
       }),
     [crawlRuns, selectedBenchmark?.sourceSlug]
   );
+  const chapterSearchSummary = useMemo(() => {
+    const scopedRuns = crawlRuns.filter((run) => {
+      if (!run.chapterSearch) {
+        return false;
+      }
+      if (!selectedBenchmark?.sourceSlug) {
+        return true;
+      }
+      return run.sourceSlug === selectedBenchmark.sourceSlug;
+    });
+
+    const totals = scopedRuns.reduce(
+      (accumulator, run) => {
+        const chapterSearch = run.chapterSearch ?? {};
+        accumulator.runCount += 1;
+        accumulator.canonical += chapterSearch.canonicalChaptersCreated ?? 0;
+        accumulator.provisional += chapterSearch.provisionalChaptersCreated ?? 0;
+        accumulator.skipped += chapterSearch.chapterOwnedTargetsSkipped ?? 0;
+        accumulator.national += chapterSearch.nationalTargetsFollowed ?? 0;
+        accumulator.institutional += chapterSearch.institutionalTargetsFollowed ?? 0;
+        accumulator.rejected += chapterSearch.candidatesRejected ?? 0;
+        accumulator.wallTimeMs += chapterSearch.chapterSearchWallTimeMs ?? 0;
+        return accumulator;
+      },
+      {
+        runCount: 0,
+        canonical: 0,
+        provisional: 0,
+        skipped: 0,
+        national: 0,
+        institutional: 0,
+        rejected: 0,
+        wallTimeMs: 0,
+      }
+    );
+
+    return {
+      ...totals,
+      avgWallTimeMs: totals.runCount > 0 ? totals.wallTimeMs / totals.runCount : 0,
+    };
+  }, [crawlRuns, selectedBenchmark?.sourceSlug]);
+  const chapterSearchComparison = useMemo(
+    () =>
+      computeChapterSearchComparison(crawlRuns, {
+        sourceSlug: selectedBenchmark?.sourceSlug ?? null
+      }),
+    [crawlRuns, selectedBenchmark?.sourceSlug]
+  );
 
   const gateReport = selectedDetail?.gateReport ?? null;
   const baselineBenchmark = selectedDetail?.baseline ?? null;
   const shadowDiffs = selectedDetail?.run?.shadowDiffs ?? selectedBenchmark?.shadowDiffs ?? [];
   const selectedAlerts = benchmarkAlerts;
+  const queueEfficiency = useMemo(() => computeQueueEfficiency(summary), [summary]);
+  const cycleBehavior = useMemo(() => {
+    const samples = selectedBenchmark?.samples ?? [];
+    if (samples.length === 0) {
+      return {
+        avgProcessed: 0,
+        avgRequeued: 0,
+        stallCycles: 0,
+      };
+    }
+    const totals = samples.reduce(
+      (accumulator, sample) => {
+        accumulator.processed += sample.processed;
+        accumulator.requeued += sample.requeued;
+        if (sample.processed === 0 && sample.requeued > 0) {
+          accumulator.stallCycles += 1;
+        }
+        return accumulator;
+      },
+      { processed: 0, requeued: 0, stallCycles: 0 }
+    );
+    return {
+      avgProcessed: totals.processed / samples.length,
+      avgRequeued: totals.requeued / samples.length,
+      stallCycles: totals.stallCycles,
+    };
+  }, [selectedBenchmark?.samples]);
   const alertSummary = useMemo(() => ({
     info: selectedAlerts.filter((alert) => alert.severity === "info").length,
     warning: selectedAlerts.filter((alert) => alert.severity === "warning").length,
@@ -890,6 +984,176 @@ export function BenchmarksDashboard({
                   </div>
                 </>
               )}
+
+              <h3>Chapter Search Slice</h3>
+              {chapterSearchSummary.runCount === 0 ? (
+                <p className="muted">No chapter-search telemetry found for this benchmark scope yet.</p>
+              ) : (
+                <>
+                  <div className="comparisonGrid">
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Discovery Outcomes</strong>
+                        <span className="cellHint">{chapterSearchSummary.runCount} runs</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">Canonical</span>
+                          <strong>{formatNumber(chapterSearchSummary.canonical)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Provisional</span>
+                          <strong>{formatNumber(chapterSearchSummary.provisional)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Rejected</span>
+                          <strong>{formatNumber(chapterSearchSummary.rejected)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Avg Wall Time</span>
+                          <strong>{formatDuration(chapterSearchSummary.avgWallTimeMs)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Follow Breakdown</strong>
+                        <span className="cellHint">chapter search only</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">National</span>
+                          <strong>{formatNumber(chapterSearchSummary.national)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Institutional</span>
+                          <strong>{formatNumber(chapterSearchSummary.institutional)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Skipped Sites</span>
+                          <strong>{formatNumber(chapterSearchSummary.skipped)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+              {chapterSearchComparison.totalRuns > 0 ? (
+                <>
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Gate</th>
+                          <th>Value</th>
+                          <th>Target</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {chapterSearchComparison.gates.map((gate) => (
+                          <tr key={gate.label}>
+                            <td>{gate.label}</td>
+                            <td>{gate.value}</td>
+                            <td>{gate.target}</td>
+                            <td><strong>{gate.passed ? "pass" : "fail"}</strong></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+
+              <h3>Contact Resolution Slice</h3>
+              <div className="comparisonGrid">
+                <div className="comparisonCard">
+                  <div className="benchmarkListItemHeader">
+                    <strong>Queue Efficiency</strong>
+                    <span className="cellHint">deferred contact work</span>
+                  </div>
+                  <div className="comparisonMetrics">
+                    <div>
+                      <span className="comparisonLabel">Processed</span>
+                      <strong>{formatNumber(summary?.totalProcessed)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Requeued</span>
+                      <strong>{formatNumber(summary?.totalRequeued)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Terminal</span>
+                      <strong>{formatNumber(summary?.totalFailedTerminal)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Burn Down</span>
+                      <strong>{formatNumber(queueEfficiency.burnDown)}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div className="comparisonCard">
+                  <div className="benchmarkListItemHeader">
+                    <strong>Cycle Behavior</strong>
+                    <span className="cellHint">queue churn guardrails</span>
+                  </div>
+                  <div className="comparisonMetrics">
+                    <div>
+                      <span className="comparisonLabel">Requeue Rate</span>
+                      <strong>{formatPercent(queueEfficiency.requeueRate)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Avg Processed/Cycle</span>
+                      <strong>{formatNumber(cycleBehavior.avgProcessed, 1)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Avg Requeued/Cycle</span>
+                      <strong>{formatNumber(cycleBehavior.avgRequeued, 1)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Stall Cycles</span>
+                      <strong>{formatNumber(cycleBehavior.stallCycles)}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Gate</th>
+                      <th>Value</th>
+                      <th>Target</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Requeue Clamp</td>
+                      <td>{formatPercent(queueEfficiency.requeueRate)}</td>
+                      <td>&lt;= 35% queue churn</td>
+                      <td><strong>{queueEfficiency.requeueRate <= 0.35 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Actionable Burn</td>
+                      <td>{formatNumber(queueEfficiency.burnDown)}</td>
+                      <td>&gt; 0 queued jobs burned</td>
+                      <td><strong>{queueEfficiency.burnDown > 0 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Cycle Stalls</td>
+                      <td>{formatNumber(cycleBehavior.stallCycles)}</td>
+                      <td>&lt;= 1 requeue-only cycle</td>
+                      <td><strong>{cycleBehavior.stallCycles <= 1 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Terminal Rate</td>
+                      <td>{formatPercent(queueEfficiency.terminalRate)}</td>
+                      <td>&lt;= 25% terminal exits</td>
+                      <td><strong>{queueEfficiency.terminalRate <= 0.25 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
 
               <h3>LangGraph Cutover Gates</h3>
               {gateReport ? (

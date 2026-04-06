@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
@@ -298,7 +298,7 @@ _DEFAULT_BROWSER_USER_AGENT = (
 @dataclass(slots=True)
 class FieldJobResult:
     chapter_updates: dict[str, str]
-    completed_payload: dict[str, str]
+    completed_payload: dict[str, Any]
     field_state_updates: dict[str, str] = field(default_factory=dict)
     provenance_records: list[ProvenanceRecord] = field(default_factory=list)
     review_item: ReviewItemCandidate | None = None
@@ -595,11 +595,15 @@ class FieldJobEngine:
             has_email=bool(job.contact_email),
             has_instagram=bool(job.instagram_url),
         )
+        self._trace("load_context", source_slug=job.source_slug, source_base_url=bool(job.source_base_url), university_name=job.university_name)
 
         if job.field_name == FIELD_JOB_FIND_EMAIL:
             if job.contact_email:
                 self._trace("already_populated", target="contact_email")
                 return self._already_populated_result(job.field_name, job.contact_email)
+            admission_result = self._admission_gate(job, "contact_email", allow_confident_website=True)
+            if admission_result is not None:
+                return admission_result
             if self._requires_website_first(job) and not _website_is_confident(job):
                 self._trace("dependency_wait", reason="website_not_confident")
                 raise RetryableJobError(
@@ -610,6 +614,9 @@ class FieldJobEngine:
                 )
             match = self._find_email_candidate(job)
             if match is None:
+                if self._should_complete_provider_degraded(job):
+                    self._trace("provider_degraded", target="contact_email")
+                    return self._provider_degraded_result(job, "contact_email")
                 self._trace("no_candidate", target="contact_email")
                 self._emit_candidate_rejection_summary(job, target="email")
                 raise self._no_candidate_error(job, "No candidate email found in provenance, chapter website, or search results")
@@ -620,6 +627,9 @@ class FieldJobEngine:
             if job.instagram_url:
                 self._trace("already_populated", target="instagram_url")
                 return self._already_populated_result(job.field_name, job.instagram_url)
+            admission_result = self._admission_gate(job, "instagram_url")
+            if admission_result is not None:
+                return admission_result
             match = self._find_instagram_candidate(job)
             if match is not None:
                 self._trace("candidate_selected", target="instagram_url", confidence=round(match.confidence, 4), provider=match.source_provider)
@@ -628,6 +638,9 @@ class FieldJobEngine:
             if fallback_result is not None:
                 self._trace("inactive_resolution", target="instagram_url")
                 return fallback_result
+            if self._should_complete_provider_degraded(job):
+                self._trace("provider_degraded", target="instagram_url")
+                return self._provider_degraded_result(job, "instagram_url")
             self._trace("no_candidate", target="instagram_url")
             self._emit_candidate_rejection_summary(job, target="instagram")
             raise self._no_candidate_error(job, "No candidate instagram URL found in provenance, chapter website, or search results")
@@ -637,8 +650,14 @@ class FieldJobEngine:
             if existing_website:
                 self._trace("already_populated", target="website_url")
                 return self._already_populated_result(job.field_name, existing_website)
+            admission_result = self._admission_gate(job, "website_url")
+            if admission_result is not None:
+                return admission_result
             match = self._find_website_candidate(job)
             if match is None:
+                if self._should_complete_provider_degraded(job):
+                    self._trace("provider_degraded", target="website_url")
+                    return self._provider_degraded_result(job, "website_url")
                 self._trace("no_candidate", target="website_url")
                 self._emit_candidate_rejection_summary(job, target="website")
                 raise self._no_candidate_error(job, "No candidate website URL available")
@@ -652,6 +671,60 @@ class FieldJobEngine:
             return self._verify_school_match(job)
 
         raise RetryableJobError(f"Unsupported field job type: {job.field_name}", reason_code="dependency_wait")
+
+    def _admission_gate(
+        self,
+        job: FieldJob,
+        target_field: str,
+        *,
+        allow_confident_website: bool = False,
+    ) -> FieldJobResult | None:
+        self._trace("admission_gate", target=target_field)
+        if self._payload_int(job.payload.get("terminal_no_signal_count")) > 0 and int(job.attempts or 0) > 1:
+            return self._terminal_no_signal_result(job, target_field, reason_code="cached_no_signal")
+        chapter_name = (job.chapter_name or "").strip()
+        school = (job.university_name or "").strip()
+        school_ok = bool(school) and not _is_low_signal_university_name(school)
+        chapter_ok = bool(chapter_name)
+        if chapter_ok and (school_ok or (allow_confident_website and _website_is_confident(job))):
+            return None
+        return self._terminal_no_signal_result(job, target_field, reason_code="not_enough_identity")
+
+    def _terminal_no_signal_result(self, job: FieldJob, target_field: str, *, reason_code: str) -> FieldJobResult:
+        state_key = target_field
+        return FieldJobResult(
+            chapter_updates={},
+            completed_payload={
+                "status": "terminal_no_signal",
+                "field": target_field,
+                "reasonCode": reason_code,
+                "decision_trace": self._build_decision_trace_summary(),
+                "rejection_summary": self._candidate_rejection_summary_payload(),
+            },
+            field_state_updates={state_key: "missing"},
+        )
+
+    def _provider_degraded_result(self, job: FieldJob, target_field: str) -> FieldJobResult:
+        state_key = target_field
+        return FieldJobResult(
+            chapter_updates={},
+            completed_payload={
+                "status": "provider_degraded",
+                "field": target_field,
+                "reasonCode": "provider_degraded",
+                "decision_trace": self._build_decision_trace_summary(),
+                "rejection_summary": self._candidate_rejection_summary_payload(),
+            },
+            field_state_updates={state_key: job.field_states.get(state_key, "missing") or "missing"},
+        )
+
+    def _should_complete_provider_degraded(self, job: FieldJob) -> bool:
+        if not self._search_errors_encountered:
+            return False
+        if self._search_queries_attempted <= 0 or self._search_queries_failed < self._search_queries_attempted:
+            return False
+        queue_state = ((job.payload.get("contactResolution") or {}).get("queueState") if isinstance(job.payload.get("contactResolution"), dict) else None) or "actionable"
+        return queue_state == "deferred" and self._payload_int(job.payload.get("transient_provider_failures")) >= self._transient_short_retries and int(job.attempts or 0) > 1
 
     def _candidate_result(self, job: FieldJob, match: CandidateMatch, target_field: str) -> FieldJobResult:
         expected_kind = {
@@ -679,6 +752,18 @@ class FieldJobEngine:
             raise self._no_candidate_error(job, f"Candidate kind mismatch for {target_field}; discovered {sanitized.kind.value}")
         match.value = sanitized.value
 
+        base_source_slug = job.source_slug or job.payload.get("sourceSlug") or "search-enrichment"
+        provenance_records = [
+            ProvenanceRecord(
+                source_slug=base_source_slug,
+                source_url=match.source_url,
+                field_name=target_field,
+                field_value=match.value,
+                source_snippet=match.source_snippet[:400],
+                confidence=match.confidence,
+            )
+        ]
+
         write_threshold = self._write_threshold(job, target_field, match)
         if match.confidence < write_threshold:
             return FieldJobResult(
@@ -688,9 +773,12 @@ class FieldJobEngine:
                     "value": match.value,
                     "confidence": f"{match.confidence:.2f}",
                     "source_url": match.source_url,
+                    "query": match.query,
+                    "provider": match.source_provider,
                     "decision_trace": self._build_decision_trace_summary(),
                     "rejection_summary": self._candidate_rejection_summary_payload(),
                 },
+                provenance_records=provenance_records,
                 review_item=ReviewItemCandidate(
                     item_type="search_candidate_review",
                     reason=f"Search enrichment found only a low-confidence candidate for {target_field}",
@@ -703,6 +791,7 @@ class FieldJobEngine:
                         "sourceUrl": match.source_url,
                         "extractionNotes": match.source_snippet,
                         "query": match.query,
+                        "provider": match.source_provider,
                         "decisionTrace": self._build_decision_trace_summary(),
                         "rejectionSummary": self._candidate_rejection_summary_payload(),
                     },
@@ -725,6 +814,7 @@ class FieldJobEngine:
             target_field: match.value,
             "confidence": f"{match.confidence:.2f}",
             "source_url": match.source_url,
+            "provider": match.source_provider,
             "decision_trace": self._build_decision_trace_summary(),
         }
         if match.query:
@@ -732,20 +822,10 @@ class FieldJobEngine:
         if match.related_website_url and target_field != "website_url":
             completed_payload["related_website_url"] = match.related_website_url
 
-        provenance_records = [
-            ProvenanceRecord(
-                source_slug=job.source_slug or job.payload.get("sourceSlug") or "search-enrichment",
-                source_url=match.source_url,
-                field_name=target_field,
-                field_value=match.value,
-                source_snippet=match.source_snippet[:400],
-                confidence=match.confidence,
-            )
-        ]
         if target_field != "website_url" and chapter_updates.get("website_url"):
             provenance_records.append(
                 ProvenanceRecord(
-                    source_slug=job.source_slug or job.payload.get("sourceSlug") or "search-enrichment",
+                    source_slug=base_source_slug,
                     source_url=match.source_url,
                     field_name="website_url",
                     field_value=chapter_updates["website_url"],
@@ -2079,6 +2159,12 @@ class FieldJobEngine:
 
     def _build_requeue_payload_patch(self, job: FieldJob, exc: "RetryableJobError", backoff_seconds: int) -> dict[str, object]:
         patch: dict[str, object] = {}
+        queue_state = "deferred" if exc.reason_code in {"transient_network", "dependency_wait", "provider_low_signal"} else "actionable"
+        patch["contactResolution"] = {
+            "queueState": queue_state,
+            "reasonCode": exc.reason_code,
+            "nextBackoffSeconds": backoff_seconds,
+        }
         if exc.reason_code == "transient_network":
             previous_transient_failures = self._payload_int(job.payload.get("transient_provider_failures"))
             patch["transient_provider_failures"] = previous_transient_failures + 1
@@ -2087,6 +2173,8 @@ class FieldJobEngine:
             patch["transient_provider_last_backoff_seconds"] = backoff_seconds
         if self._last_provider_attempts:
             patch["provider_attempts"] = self._last_provider_attempts[-8:]
+        if exc.reason_code in {"terminal_no_candidate", "provider_low_signal"}:
+            patch["terminal_no_signal_count"] = self._payload_int(job.payload.get("terminal_no_signal_count")) + 1
         return patch
 
     def _should_abort_search_fanout(self, query_results: list[SearchResult]) -> bool:
@@ -3979,6 +4067,9 @@ def _website_is_confident(job: FieldJob) -> bool:
         return False
     state = (job.field_states or {}).get("website_url")
     return state not in {"low_confidence", "missing"}
+
+
+
 
 
 

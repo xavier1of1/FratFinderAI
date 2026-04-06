@@ -1,4 +1,5 @@
 import { getDbPool } from "../db";
+import { normalizeInstagramUrl } from "../social";
 import type { ChapterActionResult, ChapterFieldName, ChapterListItem, ChapterListResponse, ChapterMapStateSummary } from "../types";
 
 const STATE_NORMALIZATION_CASE = `
@@ -111,7 +112,10 @@ export async function listChapters(params: {
     [search, limit, offset]
   );
 
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    instagramUrl: normalizeInstagramUrl(row.instagramUrl)
+  }));
 }
 
 export async function getChapterListMetadata(params: {
@@ -259,7 +263,14 @@ export async function updateChapterRecord(params: {
     ]
   );
 
-  return rows[0] ?? null;
+  const row = rows[0] ?? null;
+  if (!row) {
+    return null;
+  }
+  return {
+    ...row,
+    instagramUrl: normalizeInstagramUrl(row.instagramUrl)
+  };
 }
 
 export async function deleteChapterRecords(ids: string[]): Promise<ChapterActionResult> {

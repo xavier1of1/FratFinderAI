@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 import time
@@ -13,18 +14,20 @@ from fratfinder_crawler.adapters import AdapterRegistry
 from fratfinder_crawler.adaptive import AdaptivePolicy
 from fratfinder_crawler.config import Settings
 from fratfinder_crawler.db.connection import get_connection
+from fratfinder_crawler.db import CrawlerRepository, RequestGraphRepository
 from fratfinder_crawler.discovery import discover_source
-from fratfinder_crawler.db.repository import CrawlerRepository
 from fratfinder_crawler.field_jobs import FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
+from fratfinder_crawler.normalization import classify_chapter_validity
 from fratfinder_crawler.search import SearchClient, SearchUnavailableError
-from fratfinder_crawler.models import CrawlMetrics, EpochMetric
+from fratfinder_crawler.models import CrawlMetrics, EpochMetric, ExtractedChapter, FieldJob
 from fratfinder_crawler.orchestration import (
     AdaptiveCrawlOrchestrator,
     CrawlOrchestrator,
     FieldJobGraphRuntime,
     FieldJobSupervisorGraphRuntime,
+    RequestSupervisorGraphRuntime,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -39,6 +42,7 @@ class CrawlService:
         source_slug: str | None = None,
         runtime_mode: str | None = None,
         policy_mode: str = "live",
+        policy_version: str | None = None,
     ) -> dict[str, object]:
         aggregate = CrawlMetrics()
         effective_runtime_mode = self._resolve_runtime_mode(runtime_mode)
@@ -46,7 +50,12 @@ class CrawlService:
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
             sources = repository.load_sources(source_slug=source_slug)
-            orchestrator = self._build_orchestrator(repository, effective_runtime_mode, policy_mode=policy_mode)
+            orchestrator = self._build_orchestrator(
+                repository,
+                effective_runtime_mode,
+                policy_mode=policy_mode,
+                policy_version=policy_version,
+            )
 
             log_event(
                 LOGGER,
@@ -79,6 +88,7 @@ class CrawlService:
         result = {
             "runtime_mode": effective_runtime_mode,
             "policy_mode": policy_mode,
+            "policy_version": (policy_version or self._settings.crawler_policy_version),
             "pages_processed": aggregate.pages_processed,
             "records_seen": aggregate.records_seen,
             "records_upserted": aggregate.records_upserted,
@@ -90,6 +100,132 @@ class CrawlService:
 
     def run_legacy(self, source_slug: str | None = None) -> dict[str, int]:
         return self.run(source_slug=source_slug, runtime_mode="legacy")
+
+    def run_request(
+        self,
+        *,
+        request_id: str,
+        runtime_mode: str = "v3_request_supervisor",
+        crawl_runtime_mode: str | None = None,
+        field_job_runtime_mode: str | None = None,
+        graph_durability: str | None = None,
+    ) -> dict[str, object]:
+        effective_crawl_runtime_mode = self._resolve_v3_crawl_runtime_mode(crawl_runtime_mode)
+        effective_field_job_runtime_mode = self._resolve_v3_field_job_runtime_mode(field_job_runtime_mode)
+        effective_graph_durability = self._resolve_field_job_graph_durability(
+            graph_durability or self._settings.crawler_v3_field_job_graph_durability
+        )
+
+        with get_connection(self._settings) as connection:
+            runtime = RequestSupervisorGraphRuntime(
+                request_repository=RequestGraphRepository(connection),
+                crawler_repository=CrawlerRepository(connection),
+                worker_id=self._settings.crawler_v3_request_worker_id,
+                runtime_mode=runtime_mode,
+                crawl_runtime_mode=effective_crawl_runtime_mode,
+                field_job_runtime_mode=effective_field_job_runtime_mode,
+                field_job_graph_durability=effective_graph_durability,
+                free_recovery_attempts=self._settings.crawler_v3_free_recovery_attempts,
+                discover_source=self.discover_source,
+                run_crawl=self.run,
+                process_field_jobs=self.process_field_jobs,
+                search_preflight=self.search_preflight,
+                logger=LOGGER,
+            )
+            summary = runtime.run(request_id)
+
+        log_event(
+            LOGGER,
+            "request_graph_run_finished",
+            request_id=request_id,
+            runtime_mode=runtime_mode,
+            crawl_runtime_mode=effective_crawl_runtime_mode,
+            field_job_runtime_mode=effective_field_job_runtime_mode,
+            graph_durability=effective_graph_durability,
+            status=summary.get("status"),
+            terminal_reason=summary.get("terminalReason"),
+            crawl_run_id=summary.get("crawlRunId"),
+            records_seen=summary.get("recordsSeen"),
+            queue_remaining=summary.get("queueRemaining"),
+        )
+        return summary
+
+    def run_request_worker(
+        self,
+        *,
+        once: bool = False,
+        limit: int | None = None,
+        poll_seconds: int | None = None,
+        runtime_mode: str = "v3_request_supervisor",
+    ) -> dict[str, object]:
+        batch_limit = max(1, int(limit if limit is not None else self._settings.crawler_v3_request_batch_limit))
+        effective_poll_seconds = max(
+            1,
+            int(poll_seconds if poll_seconds is not None else self._settings.crawler_v3_request_poll_seconds),
+        )
+        summaries: list[dict[str, object]] = []
+        stale_recovered_total = 0
+        idle_cycles = 0
+
+        log_event(
+            LOGGER,
+            "request_worker_started",
+            worker_id=self._settings.crawler_v3_request_worker_id,
+            runtime_mode=runtime_mode,
+            once=once,
+            batch_limit=batch_limit,
+            poll_seconds=effective_poll_seconds,
+        )
+
+        while True:
+            with get_connection(self._settings) as connection:
+                request_repository = RequestGraphRepository(connection)
+                stale_recovered_total += request_repository.reconcile_stale_requests(
+                    self._settings.crawler_v3_request_stale_minutes
+                )
+                request = request_repository.claim_next_due_request(self._settings.crawler_v3_request_worker_id)
+
+            if request is None:
+                idle_cycles += 1
+                if once or len(summaries) >= batch_limit:
+                    break
+                time.sleep(effective_poll_seconds)
+                continue
+
+            idle_cycles = 0
+            log_event(
+                LOGGER,
+                "request_worker_claimed_request",
+                worker_id=self._settings.crawler_v3_request_worker_id,
+                request_id=request.id,
+                fraternity_slug=request.fraternity_slug,
+                source_slug=request.source_slug,
+                stage=request.stage,
+            )
+            summary = self.run_request(
+                request_id=request.id,
+                runtime_mode=runtime_mode,
+                crawl_runtime_mode=self._settings.crawler_v3_crawl_runtime_mode,
+                field_job_runtime_mode=self._settings.crawler_v3_field_job_runtime_mode,
+                graph_durability=self._settings.crawler_v3_field_job_graph_durability,
+            )
+            summaries.append(summary)
+            if once and len(summaries) >= batch_limit:
+                break
+
+        aggregate = {
+            "workerId": self._settings.crawler_v3_request_worker_id,
+            "runtimeMode": runtime_mode,
+            "processed": len(summaries),
+            "succeeded": sum(1 for item in summaries if item.get("status") == "succeeded"),
+            "paused": sum(1 for item in summaries if item.get("status") == "paused"),
+            "failed": sum(1 for item in summaries if item.get("status") == "failed"),
+            "staleRecovered": stale_recovered_total,
+            "idleCycles": idle_cycles,
+            "summaries": summaries,
+        }
+        log_event(LOGGER, "request_worker_finished", **aggregate)
+        return aggregate
 
     def adaptive_train_eval(
         self,
@@ -714,12 +850,22 @@ class CrawlService:
             return "legacy"
         return mode
 
+    def _resolve_v3_crawl_runtime_mode(self, runtime_mode: str | None = None) -> str:
+        mode = (runtime_mode or self._settings.crawler_v3_crawl_runtime_mode or "adaptive_primary").strip().lower()
+        if mode not in {"legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"}:
+            return "adaptive_primary"
+        return mode
+
+    def _resolve_v3_field_job_runtime_mode(self, runtime_mode: str | None = None) -> str:
+        return self._resolve_field_job_runtime_mode(runtime_mode or self._settings.crawler_v3_field_job_runtime_mode)
+
     def _build_orchestrator(
         self,
         repository: CrawlerRepository,
         runtime_mode: str,
         *,
         policy_mode: str = "live",
+        policy_version: str | None = None,
     ):
         if runtime_mode == "legacy":
             return CrawlOrchestrator(repository, HttpClient(self._settings), AdapterRegistry())
@@ -730,12 +876,13 @@ class CrawlService:
             settings=self._settings,
             runtime_mode=runtime_mode,
             policy_mode=policy_mode,
+            policy_version=policy_version,
         )
 
     def _resolve_field_job_runtime_mode(self, runtime_mode: str | None = None) -> str:
-        mode = (runtime_mode or self._settings.crawler_field_job_runtime_mode or "legacy").strip().lower()
+        mode = (runtime_mode or self._settings.crawler_field_job_runtime_mode or "langgraph_primary").strip().lower()
         if mode not in {"legacy", "langgraph_shadow", "langgraph_primary"}:
-            return "legacy"
+            return "langgraph_primary"
         return mode
 
     def _resolve_field_job_graph_durability(self, graph_durability: str | None = None) -> str:
@@ -743,6 +890,286 @@ class CrawlService:
         if durability not in {"exit", "async", "sync"}:
             return "sync"
         return durability
+
+    def _resolve_field_job_policy_pack(self, source_slug: str | None) -> dict[str, object]:
+        if not source_slug:
+            return {"name": "default"}
+        packs: dict[str, dict[str, object]] = {
+            "sigma-alpha-epsilon-main": {
+                "name": "wide_search_no_signal",
+                "worker_cap": 2,
+                "max_search_pages": 1,
+                "email_max_queries": 3,
+                "instagram_max_queries": 3,
+            },
+            "alpha-delta-gamma-main": {
+                "name": "invalid_heavy_directory",
+                "worker_cap": 2,
+                "max_search_pages": 1,
+                "email_max_queries": 2,
+                "instagram_max_queries": 2,
+                "force_long_repair_cooldown": True,
+            },
+            "pi-kappa-alpha-main": {
+                "name": "backlog_burn_preserve",
+                "worker_cap": 4,
+                "max_search_pages": 2,
+                "email_max_queries": 4,
+                "instagram_max_queries": 4,
+            },
+        }
+        return packs.get(source_slug, {"name": "default"})
+
+    def _reconcile_field_job_queue(
+        self,
+        repository: CrawlerRepository,
+        *,
+        source_slug: str | None,
+        field_name: str | None,
+        limit: int,
+        policy_pack: dict[str, object],
+    ) -> tuple[dict[str, int | bool], dict[str, int]]:
+        triage_summary: dict[str, int | bool] = {
+            "triaged": 0,
+            "invalidCancelled": 0,
+            "deferredLongCooldown": 0,
+            "repairQueued": 0,
+            "actionableRetained": 0,
+            "sourceInvaliditySaturated": False,
+        }
+        repair_summary: dict[str, int] = {
+            "queued": 0,
+            "running": 0,
+            "promotedToCanonical": 0,
+            "downgradedToProvisional": 0,
+            "confirmedInvalid": 0,
+            "repairExhausted": 0,
+            "reconciledHistorical": 0,
+        }
+        jobs = repository.list_queued_field_jobs_for_triage(limit=max(1, limit), source_slug=source_slug, field_name=field_name)
+        if not jobs:
+            return triage_summary, repair_summary
+
+        repairable_jobs_by_chapter: dict[str, list[FieldJob]] = {}
+        triage_summary["triaged"] = len(jobs)
+
+        for job in jobs:
+            decision = _classify_field_job_identity(job)
+            if decision.validity_class == "invalid_non_chapter":
+                repository.patch_queued_field_job(
+                    job.id,
+                    payload_patch={
+                        "queueTriage": {
+                            "outcome": "cancel_invalid",
+                            "validityClass": decision.validity_class,
+                            "invalidReason": decision.invalid_reason,
+                        },
+                        "contactResolution": {
+                            "queueState": "blocked_invalid",
+                            "validityClass": decision.validity_class,
+                            "reasonCode": decision.invalid_reason or "identity_semantically_invalid",
+                        },
+                    },
+                    status="failed",
+                    last_error=f"Canceled invalid historical field job: {decision.invalid_reason or 'invalid chapter identity'}",
+                    terminal_failure=True,
+                    completed_payload={
+                        "status": "blocked_invalid",
+                        "reasonCode": decision.invalid_reason or "identity_semantically_invalid",
+                        "validityClass": decision.validity_class,
+                    },
+                )
+                triage_summary["invalidCancelled"] = int(triage_summary["invalidCancelled"]) + 1
+                repair_summary["reconciledHistorical"] += 1
+                continue
+            if decision.validity_class == "canonical_valid":
+                repository.patch_queued_field_job(
+                    job.id,
+                    payload_patch={
+                        "queueTriage": {
+                            "outcome": "keep_actionable",
+                            "validityClass": decision.validity_class,
+                        },
+                        "contactResolution": {
+                            "queueState": "actionable",
+                            "validityClass": decision.validity_class,
+                        },
+                    },
+                    status="queued",
+                    scheduled_delay_seconds=0,
+                    last_error="",
+                    terminal_failure=False,
+                )
+                triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
+                repair_summary["reconciledHistorical"] += 1
+                continue
+            if decision.validity_class == "provisional_candidate":
+                repository.patch_queued_field_job(
+                    job.id,
+                    payload_patch={
+                        "queueTriage": {
+                            "outcome": "defer_long_cooldown",
+                            "validityClass": decision.validity_class,
+                            "repairReason": decision.repair_reason,
+                        },
+                        "contactResolution": {
+                            "queueState": "deferred",
+                            "validityClass": decision.validity_class,
+                            "reasonCode": decision.repair_reason or "broader_web_gated",
+                        },
+                    },
+                    status="queued",
+                    scheduled_delay_seconds=86_400,
+                    last_error="Deferred provisional chapter until canonical identity is established",
+                    terminal_failure=False,
+                )
+                triage_summary["deferredLongCooldown"] = int(triage_summary["deferredLongCooldown"]) + 1
+                repair_summary["reconciledHistorical"] += 1
+                continue
+            repairable_jobs_by_chapter.setdefault(job.chapter_id, []).append(job)
+
+        for chapter_jobs in repairable_jobs_by_chapter.values():
+            repair_summary["queued"] += len(chapter_jobs)
+            outcome = self._repair_chapter_identity(repository, chapter_jobs[0], policy_pack=policy_pack)
+            if outcome["status"] == "promoted_to_canonical_valid":
+                for job in chapter_jobs:
+                    repository.patch_queued_field_job(
+                        job.id,
+                        payload_patch={
+                            "queueTriage": {
+                                "outcome": "keep_actionable",
+                                "validityClass": "canonical_valid",
+                                "repairOutcome": outcome["status"],
+                            },
+                            "contactResolution": {
+                                "queueState": "actionable",
+                                "validityClass": "canonical_valid",
+                            },
+                        },
+                        status="queued",
+                        scheduled_delay_seconds=0,
+                        last_error="",
+                        terminal_failure=False,
+                    )
+                    triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
+                    repair_summary["reconciledHistorical"] += 1
+                repair_summary["promotedToCanonical"] += len(chapter_jobs)
+                continue
+
+            if outcome["status"] == "confirmed_invalid":
+                for job in chapter_jobs:
+                    repository.patch_queued_field_job(
+                        job.id,
+                        payload_patch={
+                            "queueTriage": {
+                                "outcome": "cancel_invalid",
+                                "validityClass": "invalid_non_chapter",
+                                "invalidReason": outcome.get("reason") or "identity_semantically_invalid",
+                                "repairOutcome": outcome["status"],
+                            },
+                            "contactResolution": {
+                                "queueState": "blocked_invalid",
+                                "validityClass": "invalid_non_chapter",
+                                "reasonCode": outcome.get("reason") or "identity_semantically_invalid",
+                            },
+                        },
+                        status="failed",
+                        last_error=f"Canceled invalid repair candidate: {outcome.get('reason') or 'identity_semantically_invalid'}",
+                        terminal_failure=True,
+                        completed_payload={
+                            "status": "blocked_invalid",
+                            "reasonCode": outcome.get("reason") or "identity_semantically_invalid",
+                            "validityClass": "invalid_non_chapter",
+                        },
+                    )
+                    triage_summary["invalidCancelled"] = int(triage_summary["invalidCancelled"]) + 1
+                    repair_summary["reconciledHistorical"] += 1
+                repair_summary["confirmedInvalid"] += len(chapter_jobs)
+                continue
+
+            delay_seconds = 86_400 if policy_pack.get("force_long_repair_cooldown") else 43_200
+            outcome_key = "repair_exhausted"
+            if outcome["status"] == "downgraded_to_provisional":
+                outcome_key = "downgraded_to_provisional"
+            for job in chapter_jobs:
+                repository.patch_queued_field_job(
+                    job.id,
+                    payload_patch={
+                        "queueTriage": {
+                            "outcome": "requires_entity_repair",
+                            "validityClass": "repairable_candidate",
+                            "repairReason": outcome.get("reason") or "identity_semantically_incomplete",
+                            "repairOutcome": outcome_key,
+                        },
+                        "contactResolution": {
+                            "queueState": "deferred",
+                            "validityClass": "repairable_candidate",
+                            "reasonCode": outcome.get("reason") or "repair_exhausted",
+                        },
+                    },
+                    status="queued",
+                    scheduled_delay_seconds=delay_seconds,
+                    last_error="Deferred until chapter identity repair succeeds",
+                    terminal_failure=False,
+                )
+                triage_summary["repairQueued"] = int(triage_summary["repairQueued"]) + 1
+                repair_summary["reconciledHistorical"] += 1
+            if outcome_key == "downgraded_to_provisional":
+                repair_summary["downgradedToProvisional"] += len(chapter_jobs)
+            else:
+                repair_summary["repairExhausted"] += len(chapter_jobs)
+
+        triaged = int(triage_summary["triaged"])
+        blocked = int(triage_summary["invalidCancelled"]) + int(triage_summary["repairQueued"]) + int(triage_summary["deferredLongCooldown"])
+        if triaged >= 12 and blocked / max(triaged, 1) >= 0.7:
+            triage_summary["sourceInvaliditySaturated"] = True
+
+        return triage_summary, repair_summary
+
+    def _repair_chapter_identity(
+        self,
+        repository: CrawlerRepository,
+        job: FieldJob,
+        *,
+        policy_pack: dict[str, object],
+    ) -> dict[str, str]:
+        snippets = repository.fetch_provenance_snippets(job.chapter_id)
+        repaired_university = _infer_university_name_for_job(job, snippets)
+        if repaired_university:
+            repaired_decision = classify_chapter_validity(
+                ExtractedChapter(
+                    name=job.chapter_name,
+                    university_name=repaired_university,
+                    website_url=job.website_url,
+                    instagram_url=job.instagram_url,
+                    contact_email=job.contact_email,
+                    source_url=(job.payload.get("sourceListUrl") if isinstance(job.payload.get("sourceListUrl"), str) else job.source_base_url) or "",
+                    source_confidence=0.9,
+                ),
+                source_class="national",
+                provenance="queue_repair",
+            )
+            if repaired_decision.validity_class == "canonical_valid":
+                repository.update_chapter_identity_repair(
+                    chapter_id=job.chapter_id,
+                    university_name=repaired_university,
+                    field_state_updates={"university_name": "found"},
+                    validity_class="canonical_valid",
+                    repair_metadata={
+                        "status": "promoted_to_canonical_valid",
+                        "sourceSlug": job.source_slug,
+                        "policyPack": str(policy_pack.get("name") or "default"),
+                    },
+                )
+                return {"status": "promoted_to_canonical_valid", "reason": "institutional_pattern_repair"}
+
+        current_decision = _classify_field_job_identity(job)
+        if current_decision.validity_class == "invalid_non_chapter":
+            return {"status": "confirmed_invalid", "reason": current_decision.invalid_reason or "identity_semantically_invalid"}
+
+        if repaired_university:
+            return {"status": "downgraded_to_provisional", "reason": "repair_not_canonical"}
+        return {"status": "repair_exhausted", "reason": "identity_semantically_incomplete"}
 
     def process_field_jobs(
         self,
@@ -764,6 +1191,24 @@ class CrawlService:
 
         stale_jobs_recovered = 0
         stale_graph_runs_recovered = 0
+        triage_summary: dict[str, int | bool] = {
+            "triaged": 0,
+            "invalidCancelled": 0,
+            "deferredLongCooldown": 0,
+            "repairQueued": 0,
+            "actionableRetained": 0,
+            "sourceInvaliditySaturated": False,
+        }
+        repair_summary: dict[str, int] = {
+            "queued": 0,
+            "running": 0,
+            "promotedToCanonical": 0,
+            "downgradedToProvisional": 0,
+            "confirmedInvalid": 0,
+            "repairExhausted": 0,
+            "reconciledHistorical": 0,
+        }
+        policy_pack = self._resolve_field_job_policy_pack(source_slug)
 
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
@@ -774,6 +1219,13 @@ class CrawlService:
                 stale_graph_runs_recovered = repository.reconcile_stale_field_job_graph_runs(
                     self._settings.crawler_field_job_graph_run_stale_minutes
                 )
+            triage_summary, repair_summary = self._reconcile_field_job_queue(
+                repository,
+                source_slug=source_slug,
+                field_name=field_name,
+                limit=max(limit * 6, 120) if source_slug is None else max(limit * 20, 1000),
+                policy_pack=policy_pack,
+            )
 
         if stale_jobs_recovered or stale_graph_runs_recovered:
             log_event(
@@ -785,6 +1237,8 @@ class CrawlService:
                 stale_graph_run_minutes=self._settings.crawler_field_job_graph_run_stale_minutes,
                 source_slug=source_slug,
                 field_name=field_name,
+                triage_summary=triage_summary,
+                repair_summary=repair_summary,
             )
 
         if preflight_enabled and self._settings.crawler_search_enabled:
@@ -807,10 +1261,21 @@ class CrawlService:
                     return result
                 degraded_mode = True
                 effective_workers = max(1, min(effective_workers, self._settings.crawler_search_degraded_worker_cap))
+        if policy_pack.get("worker_cap") is not None:
+            effective_workers = max(1, min(effective_workers, int(policy_pack["worker_cap"])))
 
         worker_limits = _distribute_limit(limit, effective_workers)
         if not worker_limits:
-            result = {"processed": 0, "requeued": 0, "failed_terminal": 0, "runtime_fallback_count": 0, "runtime_mode_used": effective_runtime_mode}
+            result = {
+                "processed": 0,
+                "requeued": 0,
+                "failed_terminal": 0,
+                "runtime_fallback_count": 0,
+                "runtime_mode_used": effective_runtime_mode,
+                "queue_triage": triage_summary,
+                "chapter_repair": repair_summary,
+                "policy_pack": str(policy_pack.get("name") or "default"),
+            }
             log_event(
                 LOGGER,
                 "field_job_batch_finished",
@@ -838,6 +1303,9 @@ class CrawlService:
         aggregate = supervisor.run()
         aggregate["stale_jobs_recovered"] = stale_jobs_recovered
         aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
+        aggregate["queue_triage"] = triage_summary
+        aggregate["chapter_repair"] = repair_summary
+        aggregate["policy_pack"] = str(policy_pack.get("name") or "default")
 
         log_event(
             LOGGER,
@@ -865,11 +1333,18 @@ class CrawlService:
         runtime_mode: str = "legacy",
         graph_durability: str = "sync",
     ) -> dict[str, object]:
+        policy_pack = self._resolve_field_job_policy_pack(source_slug)
         search_settings = self._settings
         max_search_pages = self._settings.crawler_search_max_pages_per_job
         dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
         email_max_queries = self._settings.crawler_search_email_max_queries
         instagram_max_queries = self._settings.crawler_search_instagram_max_queries
+        if policy_pack.get("max_search_pages") is not None:
+            max_search_pages = min(max_search_pages, int(policy_pack["max_search_pages"]))
+        if policy_pack.get("email_max_queries") is not None:
+            email_max_queries = min(email_max_queries, int(policy_pack["email_max_queries"]))
+        if policy_pack.get("instagram_max_queries") is not None:
+            instagram_max_queries = min(instagram_max_queries, int(policy_pack["instagram_max_queries"]))
         if degraded_mode:
             search_settings = self._settings.model_copy(
                 update={"crawler_search_max_results": self._settings.crawler_search_degraded_max_results}
@@ -1463,6 +1938,77 @@ def _probe_url(url: str, settings: Settings) -> tuple[int | None, str | None, st
         parsed = urlparse(url)
         fallback_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.scheme and parsed.netloc else url
         return None, fallback_url, str(exc)
+
+
+_REPAIR_SCHOOL_PATTERNS = (
+    re.compile(r"\b(University of [A-Z][A-Za-z&.' -]{2,80})\b"),
+    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} State University)\b"),
+    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} University)\b"),
+    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} College)\b"),
+    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} Institute(?: of [A-Z][A-Za-z&.' -]{2,80})?)\b"),
+)
+
+
+def _classify_field_job_identity(job: FieldJob):
+    repair_context_parts = [job.chapter_slug]
+    candidate_school = job.payload.get("candidateSchoolName")
+    if isinstance(candidate_school, str) and candidate_school.strip():
+        repair_context_parts.append(candidate_school)
+    return classify_chapter_validity(
+        ExtractedChapter(
+            name=job.chapter_name,
+            university_name=job.university_name,
+            website_url=job.website_url,
+            instagram_url=job.instagram_url,
+            contact_email=job.contact_email,
+            source_snippet=" ".join(part for part in repair_context_parts if part),
+            source_url=(job.payload.get("sourceListUrl") if isinstance(job.payload.get("sourceListUrl"), str) else job.source_base_url) or "",
+            source_confidence=0.9,
+        ),
+        source_class="national",
+        provenance="historical_queue",
+    )
+
+
+def _infer_university_name_for_job(job: FieldJob, snippets: list[str]) -> str | None:
+    candidates: list[str] = []
+    payload_candidate = job.payload.get("candidateSchoolName")
+    if isinstance(payload_candidate, str) and payload_candidate.strip():
+        candidates.append(payload_candidate.strip())
+    for snippet in snippets[:20]:
+        text = snippet.strip()
+        if not text:
+            continue
+        for pattern in _REPAIR_SCHOOL_PATTERNS:
+            for match in pattern.findall(text):
+                candidate = " ".join(str(match).split())
+                if 4 <= len(candidate) <= 96:
+                    candidates.append(candidate)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for candidate in candidates:
+        normalized = candidate.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(candidate)
+    for candidate in deduped:
+        decision = classify_chapter_validity(
+            ExtractedChapter(
+                name=job.chapter_name,
+                university_name=candidate,
+                website_url=job.website_url,
+                instagram_url=job.instagram_url,
+                contact_email=job.contact_email,
+                source_url=(job.payload.get("sourceListUrl") if isinstance(job.payload.get("sourceListUrl"), str) else job.source_base_url) or "",
+                source_confidence=0.9,
+            ),
+            source_class="national",
+            provenance="queue_repair_candidate",
+        )
+        if decision.validity_class == "canonical_valid":
+            return candidate
+    return None
 
 
 def _utc_now_iso() -> str:

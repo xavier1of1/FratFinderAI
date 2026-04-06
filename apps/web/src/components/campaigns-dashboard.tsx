@@ -6,8 +6,9 @@ import { buildCampaignReport } from "@/lib/campaign-report";
 import { MetricCard } from "@/components/metric-card";
 import { ProgressMeter } from "@/components/progress-meter";
 import { StatusPill } from "@/components/status-pill";
-import { computeRuntimeComparison } from "@/lib/runtime-comparison";
+import { computeChapterSearchComparison, computeRuntimeComparison } from "@/lib/runtime-comparison";
 import type { AdaptiveInsights, CampaignRun, CampaignRunConfig, CrawlRunListItem } from "@/lib/types";
+import { buildDefaultV4ProgramConfig } from "@/lib/v4-program";
 
 interface ApiSuccess<T> {
   success: true;
@@ -81,6 +82,24 @@ function formatNumber(value: number | null | undefined, digits = 0): string {
   return value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+function computeCampaignQueueEfficiency(summary: CampaignRun["summary"] | null | undefined): {
+  totalEvents: number;
+  requeueRate: number;
+  terminalRate: number;
+  burnDown: number;
+} {
+  const totalProcessed = Number(summary?.totalProcessed ?? 0);
+  const totalRequeued = Number(summary?.totalRequeued ?? 0);
+  const totalFailedTerminal = Number(summary?.totalFailedTerminal ?? 0);
+  const totalEvents = Math.max(totalProcessed + totalRequeued + totalFailedTerminal, 1);
+  return {
+    totalEvents,
+    requeueRate: totalRequeued / totalEvents,
+    terminalRate: totalFailedTerminal / totalEvents,
+    burnDown: Math.max(0, Math.abs(Number(summary?.queueDepthDelta ?? 0))),
+  };
+}
+
 async function fetchCampaigns(): Promise<CampaignRun[]> {
   const response = await fetch("/api/campaign-runs?limit=100", { cache: "no-store" });
   const payload = (await response.json()) as ApiEnvelope<CampaignRun[]>;
@@ -93,6 +112,17 @@ async function fetchCampaigns(): Promise<CampaignRun[]> {
   return sortCampaigns(payload.data);
 }
 
+async function fetchCampaignDetail(id: string): Promise<CampaignRun> {
+  const response = await fetch(`/api/campaign-runs/${id}`, { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<CampaignRun>;
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch campaign detail: ${response.status}`);
+  }
+  return payload.data;
+}
 
 async function fetchCrawlRuns(): Promise<CrawlRunListItem[]> {
   const response = await fetch("/api/runs?limit=800", { cache: "no-store" });
@@ -157,6 +187,7 @@ export function CampaignsDashboard({
   const [campaigns, setCampaigns] = useState<CampaignRun[]>(sortCampaigns(initialCampaigns));
   const [crawlRuns, setCrawlRuns] = useState<CrawlRunListItem[]>(initialRuns);
   const [selectedId, setSelectedId] = useState<string | null>(initialCampaigns[0]?.id ?? null);
+  const [selectedCampaignDetail, setSelectedCampaignDetail] = useState<CampaignRun | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -175,7 +206,7 @@ export function CampaignsDashboard({
     controlFraternitySlugs: ""
   });
 
-  const selectedCampaign = useMemo(() => {
+  const selectedCampaignSummary = useMemo(() => {
     if (!campaigns.length) {
       return null;
     }
@@ -184,6 +215,16 @@ export function CampaignsDashboard({
     }
     return campaigns.find((item) => item.id === selectedId) ?? campaigns[0] ?? null;
   }, [campaigns, selectedId]);
+
+  const selectedCampaign = useMemo(() => {
+    if (!selectedCampaignSummary) {
+      return null;
+    }
+    if (selectedCampaignDetail && selectedCampaignDetail.id === selectedCampaignSummary.id) {
+      return selectedCampaignDetail;
+    }
+    return selectedCampaignSummary;
+  }, [selectedCampaignDetail, selectedCampaignSummary]);
 
   const activeCount = useMemo(
     () => campaigns.filter((item) => item.status === "queued" || item.status === "running").length,
@@ -204,10 +245,19 @@ export function CampaignsDashboard({
       setCampaigns(campaignData);
       setCrawlRuns(runData);
       const selectedStillExists = selectedId ? campaignData.some((item) => item.id === selectedId) : false;
+      let nextSelectedId = selectedId;
       if (options?.selectNewest && campaignData[0]) {
+        nextSelectedId = campaignData[0].id;
         setSelectedId(campaignData[0].id);
       } else if (!selectedStillExists) {
+        nextSelectedId = campaignData[0]?.id ?? null;
         setSelectedId(campaignData[0]?.id ?? null);
+      }
+      if (nextSelectedId) {
+        const detail = await fetchCampaignDetail(nextSelectedId);
+        setSelectedCampaignDetail(detail);
+      } else {
+        setSelectedCampaignDetail(null);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -225,6 +275,16 @@ export function CampaignsDashboard({
     }, 5000);
     return () => clearInterval(interval);
   }, [activeCount]);
+
+  useEffect(() => {
+    if (!selectedCampaignSummary) {
+      setSelectedCampaignDetail(null);
+      return;
+    }
+    void fetchCampaignDetail(selectedCampaignSummary.id)
+      .then((detail) => setSelectedCampaignDetail(detail))
+      .catch((error) => setErrorMessage(error instanceof Error ? error.message : String(error)));
+  }, [selectedCampaignSummary?.id]);
 
   async function handleCreateCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -266,6 +326,34 @@ export function CampaignsDashboard({
         throw new Error(`Failed to create campaign (${response.status})`);
       }
 
+      await refreshCampaigns({ selectNewest: true });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function launchV4Program() {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch("/api/campaign-runs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          config: buildDefaultV4ProgramConfig()
+        })
+      });
+      const result = (await response.json()) as ApiEnvelope<CampaignRun>;
+      if (!response.ok || !result.success) {
+        if (!result.success) {
+          throw new Error(`${result.error.code}: ${result.error.message}`);
+        }
+        throw new Error(`Failed to launch V4 program (${response.status})`);
+      }
       await refreshCampaigns({ selectNewest: true });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -322,6 +410,34 @@ export function CampaignsDashboard({
       }),
     [crawlRuns, campaignSourceSlugs]
   );
+  const chapterSearchComparison = useMemo(
+    () =>
+      computeChapterSearchComparison(crawlRuns, {
+        sourceSlugs: campaignSourceSlugs
+      }),
+    [crawlRuns, campaignSourceSlugs]
+  );
+  const contactQueueEfficiency = useMemo(() => computeCampaignQueueEfficiency(displaySummary), [displaySummary]);
+  const lowConfidenceDrift = useMemo(() => {
+    const driftRows = selectedCampaign?.telemetry.reviewReasonDrift ?? [];
+    return driftRows.reduce(
+      (accumulator, row) => {
+        const reason = row.reason.toLowerCase();
+        const delta = Number(row.delta ?? 0);
+        if (reason.includes("low-confidence") || reason.includes("low confidence")) {
+          accumulator.lowConfidence += delta;
+        }
+        if (reason.includes("contact_email")) {
+          accumulator.email += delta;
+        }
+        if (reason.includes("website_url")) {
+          accumulator.website += delta;
+        }
+        return accumulator;
+      },
+      { lowConfidence: 0, email: 0, website: 0 }
+    );
+  }, [selectedCampaign?.telemetry.reviewReasonDrift]);
 
   useEffect(() => {
     if (!selectedCampaign) {
@@ -429,6 +545,9 @@ export function CampaignsDashboard({
             <button type="submit" className="buttonPrimaryAuto" disabled={isSubmitting}>
               {isSubmitting ? "Launching..." : "Launch Campaign"}
             </button>
+            <button type="button" className="buttonSecondary" disabled={isSubmitting} onClick={() => void launchV4Program()}>
+              {isSubmitting ? "Launching..." : "Launch V4 RL Program"}
+            </button>
             <button type="button" className="buttonSecondary" disabled={isRefreshing} onClick={() => void refreshCampaigns()}>
               {isRefreshing ? "Refreshing..." : "Refresh"}
             </button>
@@ -495,6 +614,150 @@ export function CampaignsDashboard({
                 <MetricCard label="Instagram Coverage" value={formatPercent(displaySummary?.instagramCoverageRate)} />
                 <MetricCard label="Queue Delta" value={formatNumber(displaySummary?.queueDepthDelta)} />
                 <MetricCard label="Processed Jobs" value={formatNumber(displaySummary?.totalProcessed)} />
+              </div>
+
+              {selectedCampaign.config.programMode === "v4_rl_improvement" ? (
+                <>
+                  <h3>V4 Program Status</h3>
+                  <div className="metrics">
+                    <MetricCard label="Program Phase" value={selectedCampaign.telemetry.programPhase ?? "n/a"} />
+                    <MetricCard label="Policy Version" value={selectedCampaign.telemetry.activePolicyVersion ?? "n/a"} />
+                    <MetricCard label="Policy Snapshot" value={selectedCampaign.telemetry.activePolicySnapshotId ?? "n/a"} />
+                    <MetricCard
+                      label="Delayed Rewards"
+                      value={formatNumber(selectedCampaign.telemetry.delayedRewardHealth?.delayedRewardEventCount)}
+                    />
+                    <MetricCard
+                      label="Placeholder Reviews"
+                      value={formatNumber(selectedCampaign.telemetry.delayedRewardHealth?.placeholderReviewCount)}
+                    />
+                    <MetricCard
+                      label="Overlong Reviews"
+                      value={formatNumber(selectedCampaign.telemetry.delayedRewardHealth?.overlongReviewCount)}
+                    />
+                  </div>
+                  {selectedCampaign.telemetry.queueStallAlert?.active ? (
+                    <div className="warningBanner">
+                      <strong>Queue stall alert.</strong> No meaningful processed-job movement has been observed since{" "}
+                      <code>{formatTimestamp(selectedCampaign.telemetry.queueStallAlert.since)}</code> while queued backlog remains at{" "}
+                      <code>{formatNumber(selectedCampaign.telemetry.queueStallAlert.queuedDepth)}</code>.
+                    </div>
+                  ) : null}
+                  {selectedCampaign.telemetry.acceptanceGate ? (
+                    <div className="tableWrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Acceptance Gate</th>
+                            <th>Value</th>
+                            <th>Target</th>
+                            <th>Passed</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCampaign.telemetry.acceptanceGate.checks.map((check) => (
+                            <tr key={check.label}>
+                              <td>{check.label}</td>
+                              <td>{check.value}</td>
+                              <td>{check.target}</td>
+                              <td>{check.passed ? "yes" : "no"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+
+              <h3>Contact Resolution Slice</h3>
+              <div className="comparisonGrid">
+                <div className="comparisonCard">
+                  <div className="benchmarkListItemHeader">
+                    <strong>Queue Efficiency</strong>
+                    <span className="cellHint">campaign aggregate</span>
+                  </div>
+                  <div className="comparisonMetrics">
+                    <div>
+                      <span className="comparisonLabel">Processed</span>
+                      <strong>{formatNumber(displaySummary?.totalProcessed)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Requeued</span>
+                      <strong>{formatNumber(displaySummary?.totalRequeued)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Terminal</span>
+                      <strong>{formatNumber(displaySummary?.totalFailedTerminal)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Burn Down</span>
+                      <strong>{formatNumber(contactQueueEfficiency.burnDown)}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div className="comparisonCard">
+                  <div className="benchmarkListItemHeader">
+                    <strong>Low-Confidence Drift</strong>
+                    <span className="cellHint">review reason changes</span>
+                  </div>
+                  <div className="comparisonMetrics">
+                    <div>
+                      <span className="comparisonLabel">Low-Confidence Delta</span>
+                      <strong>{formatNumber(lowConfidenceDrift.lowConfidence)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Email Delta</span>
+                      <strong>{formatNumber(lowConfidenceDrift.email)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Website Delta</span>
+                      <strong>{formatNumber(lowConfidenceDrift.website)}</strong>
+                    </div>
+                    <div>
+                      <span className="comparisonLabel">Requeue Rate</span>
+                      <strong>{formatPercent(contactQueueEfficiency.requeueRate)}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Gate</th>
+                      <th>Value</th>
+                      <th>Target</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Requeue Clamp</td>
+                      <td>{formatPercent(contactQueueEfficiency.requeueRate)}</td>
+                      <td>&lt;= 35% queue churn</td>
+                      <td><strong>{contactQueueEfficiency.requeueRate <= 0.35 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Actionable Burn</td>
+                      <td>{formatNumber(contactQueueEfficiency.burnDown)}</td>
+                      <td>&gt; 0 queued jobs burned</td>
+                      <td><strong>{contactQueueEfficiency.burnDown > 0 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Terminal Rate</td>
+                      <td>{formatPercent(contactQueueEfficiency.terminalRate)}</td>
+                      <td>&lt;= 25% terminal exits</td>
+                      <td><strong>{contactQueueEfficiency.terminalRate <= 0.25 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Low-Confidence Drift</td>
+                      <td>{formatNumber(lowConfidenceDrift.lowConfidence)}</td>
+                      <td>&lt;= 0 net increase</td>
+                      <td><strong>{lowConfidenceDrift.lowConfidence <= 0 ? "pass" : "fail"}</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
 
               <div className="buttonRow buttonRowWrap">
@@ -700,6 +963,86 @@ export function CampaignsDashboard({
                 </div>
               )}
 
+              <h3>Chapter Search Gates</h3>
+              {chapterSearchComparison.totalRuns === 0 ? (
+                <p className="muted">No chapter-search telemetry found for this campaign scope yet.</p>
+              ) : (
+                <>
+                  <div className="comparisonGrid">
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Adaptive Chapter Search</strong>
+                        <span className="cellHint">{chapterSearchComparison.adaptive.runCount} runs</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">Canonical</span>
+                          <strong>{formatNumber(chapterSearchComparison.adaptive.avgCanonicalCreated, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Provisional</span>
+                          <strong>{formatNumber(chapterSearchComparison.adaptive.avgProvisionalCreated, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Skipped Sites</span>
+                          <strong>{formatNumber(chapterSearchComparison.adaptive.avgChapterOwnedSkipped, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Wall Time</span>
+                          <strong>{formatDuration(chapterSearchComparison.adaptive.avgWallTimeMs)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="comparisonCard">
+                      <div className="benchmarkListItemHeader">
+                        <strong>Gate Status</strong>
+                        <span className="cellHint">chapter search only</span>
+                      </div>
+                      <div className="comparisonMetrics">
+                        <div>
+                          <span className="comparisonLabel">Skipped Fanout</span>
+                          <strong>{formatNumber(chapterSearchComparison.deltas.avgChapterOwnedSkipped, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Institutional</span>
+                          <strong>{formatNumber(chapterSearchComparison.adaptive.avgInstitutionalFollowed, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Broader Web</span>
+                          <strong>{formatNumber(chapterSearchComparison.adaptive.avgBroaderWebFollowed, 1)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Rejected</span>
+                          <strong>{formatNumber(chapterSearchComparison.adaptive.avgRejected, 1)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Gate</th>
+                          <th>Value</th>
+                          <th>Target</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {chapterSearchComparison.gates.map((gate) => (
+                          <tr key={gate.label}>
+                            <td>{gate.label}</td>
+                            <td>{gate.value}</td>
+                            <td>{gate.target}</td>
+                            <td><strong>{gate.passed ? "pass" : "fail"}</strong></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
               <h3>Adaptive Attribution Insights</h3>
               {adaptiveInsights ? (
                 <>
@@ -725,6 +1068,18 @@ export function CampaignsDashboard({
                         <div>
                           <span className="comparisonLabel">Verified Websites</span>
                           <strong>{formatNumber(adaptiveInsights.verifiedWebsiteCount)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Delayed Rewards</span>
+                          <strong>{formatNumber(adaptiveInsights.delayedRewardEventCount)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Placeholder Reviews</span>
+                          <strong>{formatNumber(adaptiveInsights.placeholderReviewCount)}</strong>
+                        </div>
+                        <div>
+                          <span className="comparisonLabel">Overlong Reviews</span>
+                          <strong>{formatNumber(adaptiveInsights.overlongReviewCount)}</strong>
                         </div>
                       </div>
                     </div>
@@ -781,6 +1136,72 @@ export function CampaignsDashboard({
               ) : (
                 <p className="muted">Adaptive insights are loading for this campaign scope.</p>
               )}
+
+              {selectedCampaign.config.programMode === "v4_rl_improvement" ? (
+                <>
+                  <h3>Promotion Decisions</h3>
+                  {selectedCampaign.telemetry.promotionDecisions?.length ? (
+                    <div className="tableWrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Round</th>
+                            <th>Policy</th>
+                            <th>Snapshot</th>
+                            <th>Balanced Score</th>
+                            <th>Queued</th>
+                            <th>Promoted</th>
+                            <th>Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCampaign.telemetry.promotionDecisions.map((decision) => (
+                            <tr key={`${decision.round}-${decision.stagedPolicyVersion}`}>
+                              <td>{decision.round}</td>
+                              <td>{decision.stagedPolicyVersion}</td>
+                              <td>{decision.snapshotId ?? "n/a"}</td>
+                              <td>{formatNumber(decision.balancedScore, 4)}</td>
+                              <td>{formatNumber(decision.queueQueued)}</td>
+                              <td>{decision.promoted ? "yes" : "no"}</td>
+                              <td>{decision.reason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="muted">No promotion decisions recorded yet.</p>
+                  )}
+
+                  <h3>Review Drift</h3>
+                  {selectedCampaign.telemetry.reviewReasonDrift?.length ? (
+                    <div className="tableWrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Reason</th>
+                            <th>Baseline</th>
+                            <th>Latest</th>
+                            <th>Delta</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCampaign.telemetry.reviewReasonDrift.slice(0, 10).map((row) => (
+                            <tr key={row.reason}>
+                              <td>{row.reason}</td>
+                              <td>{formatNumber(row.baselineCount)}</td>
+                              <td>{formatNumber(row.latestCount)}</td>
+                              <td>{formatNumber(row.delta)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="muted">No review drift recorded yet.</p>
+                  )}
+                </>
+              ) : null}
 
               <h3>Fraternity Items</h3>
               <div className="tableWrap">

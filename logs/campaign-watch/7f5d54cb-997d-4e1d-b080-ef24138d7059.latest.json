@@ -1,0 +1,31 @@
+{
+    "capturedAt":  "2026-04-04T23:32:43.3969383-04:00",
+    "campaignId":  "7f5d54cb-997d-4e1d-b080-ef24138d7059",
+    "status":  "failed",
+    "runtimeActive":  false,
+    "lastError":  "Command timed out after 2700000ms: python -m fratfinder_crawler.cli adaptive-train-eval --epochs 1 --train-sources acacia-main,alpha-chi-rho-main,alpha-delta-gamma-main,alpha-delta-phi-main,alpha-gamma-rho-main,alpha-tau-omega-main,beta-upsilon-chi-main,chi-psi-main,delta-kappa-epsilon-main,delta-sigma-phi-main,delta-tau-delta-main,delta-upsilon-main --eval-sources kappa-delta-rho-main,lambda-chi-alpha-main,phi-gamma-delta-main,pi-kappa-alpha-main,sigma-alpha-epsilon-main,sigma-chi-main,sigma-phi-society-main,tau-kappa-epsilon-main --runtime-mode adaptive_primary --cohort-label v4-program-7f5d54cb-997d-4e1d-b080-ef24138d7059 --policy-version adaptive-v1-7f5d54cb-r1 --report-path docs/reports/V4_RL_PROGRAM_7f5d54cb-997d-4e1d-b080-ef24138d7059_ROUND_01.md",
+    "itemCount":  0,
+    "eventCount":  5,
+    "completedCount":  0,
+    "failedCount":  0,
+    "skippedCount":  0,
+    "activeCount":  0,
+    "jobsPerMinute":  0,
+    "queueDepthStart":  13032,
+    "queueDepthEnd":  13032,
+    "queueDepthDelta":  0,
+    "totalProcessed":  0,
+    "totalRequeued":  0,
+    "checkpointCount":  0,
+    "activePolicyVersion":  null,
+    "activePolicySnapshotId":  0,
+    "delayedRewardHealth":  null,
+    "queueStallAlert":  null,
+    "latestEventTypes":  [
+                             "acceptance_gate_evaluated",
+                             "campaign_failed",
+                             "training_round_started",
+                             "v4_baseline_frozen",
+                             "campaign_started"
+                         ]
+}

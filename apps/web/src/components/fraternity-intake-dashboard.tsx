@@ -437,6 +437,22 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
                   <p className="benchmarkMetaLabel">Recovery Attempts</p>
                   <p className="benchmarkMetaValue">{selectedSourceQuality?.recoveryAttempts ?? 0}</p>
                 </div>
+                <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Graph Run</p>
+                  <p className="benchmarkMetaValue">{selectedRequest.progress.graph?.requestGraphRunId ?? "n/a"}</p>
+                </div>
+                <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Graph Node</p>
+                  <p className="benchmarkMetaValue">{selectedRequest.progress.graph?.activeNode ?? "n/a"}</p>
+                </div>
+                <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Worker</p>
+                  <p className="benchmarkMetaValue">{selectedRequest.progress.graph?.workerId ?? "n/a"}</p>
+                </div>
+                <div className="benchmarkMetaCard">
+                  <p className="benchmarkMetaLabel">Runtime</p>
+                  <p className="benchmarkMetaValue">{selectedRequest.progress.graph?.runtimeMode ?? "n/a"}</p>
+                </div>
               </div>
 
               {selectedSourceQuality ? (
@@ -593,6 +609,22 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
               </div>
 
               <h3>Field Job Progress</h3>
+              {selectedRequest.progress.provisional ? (
+                <div className="metrics">
+                  <div className="metricCard">
+                    <p className="metricLabel">Provisional Evaluated</p>
+                    <p className="metricValue">{selectedRequest.progress.provisional.evaluated ? "yes" : "no"}</p>
+                  </div>
+                  <div className="metricCard">
+                    <p className="metricLabel">Auto Promoted</p>
+                    <p className="metricValue">{selectedRequest.progress.provisional.autoPromoted ?? 0}</p>
+                  </div>
+                  <div className="metricCard">
+                    <p className="metricLabel">Still Provisional</p>
+                    <p className="metricValue">{selectedRequest.progress.provisional.remaining ?? 0}</p>
+                  </div>
+                </div>
+              ) : null}
               {selectedEnrichmentAnalytics ? (
                 <div className="metrics">
                   <div className="metricCard">

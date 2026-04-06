@@ -1,7 +1,10 @@
-﻿from fratfinder_crawler.adaptive.policy import AdaptivePolicy
+from types import SimpleNamespace
+
+from fratfinder_crawler.adaptive.policy import AdaptivePolicy
 from fratfinder_crawler.adaptive.reward import build_delayed_credit_events, score_reward
 from fratfinder_crawler.adaptive.template_memory import compute_structural_template_signature
-from fratfinder_crawler.models import PageAnalysis
+from fratfinder_crawler.models import FrontierItem, PageAnalysis
+from fratfinder_crawler.orchestration.adaptive_graph import AdaptiveCrawlOrchestrator
 
 
 def _analysis(**overrides) -> PageAnalysis:
@@ -113,3 +116,124 @@ def test_structural_signature_generalizes_state_route_shape_across_hosts():
     left = compute_structural_template_signature("https://alpha.example.org/chapters/california/theta", analysis)
     right = compute_structural_template_signature("https://beta.example.com/chapters/oregon/gamma", analysis)
     assert left == right
+
+
+def test_frontier_filter_blocks_irrelevant_same_host_pages_after_chapter_yield():
+    orchestrator = AdaptiveCrawlOrchestrator.__new__(AdaptiveCrawlOrchestrator)
+    orchestrator._settings = SimpleNamespace(crawler_frontier_max_pages_per_template=8)
+    state = {
+        "source": SimpleNamespace(list_url="https://tke.org/join-tke/find-a-chapter/"),
+        "current_frontier_item": FrontierItem(
+            id=None,
+            url="https://tke.org/join-tke/find-a-chapter/",
+            canonical_url="https://tke.org/join-tke/find-a-chapter",
+            parent_url=None,
+            depth=0,
+            anchor_text="seed",
+            discovered_from="seed",
+        ),
+        "page_analysis": _analysis(),
+        "selected_action": "extract_script_json",
+        "chapter_stubs": [object()],
+        "extracted_from_current": [],
+    }
+
+    assert orchestrator._should_queue_frontier_link(state, {"url": "https://tke.org/careers/", "anchor_text": "Careers"}) is False
+    assert orchestrator._should_queue_frontier_link(
+        state,
+        {"url": "https://tke.org/join-tke/find-a-chapter/alpha-beta/", "anchor_text": "Alpha Beta"},
+    ) is True
+
+
+def test_frontier_budget_shrinks_when_page_already_emitted_chapter_signals():
+    orchestrator = AdaptiveCrawlOrchestrator.__new__(AdaptiveCrawlOrchestrator)
+    orchestrator._settings = SimpleNamespace(crawler_frontier_max_pages_per_template=8)
+
+    assert orchestrator._generic_frontier_link_budget({"chapter_stubs": [], "extracted_from_current": []}) == 8
+    assert orchestrator._generic_frontier_link_budget({"chapter_stubs": [object()], "extracted_from_current": []}) == 3
+
+
+def test_delayed_reward_seed_counts_chapter_yield_not_just_contacts():
+    orchestrator = AdaptiveCrawlOrchestrator.__new__(AdaptiveCrawlOrchestrator)
+    seed = orchestrator._delayed_reward_seed(
+        {
+            "extracted_from_current": [
+                SimpleNamespace(contact_email=None, instagram_url=None),
+                SimpleNamespace(contact_email="alpha@example.edu", instagram_url=None),
+            ],
+            "verified_website_count_current": 1,
+            "valid_missing_count_current": 1,
+        }
+    )
+
+    assert seed == 3.1
+
+
+def test_chapter_search_decision_rejects_wider_web_record_without_institution_signal():
+    orchestrator = AdaptiveCrawlOrchestrator.__new__(AdaptiveCrawlOrchestrator)
+    decision = orchestrator._chapter_search_decide_record(
+        record=SimpleNamespace(
+            name="Alpha Chapter",
+            university_name=None,
+            website_url="https://alphachapter.example/",
+            source_url="https://alphachapter.example/",
+        ),
+        source_class="wider_web",
+    )
+
+    assert decision.decision == "reject"
+    assert decision.validity_class == "invalid_non_chapter"
+    assert decision.invalid_reason == "identity_semantically_incomplete"
+
+
+def test_chapter_search_decision_routes_award_rows_to_invalid_non_chapter():
+    orchestrator = AdaptiveCrawlOrchestrator.__new__(AdaptiveCrawlOrchestrator)
+    decision = orchestrator._chapter_search_decide_record(
+        record=SimpleNamespace(
+            name="The Most Outstanding Chapter Award",
+            university_name="2008",
+            website_url=None,
+            source_url="https://adg.example.org/awards",
+            source_confidence=0.95,
+            source_snippet=None,
+        ),
+        source_class="national",
+    )
+
+    assert decision.decision == "reject"
+    assert decision.validity_class == "invalid_non_chapter"
+    assert decision.invalid_reason in {"award_or_honor_row", "year_or_percentage_as_identity"}
+
+
+def test_chapter_search_decision_marks_incomplete_national_identity_repairable():
+    orchestrator = AdaptiveCrawlOrchestrator.__new__(AdaptiveCrawlOrchestrator)
+    decision = orchestrator._chapter_search_decide_record(
+        record=SimpleNamespace(
+            name="Mississippi",
+            university_name=None,
+            website_url=None,
+            source_url="https://phigam.org/about/overview/our-chapters/",
+            source_confidence=0.9,
+            source_snippet=None,
+        ),
+        source_class="national",
+    )
+
+    assert decision.decision == "repair"
+    assert decision.validity_class == "repairable_candidate"
+    assert decision.repair_reason == "identity_semantically_incomplete"
+
+
+def test_chapter_search_follow_stats_track_skipped_chapter_sites():
+    orchestrator = AdaptiveCrawlOrchestrator.__new__(AdaptiveCrawlOrchestrator)
+    merged = orchestrator._merge_chapter_search_follow_stats(
+        {},
+        {
+            "followed_by_target_type": {"national_detail": 2, "institutional_page": 1},
+            "skipped_by_target_type": {"chapter_owned_site": 4},
+        },
+    )
+
+    assert merged["nationalTargetsFollowed"] == 2
+    assert merged["institutionalTargetsFollowed"] == 1
+    assert merged["chapterOwnedTargetsSkipped"] == 4

@@ -6,9 +6,11 @@ function buildAdaptiveFilters(params: {
   sourceSlugs?: string[];
   runtimeMode?: string | null;
   windowDays?: number | null;
+  createdAtColumn?: string;
 }) {
   const conditions: string[] = [];
   const values: Array<string | number | string[]> = [];
+  const createdAtColumn = params.createdAtColumn?.trim() || "cpo.created_at";
 
   if (params.sourceSlugs && params.sourceSlugs.length > 0) {
     values.push(params.sourceSlugs);
@@ -22,7 +24,7 @@ function buildAdaptiveFilters(params: {
 
   if (params.windowDays && params.windowDays > 0) {
     values.push(Math.max(1, Math.floor(params.windowDays)));
-    conditions.push(`cpo.created_at >= NOW() - ($${values.length}::int * INTERVAL '1 day')`);
+    conditions.push(`${createdAtColumn} >= NOW() - ($${values.length}::int * INTERVAL '1 day')`);
   }
 
   const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -121,6 +123,13 @@ export async function getAdaptiveInsights(params?: {
     sourceSlugs: params?.sourceSlugs,
     runtimeMode: params?.runtimeMode ?? null,
     windowDays: params?.windowDays ?? null,
+    createdAtColumn: "cpo.created_at",
+  });
+  const delayedFilters = buildAdaptiveFilters({
+    sourceSlugs: params?.sourceSlugs,
+    runtimeMode: params?.runtimeMode ?? null,
+    windowDays: params?.windowDays ?? null,
+    createdAtColumn: "cre.created_at",
   });
 
   const actionQuery = `
@@ -139,8 +148,8 @@ export async function getAdaptiveInsights(params?: {
     LIMIT $${filters.values.length + 1}
   `;
 
-  const delayedWhere = filters.whereClause
-    ? `${filters.whereClause} AND cre.reward_stage = 'delayed'`
+  const delayedWhere = delayedFilters.whereClause
+    ? `${delayedFilters.whereClause} AND cre.reward_stage = 'delayed'`
     : "WHERE cre.reward_stage = 'delayed'";
   const delayedQuery = `
     SELECT
@@ -154,7 +163,7 @@ export async function getAdaptiveInsights(params?: {
     ${delayedWhere}
     GROUP BY cre.action_type
     ORDER BY total_reward DESC, event_count DESC
-    LIMIT $${filters.values.length + 1}
+    LIMIT $${delayedFilters.values.length + 1}
   `;
 
   const guardrailQuery = `
@@ -169,11 +178,41 @@ export async function getAdaptiveInsights(params?: {
     ${filters.whereClause}
   `;
 
-  const actionPromise = dbPool.query(actionQuery, [...filters.values, limit]);
-  const delayedPromise = dbPool.query(delayedQuery, [...filters.values, limit]);
-  const guardrailPromise = dbPool.query(guardrailQuery, filters.values);
+  const reviewConditions: string[] = [];
+  const reviewValues: Array<string | number | string[]> = [];
+  if (params?.sourceSlugs && params.sourceSlugs.length > 0) {
+    reviewValues.push(params.sourceSlugs);
+    reviewConditions.push(`s.slug = ANY($${reviewValues.length}::text[])`);
+  }
+  if (params?.windowDays && params.windowDays > 0) {
+    reviewValues.push(Math.max(1, Math.floor(params.windowDays)));
+    reviewConditions.push(`ri.created_at >= NOW() - ($${reviewValues.length}::int * INTERVAL '1 day')`);
+  }
+  reviewValues.push(limit);
+  const reviewWhere = reviewConditions.length ? `WHERE ${reviewConditions.join(" AND ")}` : "";
+  const reviewQuery = `
+    SELECT
+      ri.reason,
+      COUNT(*)::int AS count
+    FROM review_items ri
+    LEFT JOIN sources s ON s.id = ri.source_id
+    ${reviewWhere}
+    GROUP BY ri.reason
+    ORDER BY count DESC, ri.reason ASC
+    LIMIT $${reviewValues.length}
+  `;
 
-  const [actionRows, delayedRows, guardrailRows] = await Promise.all([actionPromise, delayedPromise, guardrailPromise]);
+  const actionPromise = dbPool.query(actionQuery, [...filters.values, limit]);
+  const delayedPromise = dbPool.query(delayedQuery, [...delayedFilters.values, limit]);
+  const guardrailPromise = dbPool.query(guardrailQuery, filters.values);
+  const reviewPromise = dbPool.query(reviewQuery, reviewValues);
+
+  const [actionRows, delayedRows, guardrailRows, reviewRows] = await Promise.all([
+    actionPromise,
+    delayedPromise,
+    guardrailPromise,
+    reviewPromise,
+  ]);
 
   const actionLeaderboard = actionRows.rows.map((row) => ({
     actionType: String(row.action_type),
@@ -189,6 +228,19 @@ export async function getAdaptiveInsights(params?: {
     avgReward: Number(row.avg_reward ?? 0),
     totalReward: Number(row.total_reward ?? 0),
   }));
+
+  const topReviewReasons = reviewRows.rows.map((row) => ({
+    reason: String(row.reason ?? "unknown"),
+    count: Number(row.count ?? 0),
+  }));
+  const placeholderReviewCount = topReviewReasons
+    .filter((row) => row.reason.toLowerCase().includes("navigation or placeholder text"))
+    .reduce((total, row) => total + row.count, 0);
+  const overlongReviewCount = topReviewReasons
+    .filter((row) => row.reason.toLowerCase().includes("exceeded max supported length"))
+    .reduce((total, row) => total + row.count, 0);
+  const delayedRewardEventCount = delayedAttribution.reduce((total, row) => total + row.count, 0);
+  const delayedRewardTotal = delayedAttribution.reduce((total, row) => total + row.totalReward, 0);
 
   const guardrail = guardrailRows.rows[0] ?? {
     total_pages: 0,
@@ -208,5 +260,10 @@ export async function getAdaptiveInsights(params?: {
     guardrailPages,
     validMissingCount: Number(guardrail.valid_missing_count ?? 0),
     verifiedWebsiteCount: Number(guardrail.verified_website_count ?? 0),
+    delayedRewardEventCount,
+    delayedRewardTotal,
+    placeholderReviewCount,
+    overlongReviewCount,
+    topReviewReasons,
   };
 }

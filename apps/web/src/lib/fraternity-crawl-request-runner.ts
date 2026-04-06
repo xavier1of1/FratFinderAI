@@ -37,6 +37,8 @@ const DEFAULT_FIELD_JOB_GRAPH_DURABILITY = (() => {
   }
   return "async";
 })();
+
+const V3_REQUEST_WORKER_ENABLED = String(process.env.CRAWLER_V3_ENABLED ?? "false").trim().toLowerCase() === "true";
 const activeRequestRuns = new Set<string>();
 
 function delay(ms: number): Promise<void> {
@@ -279,7 +281,8 @@ function computeAdaptiveEnrichmentConfig(
     fieldJobWorkers: effectiveWorkers,
     fieldJobLimitPerCycle: effectiveLimit,
     maxEnrichmentCycles: Math.min(96, adaptiveMaxCycles),
-    pauseMs: baseConfig.pauseMs
+    pauseMs: baseConfig.pauseMs,
+    crawlPolicyVersion: baseConfig.crawlPolicyVersion ?? null
   };
 }
 
@@ -1089,6 +1092,9 @@ async function executeFraternityCrawlRequest(requestId: string): Promise<void> {
 }
 
 export async function scheduleFraternityCrawlRequest(requestId: string): Promise<boolean> {
+  if (V3_REQUEST_WORKER_ENABLED) {
+    return false;
+  }
   if (activeRequestRuns.has(requestId)) {
     return false;
   }
@@ -1105,6 +1111,9 @@ export async function scheduleFraternityCrawlRequest(requestId: string): Promise
 
 export async function scheduleDueFraternityCrawlRequests(limit = 20): Promise<number> {
   await reconcileStaleFraternityCrawlRequests();
+  if (V3_REQUEST_WORKER_ENABLED) {
+    return 0;
+  }
   const dueIds = await listDueQueuedFraternityCrawlRequestIds(limit);
   let scheduled = 0;
   for (const id of dueIds) {

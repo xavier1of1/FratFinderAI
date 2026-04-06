@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
-import { listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
+import { failStaleCrawlRuns, listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
 
 export async function GET(request: NextRequest) {
   try {
+    await failStaleCrawlRuns();
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "100");
 

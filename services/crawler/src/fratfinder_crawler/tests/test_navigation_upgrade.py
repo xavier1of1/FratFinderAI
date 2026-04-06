@@ -2,6 +2,7 @@ from fratfinder_crawler.adapters.registry import AdapterRegistry
 from fratfinder_crawler.analysis import score_chapter_link
 from fratfinder_crawler.models import EmbeddedDataResult, PageAnalysis, SourceClassification
 from fratfinder_crawler.orchestration.navigation import (
+    classify_chapter_target,
     detect_chapter_index_mode,
     extract_chapter_stubs,
     extract_contacts_from_chapter_site,
@@ -126,7 +127,6 @@ def test_follow_and_extract_contacts_respects_budget_and_extracts_fields():
         html="""
         <li class="chapter-item" data-chapter-card>
           <h3 class="chapter-name">Beta Chapter</h3>
-          <div class="university">Example University</div>
           <a href="https://chapters.example.edu/beta">Chapter Website</a>
         </li>
         """,
@@ -150,6 +150,92 @@ def test_follow_and_extract_contacts_respects_budget_and_extracts_fields():
     assert first["email"] == "brothers@example.edu"
     assert first["instagram_url"] == "https://www.instagram.com/examplechapter/"
 
+
+def test_classify_chapter_target_marks_external_chapter_site_as_not_followable():
+    target = classify_chapter_target(
+        source_url="https://phigam.org/about/overview/our-chapters/",
+        candidate_url="http://www.fijiuwo.com/",
+    )
+
+    assert target.target_type == "chapter_owned_site"
+    assert target.follow_allowed is False
+    assert target.rejection_reason == "chapter_site_only"
+
+
+def test_classify_chapter_target_blocks_personal_homepage_style_institutional_urls():
+    target = classify_chapter_target(
+        source_url="https://phigam.org/about/overview/our-chapters/",
+        candidate_url="http://www.student.richmond.edu/~fiji",
+    )
+
+    assert target.target_type == "institutional_page"
+    assert target.follow_allowed is False
+    assert target.rejection_reason == "external_target_timeout_risk"
+
+
+def test_follow_chapter_detail_or_outbound_skips_external_chapter_sites_when_disabled():
+    stubs = extract_chapter_stubs(
+        registry=AdapterRegistry(),
+        html="""
+        <li class="chapter-item" data-chapter-card>
+          <h3 class="chapter-name">Lambda Omega Chapter</h3>
+          <div class="university">Western Example University</div>
+          <a href="http://www.fijiuwo.com/">Chapter Website</a>
+        </li>
+        """,
+        source_url="https://phigam.org/about/overview/our-chapters/",
+        mode="map_or_api_locator",
+        embedded_data=EmbeddedDataResult(found=False, data_type=None, raw_data=None, api_url=None),
+        http_client=RoutingHttpClient({}),
+    )
+
+    pages_by_stub, stats = follow_chapter_detail_or_outbound(
+        stubs=stubs,
+        source_url="https://phigam.org/about/overview/our-chapters/",
+        http_client=RoutingHttpClient({}),
+        max_hops_per_stub=2,
+        max_pages_per_run=5,
+        follow_external_chapter_sites=False,
+    )
+
+    assert pages_by_stub == {}
+    assert stats["fetched_pages"] == 0
+    assert stats["skipped_by_target_type"]["chapter_owned_site"] >= 1
+
+
+def test_follow_chapter_detail_or_outbound_skips_institutional_follow_when_identity_complete():
+    stubs = extract_chapter_stubs(
+        registry=AdapterRegistry(),
+        html="""
+        <li class="chapter-item" data-chapter-card>
+          <h3 class="chapter-name">Lambda Omega Chapter</h3>
+          <div class="university">University of Richmond</div>
+          <a href="http://www.student.richmond.edu/~fiji">Chapter Website</a>
+        </li>
+        """,
+        source_url="https://phigam.org/about/overview/our-chapters/",
+        mode="map_or_api_locator",
+        embedded_data=EmbeddedDataResult(found=False, data_type=None, raw_data=None, api_url=None),
+        http_client=RoutingHttpClient({}),
+    )
+
+    pages_by_stub, stats = follow_chapter_detail_or_outbound(
+        stubs=stubs,
+        source_url="https://phigam.org/about/overview/our-chapters/",
+        http_client=RoutingHttpClient({}),
+        max_hops_per_stub=2,
+        max_pages_per_run=5,
+        follow_external_chapter_sites=False,
+        allow_institutional_follow=True,
+    )
+
+    assert pages_by_stub == {}
+    assert stats["fetched_pages"] == 0
+    assert stats["skipped_by_target_type"]["institutional_page"] >= 1
+    decisions = stats["target_decisions"]
+    assert decisions
+    assert decisions[0]["rejectionReason"] in {"institutional_completion_not_needed", "external_target_timeout_risk"}
+
 def test_extract_chapter_stubs_skips_navigation_noise_in_chapter_roll_fallback():
     html = """
     <html>
@@ -172,3 +258,29 @@ def test_extract_chapter_stubs_skips_navigation_noise_in_chapter_roll_fallback()
     )
 
     assert stubs == []
+
+
+def test_extract_chapter_stubs_skips_irrelevant_same_host_targets():
+    html = """
+    <html>
+      <body>
+        <a href="/careers/">Alpha Chapter</a>
+        <section>
+          <h3>Alpha Chapter</h3>
+          <div>Example University</div>
+          <a href="/chapters/alpha/">Chapter Website</a>
+        </section>
+      </body>
+    </html>
+    """
+    stubs = extract_chapter_stubs(
+        registry=AdapterRegistry(),
+        html=html,
+        source_url="https://example.org/find-a-chapter",
+        mode="direct_chapter_list",
+        embedded_data=EmbeddedDataResult(found=False, data_type=None, raw_data=None, api_url=None),
+        http_client=RoutingHttpClient({}),
+    )
+
+    assert len(stubs) == 1
+    assert stubs[0].detail_url == "https://example.org/chapters/alpha/"

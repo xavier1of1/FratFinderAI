@@ -13,11 +13,37 @@ from fratfinder_crawler.analysis import analyze_page, classify_source, detect_em
 from fratfinder_crawler.adapters.registry import AdapterRegistry
 from fratfinder_crawler.config import Settings, get_settings
 from fratfinder_crawler.db.repository import CrawlerRepository
+from fratfinder_crawler.field_jobs import FieldJobEngine, RetryableJobError
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
-from fratfinder_crawler.models import AmbiguousRecordError, CrawlMetrics, ExtractedChapter, FrontierItem, PageObservation, PolicyDecision, ReviewItemCandidate
-from fratfinder_crawler.normalization import normalize_record
+from fratfinder_crawler.models import (
+    AmbiguousRecordError,
+    ChapterCandidate,
+    ChapterValidityDecision,
+    ChapterSearchDecision,
+    ChapterEvidenceRecord,
+    CrawlMetrics,
+    ExtractedChapter,
+    FieldJob,
+    FIELD_JOB_FIND_EMAIL,
+    FIELD_JOB_FIND_INSTAGRAM,
+    FIELD_JOB_FIND_WEBSITE,
+    FrontierItem,
+    PageObservation,
+    PolicyDecision,
+    ReviewItemCandidate,
+)
+from fratfinder_crawler.normalization import classify_chapter_validity, normalize_record
+from fratfinder_crawler.search import SearchClient
 from fratfinder_crawler.orchestration.state import AdaptiveCrawlState
+from fratfinder_crawler.orchestration.navigation import (
+    build_chapter_candidates,
+    classify_chapter_target,
+    detect_chapter_index_mode,
+    extract_chapter_stubs,
+    extract_contacts_from_chapter_site,
+    follow_chapter_detail_or_outbound,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +66,7 @@ class AdaptiveCrawlOrchestrator:
         settings: Settings | None = None,
         runtime_mode: str = "adaptive_shadow",
         policy_mode: str = "live",
+        policy_version: str | None = None,
     ):
         self._repository = repository
         self._http = http_client
@@ -49,7 +76,7 @@ class AdaptiveCrawlOrchestrator:
         self._policy_mode = policy_mode
         self._policy = AdaptivePolicy(
             epsilon=self._settings.crawler_adaptive_epsilon,
-            policy_version=self._settings.crawler_policy_version,
+            policy_version=(policy_version or self._settings.crawler_policy_version),
             live_epsilon=self._settings.crawler_adaptive_live_epsilon,
             train_epsilon=self._settings.crawler_adaptive_train_epsilon,
             risk_timeout_weight=self._settings.crawler_adaptive_risk_timeout_weight,
@@ -57,6 +84,35 @@ class AdaptiveCrawlOrchestrator:
         )
         if self._settings.crawler_adaptive_policy_restore_enabled:
             self._restore_policy_snapshot()
+        self._inline_enrichment_engine = (
+            FieldJobEngine(
+                repository=self._repository,
+                logger=LOGGER,
+                worker_id=f"inline-{self._runtime_mode}",
+                source_slug=None,
+                search_client=SearchClient(self._settings),
+                search_provider=self._settings.crawler_search_provider,
+                max_search_pages=self._settings.crawler_search_max_pages_per_job,
+                negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
+                dependency_wait_seconds=self._settings.crawler_search_dependency_wait_seconds,
+                require_confident_website_for_email=self._settings.crawler_search_require_confident_website_for_email,
+                email_escape_on_provider_block=self._settings.crawler_search_email_escape_on_provider_block,
+                email_escape_min_website_failures=self._settings.crawler_search_email_escape_min_website_failures,
+                transient_short_retries=self._settings.crawler_search_transient_short_retries,
+                transient_long_cooldown_seconds=self._settings.crawler_search_transient_long_cooldown_seconds,
+                min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
+                email_max_queries=self._settings.crawler_search_email_max_queries,
+                instagram_max_queries=self._settings.crawler_search_instagram_max_queries,
+                enable_school_initials=self._settings.crawler_search_enable_school_initials,
+                min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
+                enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
+                instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
+                instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
+                greedy_collect_mode=self._settings.crawler_greedy_collect,
+            )
+            if self._settings.crawler_search_enabled
+            else None
+        )
         self._graph = self._build_graph()
 
     def run_for_source(self, source, policy_mode: str | None = None) -> CrawlMetrics:
@@ -93,6 +149,34 @@ class AdaptiveCrawlOrchestrator:
                 "verified_website_total": 0,
             },
             "navigation_stats": {"frontier_added": 0, "frontier_visited": 0},
+            "chapter_search_metrics": {
+                "sourceClass": None,
+                "candidatesExtracted": 0,
+                "candidatesRejected": 0,
+                "canonicalChaptersCreated": 0,
+                "provisionalChaptersCreated": 0,
+                "nationalTargetsFollowed": 0,
+                "institutionalTargetsFollowed": 0,
+                "chapterOwnedTargetsSkipped": 0,
+                "broaderWebTargetsFollowed": 0,
+                "rejectionReasonCounts": {},
+            },
+            "chapter_validity_metrics": {
+                "invalidCount": 0,
+                "repairableCount": 0,
+                "provisionalCount": 0,
+                "canonicalValidCount": 0,
+                "invalidReasonCounts": {},
+                "repairReasonCounts": {},
+                "contactAdmission": {
+                    "blocked_invalid": 0,
+                    "blocked_repairable": 0,
+                    "admitted_canonical": 0,
+                },
+                "sourceInvaliditySaturated": False,
+            },
+            "chapter_search_candidates": [],
+            "chapter_search_decisions": [],
             "final_status": "succeeded",
         }
         final_state = self._graph.invoke(initial_state)
@@ -222,7 +306,22 @@ class AdaptiveCrawlOrchestrator:
         analysis = analyze_page(state["current_page_html"])
         classification = classify_source(analysis, llm_enabled=False)
         embedded = detect_embedded_data(state["current_page_html"], state["current_page_url"])
-        return {"page_analysis": analysis, "classification": classification, "embedded_data": embedded, "page_level_confidence": classification.confidence}
+        chapter_index_mode, chapter_index_mode_confidence, chapter_index_mode_reason = detect_chapter_index_mode(
+            state["current_page_html"],
+            analysis,
+            classification,
+            embedded,
+            state["source"].metadata,
+        )
+        return {
+            "page_analysis": analysis,
+            "classification": classification,
+            "embedded_data": embedded,
+            "page_level_confidence": classification.confidence,
+            "chapter_index_mode": chapter_index_mode,
+            "chapter_index_mode_confidence": chapter_index_mode_confidence,
+            "chapter_index_mode_reason": chapter_index_mode_reason,
+        }
 
     def _compute_template_signature(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         analysis = state["page_analysis"]
@@ -342,8 +441,17 @@ class AdaptiveCrawlOrchestrator:
         strategy = self._action_to_strategy(action, state)
         extracted: list[ExtractedChapter] = []
         seeded_frontier: list[FrontierItem] = []
+        chapter_stubs = []
+        chapter_search_candidates: list[ChapterCandidate] = []
+        chapter_search_decisions: list[ChapterSearchDecision] = list(state.get("chapter_search_decisions") or [])
+        chapter_follow_pages: dict[str, list[tuple[str, str]]] = {}
+        chapter_contact_hints: dict[str, dict[str, str]] = {}
         metrics = state["metrics"]
-        if action.startswith("extract_") and strategy:
+        review_items = list(state.get("review_items", []))
+        chapter_search_metrics = dict(state.get("chapter_search_metrics") or {})
+        chapter_validity_metrics = dict(state.get("chapter_validity_metrics") or {})
+        chapter_search_started = time.perf_counter()
+        if action.startswith("extract_") and strategy and self._page_can_emit_chapters(state):
             adapter = self._registry.get(strategy)
             if adapter is not None:
                 if action == "extract_stubs_only":
@@ -390,7 +498,102 @@ class AdaptiveCrawlOrchestrator:
                         source_metadata=state["source"].metadata,
                     )
                     extracted = self._dedupe_extracted_records(extracted)
-                    metrics.records_seen += len(extracted)
+        elif action.startswith("extract_") and strategy:
+            review_items.append(
+                ReviewItemCandidate(
+                    item_type="adaptive_page_role_gate",
+                    reason="Page role gated chapter extraction before normalization",
+                    source_slug=state["source"].source_slug,
+                    chapter_slug=None,
+                    payload={
+                        "source_url": state["current_page_url"],
+                        "pageRole": state["page_analysis"].probable_page_role,
+                        "selectedAction": action,
+                        "chapterIntentSignals": self._chapter_intent_signal_count(state),
+                    },
+                )
+            )
+
+        if action.startswith("extract_") or action.startswith("expand_"):
+            chapter_stubs = extract_chapter_stubs(
+                registry=self._registry,
+                html=state["current_page_html"],
+                source_url=state["current_page_url"],
+                mode=state.get("chapter_index_mode", "mixed"),
+                embedded_data=state["embedded_data"],
+                http_client=self._http,
+                source_metadata=state["source"].metadata,
+            )
+            chapter_stubs, stub_decisions = self._filter_chapter_stubs_for_context(chapter_stubs, state)
+            chapter_search_decisions.extend(stub_decisions)
+            chapter_search_candidates = build_chapter_candidates(stubs=chapter_stubs, source_url=state["source"].list_url)
+            chapter_search_metrics["sourceClass"] = self._chapter_search_source_class(state)
+            chapter_search_metrics["candidatesExtracted"] = int(chapter_search_metrics.get("candidatesExtracted", 0) or 0) + len(chapter_search_candidates)
+            chapter_validity_metrics = self._merge_candidate_validity_metrics(chapter_validity_metrics, chapter_search_candidates)
+            chapter_follow_pages, follow_stats = follow_chapter_detail_or_outbound(
+                stubs=chapter_stubs,
+                source_url=state["source"].list_url,
+                http_client=self._http,
+                max_hops_per_stub=self._settings.crawler_navigation_max_hops_per_stub,
+                max_pages_per_run=self._settings.crawler_navigation_max_pages_per_run,
+                follow_external_chapter_sites=False,
+                allow_institutional_follow=True,
+            )
+            metrics.pages_processed += int(follow_stats.get("fetched_pages", 0) or 0)
+            chapter_search_metrics = self._merge_chapter_search_follow_stats(chapter_search_metrics, follow_stats)
+            for target_decision in follow_stats.get("target_decisions", []) or []:
+                chapter_search_decisions.append(
+                    ChapterSearchDecision(
+                        chapter_name="",
+                        university_name=None,
+                        source_class=str(target_decision.get("sourceClass") or "unknown"),
+                        decision="follow" if bool(target_decision.get("followAllowed")) else "skip",
+                        reason=str(target_decision.get("rejectionReason") or "") or None,
+                        target_type=str(target_decision.get("targetType") or "unknown"),
+                        provenance="chapter_target",
+                        source_url=str(target_decision.get("url") or "") or None,
+                    )
+                )
+            chapter_contact_hints = extract_contacts_from_chapter_site(chapter_stubs, chapter_follow_pages)
+            extracted = self._merge_stub_contacts_into_records(
+                extracted=extracted,
+                stubs=chapter_stubs,
+                contact_hints=chapter_contact_hints,
+                state=state,
+            )
+            for stub in chapter_stubs[: self._settings.crawler_frontier_max_pages_per_template]:
+                target_url = stub.detail_url or stub.outbound_chapter_url_candidate
+                if not target_url:
+                    continue
+                canonical = canonicalize_url(target_url, state["current_page_url"])
+                score, components = score_frontier_item(
+                    canonical,
+                    anchor_text=stub.chapter_name,
+                    depth=state["current_frontier_item"].depth + 1,
+                    source_url=state["source"].list_url,
+                    page_analysis=state["page_analysis"],
+                    template_bonus=0.7,
+                    parent_success_bonus=0.5 if chapter_contact_hints.get(self._stub_key(stub)) else 0.3,
+                )
+                seeded_frontier.append(
+                    FrontierItem(
+                        id=None,
+                        url=canonical,
+                        canonical_url=canonical,
+                        parent_url=state["current_page_url"],
+                        depth=state["current_frontier_item"].depth + 1,
+                        anchor_text=stub.chapter_name,
+                        discovered_from="chapter_stub",
+                        score_total=score,
+                        score_components=components,
+                    )
+                )
+
+        filtered_records, gated_reviews = self._filter_records_for_page_context(extracted, state)
+        extracted = self._dedupe_extracted_records(filtered_records)
+        review_items.extend(gated_reviews)
+        metrics.records_seen += len(extracted)
+        chapter_search_metrics["chapterSearchWallTimeMs"] = int((time.perf_counter() - chapter_search_started) * 1000)
 
         valid_missing_count = self._count_valid_missing_records(extracted)
         verified_website_count = self._count_verified_websites(extracted, state["current_page_url"], state["source"].list_url)
@@ -403,10 +606,18 @@ class AdaptiveCrawlOrchestrator:
             "extracted": self._merge_extracted_records(state.get("extracted", []), extracted),
             "extracted_from_current": extracted,
             "frontier_items": seeded_frontier,
+            "chapter_stubs": chapter_stubs,
+            "chapter_search_candidates": chapter_search_candidates,
+            "chapter_search_decisions": chapter_search_decisions,
+            "chapter_search_metrics": chapter_search_metrics,
+            "chapter_validity_metrics": chapter_validity_metrics,
+            "chapter_follow_pages": chapter_follow_pages,
+            "chapter_contact_hints": chapter_contact_hints,
             "metrics": metrics,
             "valid_missing_count_current": valid_missing_count,
             "verified_website_count_current": verified_website_count,
             "budget_state": budget_state,
+            "review_items": review_items,
         }
 
     def _expand_frontier(self, state: AdaptiveCrawlState) -> dict[str, Any]:
@@ -415,21 +626,19 @@ class AdaptiveCrawlOrchestrator:
             return {"current_links": []}
         new_items = list(state.get("frontier_items", []))
         current_links: list[dict[str, Any]] = []
+        generic_link_budget = self._generic_frontier_link_budget(state)
         for link in discover_frontier_links(state["current_page_html"], state["current_page_url"]):
             url = str(link["url"])
             if host_family(url) != host_family(state["source"].list_url):
                 continue
-            if state.get("selected_action") == "expand_same_section_links":
-                left = "/".join(part for part in current.canonical_url.split("/")[3:5] if part)
-                right = "/".join(part for part in url.split("/")[3:5] if part)
-                if left and right and left != right:
-                    continue
+            if not self._should_queue_frontier_link(state, link):
+                continue
             score, components = score_frontier_item(url, anchor_text=str(link.get("anchor_text") or "") or None, depth=current.depth + 1, source_url=state["source"].list_url, page_analysis=state["page_analysis"], template_bonus=0.2, parent_success_bonus=0.4 if state.get("extracted_from_current") else 0.0)
             if score < self._settings.crawler_adaptive_min_score:
                 continue
             new_items.append(FrontierItem(id=None, url=url, canonical_url=url, parent_url=current.url, depth=current.depth + 1, anchor_text=str(link.get("anchor_text") or "") or None, discovered_from="page_link", score_total=score, score_components=components))
             current_links.append({"url": url, "anchorText": link.get("anchor_text"), "score": score})
-            if len(current_links) >= self._settings.crawler_frontier_max_pages_per_template:
+            if len(current_links) >= generic_link_budget:
                 break
         if state["embedded_data"].api_url and state.get("selected_action") in {"expand_map_children", "extract_locator_api"}:
             api_url = canonicalize_url(state["embedded_data"].api_url, state["current_page_url"])
@@ -440,6 +649,7 @@ class AdaptiveCrawlOrchestrator:
         navigation_stats = dict(state.get("navigation_stats") or {})
         navigation_stats["frontier_added"] = navigation_stats.get("frontier_added", 0) + added
         return {"current_links": current_links, "navigation_stats": navigation_stats}
+
     def _score_reward(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         extracted_current = state.get("extracted_from_current", [])
         reward = score_reward(
@@ -559,9 +769,7 @@ class AdaptiveCrawlOrchestrator:
         observation_url_index = dict(state.get("observation_url_index") or {})
         observation_url_index[canonicalize_url(state["current_page_url"])] = observation_id
 
-        delayed_seed = float(state.get("verified_website_count_current", 0) or 0) * 1.2 + float(
-            sum(1 for record in state.get("extracted_from_current", []) if record.contact_email or record.instagram_url)
-        )
+        delayed_seed = self._delayed_reward_seed(state)
         ancestors = self._ancestor_actions(parent_observation_id, observation_index)
         delayed_events = build_delayed_credit_events(
             ancestor_actions=ancestors,
@@ -607,24 +815,237 @@ class AdaptiveCrawlOrchestrator:
         extracted = self._dedupe_extracted_records(state.get("extracted", []))
         review_items = list(state.get("review_items", []))
         persisted: list[dict[str, Any]] = []
+        provisional_created = 0
+        canonical_created = 0
+        repairable_blocked = 0
+        invalid_blocked = 0
+        inline_enriched = 0
+        chapter_search_metrics = dict(state.get("chapter_search_metrics") or {})
+        chapter_validity_metrics = {
+            "invalidCount": 0,
+            "repairableCount": 0,
+            "provisionalCount": 0,
+            "canonicalValidCount": 0,
+            "invalidReasonCounts": {},
+            "repairReasonCounts": {},
+            "contactAdmission": {
+                "blocked_invalid": 0,
+                "blocked_repairable": 0,
+                "admitted_canonical": 0,
+            },
+            "sourceInvaliditySaturated": False,
+        }
         for record in extracted:
+            source_class = self._classify_record_source(source, record.source_url)
+            chapter_decision = self._chapter_search_decide_record(record=record, source_class=source_class)
+            chapter_search_metrics = self._record_chapter_search_decision(chapter_search_metrics, chapter_decision)
+            chapter_validity_metrics = self._record_chapter_validity_decision(chapter_validity_metrics, chapter_decision)
+            if chapter_decision.decision == "reject":
+                invalid_blocked += 1
+                review_items.append(
+                    ReviewItemCandidate(
+                        item_type="chapter_search_rejected",
+                        reason=chapter_decision.reason or "Chapter candidate rejected during chapter search",
+                        source_slug=source.source_slug,
+                        chapter_slug=None,
+                        payload={
+                            "source_url": record.source_url,
+                            "recordName": record.name,
+                            "universityName": record.university_name,
+                            "sourceClass": source_class,
+                            "validityClass": chapter_decision.validity_class,
+                            "targetType": chapter_decision.target_type,
+                            "rejectionReason": chapter_decision.invalid_reason or chapter_decision.reason,
+                        },
+                    )
+                )
+                self._persist_record_evidence(
+                    source,
+                    run_id,
+                    None,
+                    record,
+                    source_class=source_class,
+                    evidence_status="review",
+                    rejection_reason=chapter_decision.invalid_reason or chapter_decision.reason,
+                    validity_class=chapter_decision.validity_class,
+                    repair_reason=chapter_decision.repair_reason,
+                )
+                continue
+            if chapter_decision.decision == "repair":
+                repairable_blocked += 1
+                review_items.append(
+                    ReviewItemCandidate(
+                        item_type="chapter_repair_candidate",
+                        reason=chapter_decision.repair_reason or chapter_decision.reason or "Chapter candidate requires identity repair",
+                        source_slug=source.source_slug,
+                        chapter_slug=None,
+                        payload={
+                            "source_url": record.source_url,
+                            "recordName": record.name,
+                            "universityName": record.university_name,
+                            "sourceClass": source_class,
+                            "validityClass": chapter_decision.validity_class,
+                            "repairReason": chapter_decision.repair_reason or chapter_decision.reason,
+                            "nextAction": chapter_decision.next_action,
+                        },
+                    )
+                )
+                self._persist_record_evidence(
+                    source,
+                    run_id,
+                    None,
+                    record,
+                    source_class=source_class,
+                    evidence_status="review",
+                    rejection_reason=chapter_decision.repair_reason or chapter_decision.reason,
+                    validity_class=chapter_decision.validity_class,
+                    repair_reason=chapter_decision.repair_reason,
+                )
+                continue
             try:
-                chapter, provenance = normalize_record(source, record)
+                chapter, provenance = normalize_record(source, record, validity_class=chapter_decision.validity_class)
+                if chapter_decision.decision == "provisional":
+                    self._repository.upsert_provisional_chapter(
+                        fraternity_id=source.fraternity_id,
+                        source_id=source.id,
+                        slug=chapter.slug,
+                        name=chapter.name,
+                        university_name=chapter.university_name,
+                        city=chapter.city,
+                        state=chapter.state,
+                        country=chapter.country,
+                        website_url=chapter.website_url,
+                        instagram_url=chapter.instagram_url,
+                        contact_email=chapter.contact_email,
+                        evidence_payload={
+                            "sourceUrl": record.source_url,
+                            "sourceSnippet": record.source_snippet,
+                            "sourceConfidence": record.source_confidence,
+                            "sourceClass": source_class,
+                            "validityClass": chapter_decision.validity_class,
+                            "repairReason": chapter_decision.repair_reason,
+                        },
+                    )
+                    provisional_created += 1
+                    self._persist_record_evidence(
+                        source,
+                        run_id,
+                        chapter.slug,
+                        record,
+                        source_class=source_class,
+                        evidence_status="observed",
+                        validity_class=chapter_decision.validity_class,
+                        repair_reason=chapter_decision.repair_reason,
+                    )
+                    continue
+
                 chapter_id = self._repository.upsert_chapter(source, chapter)
                 self._repository.insert_provenance(chapter_id, source.id, run_id, provenance)
+                self._persist_record_evidence(
+                    source,
+                    run_id,
+                    chapter.slug,
+                    record,
+                    chapter_id=chapter_id,
+                    source_class=source_class,
+                    evidence_status="accepted",
+                    validity_class=chapter_decision.validity_class,
+                )
                 metrics.records_upserted += 1
-                persisted.append({"chapter": chapter, "chapter_id": chapter_id})
+                canonical_created += 1
+                pending_fields = list(chapter.missing_optional_fields)
+                if pending_fields:
+                    inline_summary = self._run_inline_contact_resolution(
+                        chapter_id=chapter_id,
+                        chapter=chapter,
+                        source=source,
+                        crawl_run_id=run_id,
+                    )
+                    inline_enriched += int(inline_summary["resolved_count"])
+                    for candidate in inline_summary["review_items"]:
+                        self._repository.create_review_item(source.id, run_id, candidate, chapter_id=chapter_id)
+                        metrics.review_items_created += 1
+                    pending_fields = inline_summary["pending_fields"]
+                persisted.append({"chapter": chapter, "chapter_id": chapter_id, "pending_fields": pending_fields})
             except AmbiguousRecordError as exc:
-                review_items.append(ReviewItemCandidate(item_type="adaptive_ambiguous_record", reason=str(exc), source_slug=source.source_slug, chapter_slug=None, payload={"source_url": record.source_url, "snippet": record.source_snippet}))
+                review_items.append(
+                    ReviewItemCandidate(
+                        item_type="adaptive_ambiguous_record",
+                        reason=str(exc),
+                        source_slug=source.source_slug,
+                        chapter_slug=None,
+                        payload={
+                            "source_url": record.source_url,
+                            "snippet": record.source_snippet,
+                            "pageRole": state["page_analysis"].probable_page_role if state.get("page_analysis") else None,
+                            "selectedAction": state.get("selected_action"),
+                            "sourceClass": source_class,
+                            "validityClass": chapter_decision.validity_class,
+                        },
+                    )
+                )
+                self._persist_record_evidence(
+                    source,
+                    run_id,
+                    None,
+                    record,
+                    source_class=source_class,
+                    evidence_status="review",
+                    rejection_reason=str(exc),
+                    validity_class=chapter_decision.validity_class,
+                    repair_reason=chapter_decision.repair_reason,
+                )
         for review_item in review_items:
             self._repository.create_review_item(source.id, run_id, review_item)
             metrics.review_items_created += 1
         for bundle in persisted:
-            chapter = bundle["chapter"]
-            if not chapter.missing_optional_fields:
+            pending_fields = list(bundle.get("pending_fields") or [])
+            if not pending_fields:
                 continue
-            metrics.field_jobs_created += self._repository.create_field_jobs(chapter_id=bundle["chapter_id"], crawl_run_id=run_id, chapter_slug=chapter.slug, source_slug=source.source_slug, missing_fields=chapter.missing_optional_fields)
-        extraction_metadata = {"strategy_used": state.get("selected_action"), "runtime_mode": state.get("runtime_mode", self._runtime_mode), "page_level_confidence": state.get("page_level_confidence"), "template_signature": state.get("template_signature"), "template_signature_raw": state.get("template_signature_raw"), "stop_reason": state.get("stop_reason"), "navigation_stats": state.get("navigation_stats", {}), "policy_snapshot": self._policy.snapshot()}
+            chapter = bundle["chapter"]
+            metrics.field_jobs_created += self._repository.create_field_jobs(
+                chapter_id=bundle["chapter_id"],
+                crawl_run_id=run_id,
+                chapter_slug=chapter.slug,
+                source_slug=source.source_slug,
+                missing_fields=pending_fields,
+            )
+        extraction_metadata = {
+            "strategy_used": state.get("selected_action"),
+            "runtime_mode": state.get("runtime_mode", self._runtime_mode),
+            "page_level_confidence": state.get("page_level_confidence"),
+            "template_signature": state.get("template_signature"),
+            "template_signature_raw": state.get("template_signature_raw"),
+            "stop_reason": state.get("stop_reason"),
+            "navigation_stats": state.get("navigation_stats", {}),
+            "policy_snapshot": self._policy.snapshot(),
+            "chapter_index_mode": state.get("chapter_index_mode"),
+            "chapter_index_reason": state.get("chapter_index_mode_reason"),
+            "provisional_created": provisional_created,
+            "canonical_created": canonical_created,
+            "inline_enriched": inline_enriched,
+            "chapter_search": {
+                **chapter_search_metrics,
+                "canonicalChaptersCreated": canonical_created,
+                "provisionalChaptersCreated": provisional_created,
+                "coverageState": self._chapter_search_coverage_state(
+                    chapter_search_metrics=chapter_search_metrics,
+                    canonical_created=canonical_created,
+                    provisional_created=provisional_created,
+                ),
+            },
+            "chapter_validity": {
+                **chapter_validity_metrics,
+                "canonicalValidCount": canonical_created,
+                "provisionalCount": provisional_created,
+                "sourceInvaliditySaturated": self._chapter_invalidity_saturated(
+                    invalid_count=int(chapter_validity_metrics.get("invalidCount", 0) or 0),
+                    repairable_count=int(chapter_validity_metrics.get("repairableCount", 0) or 0),
+                    canonical_count=canonical_created,
+                    provisional_count=provisional_created,
+                ),
+            },
+        }
         page_analysis_payload = _to_serializable(state.get("page_analysis"))
         classification_payload = _to_serializable(state.get("classification"))
         if state.get("error"):
@@ -635,6 +1056,8 @@ class AdaptiveCrawlOrchestrator:
                 self._repository.finish_crawl_session(session_id, status="failed", stop_reason=state.get("stop_reason") or "error", summary={"recordsUpserted": metrics.records_upserted, "pagesProcessed": metrics.pages_processed, "reviewItemsCreated": metrics.review_items_created})
             return {"metrics": metrics, "final_status": "failed", "error": state.get("error")}
         status = state.get("final_status", "succeeded")
+        if extraction_metadata["chapter_validity"].get("sourceInvaliditySaturated"):
+            status = "partial" if canonical_created == 0 else status
         if metrics.review_items_created > 0 and metrics.records_upserted == 0:
             status = "partial"
         self._repository.finish_crawl_run(run_id=run_id, status=status, metrics=metrics, page_analysis=page_analysis_payload, classification=classification_payload, extraction_metadata=extraction_metadata)
@@ -665,6 +1088,370 @@ class AdaptiveCrawlOrchestrator:
         self._policy.observe(terminal_event.action_type, terminal_event.reward_value)
 
         return {"metrics": metrics, "final_status": status, "stop_reason": state.get("stop_reason")}
+
+    def _page_can_emit_chapters(self, state: AdaptiveCrawlState) -> bool:
+        role = str(state["page_analysis"].probable_page_role or "").strip().lower()
+        if role in {"directory", "index"}:
+            return True
+        if role == "profile" and self._chapter_intent_signal_count(state) >= 2:
+            return True
+        return self._chapter_intent_signal_count(state) >= 3
+
+    def _chapter_intent_signal_count(self, state: AdaptiveCrawlState) -> int:
+        tokens = " ".join(
+            part
+            for part in (
+                state["current_page_url"],
+                state["page_analysis"].title or "",
+                " ".join(state["page_analysis"].headings or []),
+                state["page_analysis"].text_sample or "",
+            )
+            if part
+        ).lower()
+        markers = ("chapter", "chapters", "fraternity", "greek", "organization", "student org", "directory", "find a chapter")
+        return sum(1 for marker in markers if marker in tokens)
+
+    def _filter_records_for_page_context(
+        self,
+        extracted: list[ExtractedChapter],
+        state: AdaptiveCrawlState,
+    ) -> tuple[list[ExtractedChapter], list[ReviewItemCandidate]]:
+        if not extracted:
+            return [], []
+        filtered: list[ExtractedChapter] = []
+        reviews: list[ReviewItemCandidate] = []
+        role = str(state["page_analysis"].probable_page_role or "").strip().lower()
+        allowed = self._page_can_emit_chapters(state)
+        for record in extracted:
+            name = (record.name or "").strip()
+            school = (record.university_name or "").strip()
+            if not allowed:
+                reviews.append(
+                    ReviewItemCandidate(
+                        item_type="adaptive_page_role_gate",
+                        reason="navigation_noise",
+                        source_slug=state["source"].source_slug,
+                        chapter_slug=None,
+                        payload={
+                            "source_url": record.source_url,
+                            "pageRole": role,
+                            "recordName": name,
+                            "universityName": school,
+                        },
+                    )
+                )
+                continue
+            if role in {"search", "navigation"} and not school:
+                reviews.append(
+                    ReviewItemCandidate(
+                        item_type="adaptive_page_role_gate",
+                        reason="missing_institution_signal",
+                        source_slug=state["source"].source_slug,
+                        chapter_slug=None,
+                        payload={"source_url": record.source_url, "pageRole": role, "recordName": name},
+                    )
+                )
+                continue
+            filtered.append(record)
+        return filtered, reviews
+
+    def _filter_chapter_stubs_for_context(self, stubs: list, state: AdaptiveCrawlState) -> tuple[list, list[ChapterSearchDecision]]:
+        if not stubs:
+            return [], []
+        filtered = []
+        decisions: list[ChapterSearchDecision] = []
+        for stub in stubs:
+            target_url = stub.detail_url or stub.outbound_chapter_url_candidate or ""
+            if self._is_irrelevant_frontier_target(target_url, stub.chapter_name):
+                decisions.append(
+                    ChapterSearchDecision(
+                        chapter_name=stub.chapter_name,
+                        university_name=stub.university_name,
+                        source_class=self._chapter_search_source_class(state),
+                        decision="reject",
+                        reason="navigation_noise",
+                        provenance=stub.provenance,
+                        source_url=target_url or None,
+                    )
+                )
+                continue
+            if stub.provenance == "anchor_list" and not stub.university_name and self._chapter_intent_score(target_url, stub.chapter_name) < 1:
+                decisions.append(
+                    ChapterSearchDecision(
+                        chapter_name=stub.chapter_name,
+                        university_name=stub.university_name,
+                        source_class=self._chapter_search_source_class(state),
+                        decision="reject",
+                        reason="missing_institution_signal",
+                        provenance=stub.provenance,
+                        source_url=target_url or None,
+                    )
+                )
+                continue
+            filtered.append(stub)
+        return filtered, decisions
+
+    def _generic_frontier_link_budget(self, state: AdaptiveCrawlState) -> int:
+        default_budget = int(self._settings.crawler_frontier_max_pages_per_template)
+        if state.get("chapter_stubs") or state.get("extracted_from_current"):
+            return max(2, min(default_budget, 3))
+        return default_budget
+
+    def _should_queue_frontier_link(self, state: AdaptiveCrawlState, link: dict[str, Any]) -> bool:
+        url = str(link.get("url") or "")
+        anchor_text = str(link.get("anchor_text") or "")
+        current = state["current_frontier_item"]
+        if not url:
+            return False
+        if self._is_irrelevant_frontier_target(url, anchor_text):
+            return False
+        if state.get("selected_action") == "expand_same_section_links":
+            left = "/".join(part for part in current.canonical_url.split("/")[3:5] if part)
+            right = "/".join(part for part in url.split("/")[3:5] if part)
+            if left and right and left != right:
+                return False
+        intent_score = self._chapter_intent_score(url, anchor_text)
+        if state.get("chapter_stubs") or state.get("extracted_from_current"):
+            return intent_score >= 1
+        role = str(state["page_analysis"].probable_page_role or "").strip().lower()
+        if role in {"directory", "search", "index"}:
+            return intent_score >= 1
+        return True
+
+    def _is_irrelevant_frontier_target(self, url: str, anchor_text: str | None = None) -> bool:
+        lowered = " ".join(part for part in (url, anchor_text or "") if part).lower()
+        blocked_markers = (
+            "/start-a-chapter",
+            "start a chapter",
+            "/careers",
+            "/career",
+            "/about-us",
+            "/about/",
+            "/history",
+            "/notable",
+            "/news",
+            "/blog",
+            "/events",
+            "/event",
+            "/foundation",
+            "/donate",
+            "/scholarship",
+            "/alumni",
+            "/leadership",
+            "/staff",
+            "/privacy",
+            "/terms",
+            "/contact-us",
+        )
+        return any(marker in lowered for marker in blocked_markers)
+
+    def _chapter_intent_score(self, url: str, anchor_text: str | None = None) -> int:
+        lowered = " ".join(part for part in (url, anchor_text or "") if part).lower()
+        strong_markers = ("chapter", "chapters", "directory", "find-a-chapter", "find a chapter", "chapter-roll", "collegiate")
+        weak_markers = ("campus", "university", "college", "undergraduate", "locator", "map")
+        score = sum(1 for marker in strong_markers if marker in lowered)
+        if score:
+            return score
+        return 1 if any(marker in lowered for marker in weak_markers) else 0
+
+    def _merge_stub_contacts_into_records(
+        self,
+        *,
+        extracted: list[ExtractedChapter],
+        stubs: list,
+        contact_hints: dict[str, dict[str, str]],
+        state: AdaptiveCrawlState,
+    ) -> list[ExtractedChapter]:
+        by_key: dict[tuple[str, str], ExtractedChapter] = {}
+        for record in extracted:
+            key = ((record.name or "").strip().lower(), (record.university_name or "").strip().lower())
+            by_key[key] = record
+
+        merged = list(extracted)
+        for stub in stubs:
+            key = self._stub_key(stub)
+            hint = contact_hints.get(key, {})
+            record_key = ((stub.chapter_name or "").strip().lower(), (stub.university_name or "").strip().lower())
+            target = by_key.get(record_key)
+            if target is None:
+                outbound = stub.outbound_chapter_url_candidate or stub.detail_url
+                if not hint and not outbound:
+                    continue
+                target = ExtractedChapter(
+                    name=stub.chapter_name,
+                    university_name=stub.university_name,
+                    website_url=hint.get("website_url"),
+                    instagram_url=hint.get("instagram_url"),
+                    contact_email=hint.get("email"),
+                    source_url=outbound or state["current_page_url"],
+                    source_snippet=stub.provenance,
+                    source_confidence=max(0.7, min(float(stub.confidence or 0.0), 0.92)),
+                )
+                merged.append(target)
+                by_key[record_key] = target
+            if hint.get("website_url") and not target.website_url:
+                target.website_url = hint["website_url"]
+            if hint.get("instagram_url") and not target.instagram_url:
+                target.instagram_url = hint["instagram_url"]
+            if hint.get("email") and not target.contact_email:
+                target.contact_email = hint["email"]
+            if not target.source_url:
+                target.source_url = stub.detail_url or stub.outbound_chapter_url_candidate or state["current_page_url"]
+        return merged
+
+    def _run_inline_contact_resolution(
+        self,
+        *,
+        chapter_id: str,
+        chapter,
+        source,
+        crawl_run_id: int,
+    ) -> dict[str, Any]:
+        pending_fields = list(chapter.missing_optional_fields)
+        review_items: list[ReviewItemCandidate] = []
+        resolved_count = 0
+        if self._inline_enrichment_engine is None or not pending_fields:
+            return {"pending_fields": pending_fields, "review_items": review_items, "resolved_count": resolved_count}
+
+        current_values = {
+            "website_url": chapter.website_url,
+            "instagram_url": chapter.instagram_url,
+            "contact_email": chapter.contact_email,
+        }
+        current_field_states = dict(chapter.field_states or {})
+        for field_name in (FIELD_JOB_FIND_WEBSITE, FIELD_JOB_FIND_EMAIL, FIELD_JOB_FIND_INSTAGRAM):
+            if field_name not in pending_fields:
+                continue
+            job = FieldJob(
+                id=f"inline-{crawl_run_id}-{chapter.slug}-{field_name}",
+                chapter_id=chapter_id,
+                chapter_slug=chapter.slug,
+                chapter_name=chapter.name,
+                field_name=field_name,
+                payload={"mode": "inline_v3"},
+                attempts=0,
+                max_attempts=1,
+                claim_token="inline",
+                source_base_url=source.base_url,
+                website_url=current_values["website_url"],
+                instagram_url=current_values["instagram_url"],
+                contact_email=current_values["contact_email"],
+                fraternity_slug=source.fraternity_slug,
+                source_id=source.id,
+                source_slug=source.source_slug,
+                university_name=chapter.university_name,
+                crawl_run_id=crawl_run_id,
+                field_states=current_field_states,
+            )
+            try:
+                result = self._inline_enrichment_engine.process_claimed_job(job)
+            except RetryableJobError:
+                continue
+            except Exception as exc:  # pragma: no cover - guardrail path
+                review_items.append(
+                    ReviewItemCandidate(
+                        item_type="inline_enrichment_failure",
+                        reason=f"Inline enrichment failed for {field_name}",
+                        source_slug=source.source_slug,
+                        chapter_slug=chapter.slug,
+                        payload={"error": str(exc), "fieldName": field_name},
+                    )
+                )
+                continue
+
+            if result.review_item is not None:
+                review_items.append(result.review_item)
+
+            if result.chapter_updates or result.field_state_updates or result.provenance_records:
+                self._repository.apply_inline_enrichment_result(
+                    chapter_id=chapter_id,
+                    chapter_slug=chapter.slug,
+                    fraternity_slug=source.fraternity_slug,
+                    source_slug=source.source_slug,
+                    source_id=source.id,
+                    crawl_run_id=crawl_run_id,
+                    chapter_updates=result.chapter_updates,
+                    completed_payload=result.completed_payload,
+                    field_state_updates=result.field_state_updates,
+                    provenance_records=result.provenance_records,
+                )
+                current_values["website_url"] = result.chapter_updates.get("website_url", current_values["website_url"])
+                current_values["instagram_url"] = result.chapter_updates.get("instagram_url", current_values["instagram_url"])
+                current_values["contact_email"] = result.chapter_updates.get("contact_email", current_values["contact_email"])
+                current_field_states.update(result.field_state_updates or {})
+
+            target_key = {
+                FIELD_JOB_FIND_WEBSITE: "website_url",
+                FIELD_JOB_FIND_EMAIL: "contact_email",
+                FIELD_JOB_FIND_INSTAGRAM: "instagram_url",
+            }[field_name]
+            if target_key in result.chapter_updates:
+                pending_fields.remove(field_name)
+                resolved_count += 1
+            elif result.review_item is not None and str(result.completed_payload.get("status") or "") == "review_required":
+                pending_fields.remove(field_name)
+        return {"pending_fields": pending_fields, "review_items": review_items, "resolved_count": resolved_count}
+
+    def _persist_record_evidence(
+        self,
+        source,
+        crawl_run_id: int,
+        chapter_slug: str | None,
+        record: ExtractedChapter,
+        *,
+        chapter_id: str | None = None,
+        source_class: str,
+        evidence_status: str,
+        rejection_reason: str | None = None,
+        validity_class: str | None = None,
+        repair_reason: str | None = None,
+    ) -> None:
+        trust_tier = "strong_official" if source_class in {"national", "institutional"} and record.source_confidence >= 0.9 else "high" if record.source_confidence >= 0.85 else "medium"
+        for field_name, field_value in (
+            ("name", record.name),
+            ("university_name", record.university_name),
+            ("website_url", record.website_url),
+            ("instagram_url", record.instagram_url),
+            ("contact_email", record.contact_email),
+        ):
+            if not field_value:
+                continue
+            self._repository.insert_chapter_evidence(
+                ChapterEvidenceRecord(
+                    chapter_id=chapter_id,
+                    chapter_slug=chapter_slug or "",
+                    fraternity_slug=source.fraternity_slug,
+                    source_slug=source.source_slug,
+                    crawl_run_id=crawl_run_id,
+                    field_name=field_name,
+                    candidate_value=field_value,
+                    confidence=record.source_confidence,
+                    trust_tier=trust_tier,
+                    evidence_status=evidence_status,
+                    source_url=record.source_url,
+                    source_snippet=record.source_snippet,
+                    metadata={
+                        "sourceClass": source_class,
+                        "rejectionReason": rejection_reason,
+                        "validityClass": validity_class,
+                        "repairReason": repair_reason,
+                        "runtimeMode": self._runtime_mode,
+                        "chapterSearch": True,
+                    },
+                )
+            )
+
+    def _classify_record_source(self, source, record_url: str | None) -> str:
+        host = host_family(record_url or "")
+        source_host = host_family(source.list_url)
+        if host and host == source_host:
+            return "national"
+        if host.endswith(".edu") or ".edu." in host:
+            return "institutional"
+        return "wider_web"
+
+    def _stub_key(self, stub) -> str:
+        return f"{(stub.chapter_name or '').strip().lower()}::{(stub.university_name or '').strip().lower()}"
 
     def _restore_policy_snapshot(self) -> None:
         snapshot = self._repository.load_latest_policy_snapshot(
@@ -774,6 +1561,189 @@ class AdaptiveCrawlOrchestrator:
         burn = records / pages
         penalties = float(budget_state.get("low_yield_streak", 0)) * 0.05 + float(budget_state.get("guardrail_hits", 0)) * 0.01
         return max(-1.0, min(1.0, burn - penalties))
+
+    def _delayed_reward_seed(self, state: AdaptiveCrawlState) -> float:
+        extracted_current = list(state.get("extracted_from_current", []) or [])
+        verified_website_count = float(state.get("verified_website_count_current", 0) or 0)
+        contact_count = float(sum(1 for record in extracted_current if record.contact_email or record.instagram_url))
+        chapter_yield = min(float(len(extracted_current)), 8.0) * 0.35
+        valid_missing = min(float(state.get("valid_missing_count_current", 0) or 0), 4.0) * 0.2
+        return round((verified_website_count * 1.2) + contact_count + chapter_yield + valid_missing, 4)
+
+    def _chapter_search_source_class(self, state: AdaptiveCrawlState) -> str:
+        page_url = str(state.get("current_page_url") or state["source"].list_url)
+        host = host_family(page_url)
+        source_host = host_family(state["source"].list_url)
+        if host == source_host:
+            if state.get("chapter_index_mode") == "map_or_api_locator" or state["classification"].page_type == "locator_map":
+                return "locator_map"
+            return "html_directory"
+        if host.endswith(".edu") or ".edu." in host:
+            return "institutional_directory"
+        return "mixed_directory"
+
+    def _chapter_search_decide_record(self, *, record: ExtractedChapter, source_class: str) -> ChapterSearchDecision:
+        target = classify_chapter_target(source_url=record.source_url or "", candidate_url=record.website_url or record.source_url)
+        validity = classify_chapter_validity(
+            record,
+            source_class=source_class,
+            target_type=target.target_type,
+        )
+        if len((record.name or "").strip()) > 120 or len((record.university_name or "").strip()) > 160:
+            return ChapterSearchDecision(
+                chapter_name=record.name,
+                university_name=record.university_name,
+                source_class=source_class,
+                decision="reject",
+                reason="overlong_record_blocked",
+                validity_class="invalid_non_chapter",
+                target_type=target.target_type,
+                source_url=record.source_url,
+                invalid_reason="overlong_record_blocked",
+                next_action="quarantine_invalid_entities",
+            )
+        return self._chapter_search_decision_from_validity(validity)
+
+    def _record_chapter_search_decision(
+        self,
+        metrics: dict[str, Any],
+        decision: ChapterSearchDecision,
+    ) -> dict[str, Any]:
+        next_metrics = dict(metrics or {})
+        reason_counts = dict(next_metrics.get("rejectionReasonCounts") or {})
+        if decision.decision == "reject":
+            next_metrics["candidatesRejected"] = int(next_metrics.get("candidatesRejected", 0) or 0) + 1
+            if decision.invalid_reason or decision.reason:
+                key = decision.invalid_reason or decision.reason
+                reason_counts[key] = int(reason_counts.get(key, 0) or 0) + 1
+        next_metrics["rejectionReasonCounts"] = reason_counts
+        return next_metrics
+
+    def _chapter_search_decision_from_validity(self, validity: ChapterValidityDecision) -> ChapterSearchDecision:
+        decision_map = {
+            "canonical_valid": "canonical",
+            "repairable_candidate": "repair",
+            "provisional_candidate": "provisional",
+            "invalid_non_chapter": "reject",
+        }
+        return ChapterSearchDecision(
+            chapter_name=validity.chapter_name,
+            university_name=validity.university_name,
+            source_class=validity.source_class,
+            decision=decision_map.get(validity.validity_class, "reject"),
+            validity_class=validity.validity_class,
+            reason=validity.invalid_reason or validity.repair_reason,
+            target_type=validity.target_type,
+            provenance=validity.provenance,
+            source_url=validity.source_url,
+            invalid_reason=validity.invalid_reason,
+            repair_reason=validity.repair_reason,
+            next_action=validity.next_action,
+        )
+
+    def _merge_candidate_validity_metrics(
+        self,
+        metrics: dict[str, Any],
+        candidates: list[ChapterCandidate],
+    ) -> dict[str, Any]:
+        next_metrics = dict(metrics or {})
+        invalid_reason_counts = dict(next_metrics.get("invalidReasonCounts") or {})
+        repair_reason_counts = dict(next_metrics.get("repairReasonCounts") or {})
+        for candidate in candidates:
+            validity_class = candidate.validity_class or "repairable_candidate"
+            if validity_class == "canonical_valid":
+                next_metrics["canonicalValidCount"] = int(next_metrics.get("canonicalValidCount", 0) or 0) + 1
+            elif validity_class == "provisional_candidate":
+                next_metrics["provisionalCount"] = int(next_metrics.get("provisionalCount", 0) or 0) + 1
+            elif validity_class == "repairable_candidate":
+                next_metrics["repairableCount"] = int(next_metrics.get("repairableCount", 0) or 0) + 1
+                if candidate.repair_reason:
+                    repair_reason_counts[candidate.repair_reason] = int(repair_reason_counts.get(candidate.repair_reason, 0) or 0) + 1
+            else:
+                next_metrics["invalidCount"] = int(next_metrics.get("invalidCount", 0) or 0) + 1
+                if candidate.invalid_reason:
+                    invalid_reason_counts[candidate.invalid_reason] = int(invalid_reason_counts.get(candidate.invalid_reason, 0) or 0) + 1
+        next_metrics["invalidReasonCounts"] = invalid_reason_counts
+        next_metrics["repairReasonCounts"] = repair_reason_counts
+        return next_metrics
+
+    def _record_chapter_validity_decision(
+        self,
+        metrics: dict[str, Any],
+        decision: ChapterSearchDecision,
+    ) -> dict[str, Any]:
+        next_metrics = dict(metrics or {})
+        invalid_reason_counts = dict(next_metrics.get("invalidReasonCounts") or {})
+        repair_reason_counts = dict(next_metrics.get("repairReasonCounts") or {})
+        validity_class = decision.validity_class or "repairable_candidate"
+        if validity_class == "canonical_valid":
+            next_metrics["canonicalValidCount"] = int(next_metrics.get("canonicalValidCount", 0) or 0) + 1
+            contact_admission = dict(next_metrics.get("contactAdmission") or {})
+            contact_admission["admitted_canonical"] = int(contact_admission.get("admitted_canonical", 0) or 0) + 1
+            next_metrics["contactAdmission"] = contact_admission
+        elif validity_class == "provisional_candidate":
+            next_metrics["provisionalCount"] = int(next_metrics.get("provisionalCount", 0) or 0) + 1
+        elif validity_class == "repairable_candidate":
+            next_metrics["repairableCount"] = int(next_metrics.get("repairableCount", 0) or 0) + 1
+            if decision.repair_reason:
+                repair_reason_counts[decision.repair_reason] = int(repair_reason_counts.get(decision.repair_reason, 0) or 0) + 1
+            contact_admission = dict(next_metrics.get("contactAdmission") or {})
+            contact_admission["blocked_repairable"] = int(contact_admission.get("blocked_repairable", 0) or 0) + 1
+            next_metrics["contactAdmission"] = contact_admission
+        else:
+            next_metrics["invalidCount"] = int(next_metrics.get("invalidCount", 0) or 0) + 1
+            if decision.invalid_reason or decision.reason:
+                key = decision.invalid_reason or decision.reason
+                invalid_reason_counts[key] = int(invalid_reason_counts.get(key, 0) or 0) + 1
+            contact_admission = dict(next_metrics.get("contactAdmission") or {})
+            contact_admission["blocked_invalid"] = int(contact_admission.get("blocked_invalid", 0) or 0) + 1
+            next_metrics["contactAdmission"] = contact_admission
+        next_metrics["invalidReasonCounts"] = invalid_reason_counts
+        next_metrics["repairReasonCounts"] = repair_reason_counts
+        return next_metrics
+
+    def _chapter_invalidity_saturated(
+        self,
+        *,
+        invalid_count: int,
+        repairable_count: int,
+        canonical_count: int,
+        provisional_count: int,
+    ) -> bool:
+        total = invalid_count + repairable_count + canonical_count + provisional_count
+        if total < 6:
+            return False
+        noisy = invalid_count + repairable_count
+        return canonical_count == 0 and noisy / max(total, 1) >= 0.6
+
+    def _merge_chapter_search_follow_stats(
+        self,
+        metrics: dict[str, Any],
+        follow_stats: dict[str, Any],
+    ) -> dict[str, Any]:
+        next_metrics = dict(metrics or {})
+        followed = dict(follow_stats.get("followed_by_target_type") or {})
+        skipped = dict(follow_stats.get("skipped_by_target_type") or {})
+        next_metrics["nationalTargetsFollowed"] = int(next_metrics.get("nationalTargetsFollowed", 0) or 0) + int(followed.get("national_detail", 0) or 0) + int(followed.get("national_listing", 0) or 0)
+        next_metrics["institutionalTargetsFollowed"] = int(next_metrics.get("institutionalTargetsFollowed", 0) or 0) + int(followed.get("institutional_page", 0) or 0)
+        next_metrics["broaderWebTargetsFollowed"] = int(next_metrics.get("broaderWebTargetsFollowed", 0) or 0) + int(followed.get("broader_web_candidate", 0) or 0)
+        next_metrics["chapterOwnedTargetsSkipped"] = int(next_metrics.get("chapterOwnedTargetsSkipped", 0) or 0) + int(skipped.get("chapter_owned_site", 0) or 0)
+        return next_metrics
+
+    def _chapter_search_coverage_state(
+        self,
+        *,
+        chapter_search_metrics: dict[str, Any],
+        canonical_created: int,
+        provisional_created: int,
+    ) -> str:
+        if canonical_created > 0:
+            return "canonical_ready"
+        if provisional_created > 0:
+            return "provisional_only"
+        if int((chapter_search_metrics or {}).get("candidatesExtracted", 0) or 0) > 0:
+            return "identity_incomplete"
+        return "empty"
 
 
 def _to_serializable(value: Any) -> dict[str, Any] | None:

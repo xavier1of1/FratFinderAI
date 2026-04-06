@@ -1,5 +1,9 @@
+from contextlib import nullcontext
 from types import SimpleNamespace
 
+import fratfinder_crawler.pipeline as pipeline_module
+
+from fratfinder_crawler.models import FieldJob
 from fratfinder_crawler.pipeline import CrawlService, _distribute_limit, _worker_id
 
 
@@ -20,9 +24,9 @@ def test_worker_id_suffixes_only_for_multi_worker_runs():
     assert _worker_id("local-crawler-worker", 3, 8) == "local-crawler-worker-3"
 
 
-def test_resolve_field_job_runtime_mode_defaults_to_legacy_for_unknown():
-    service = CrawlService(SimpleNamespace(crawler_field_job_runtime_mode="legacy", crawler_field_job_graph_durability="sync"))
-    assert service._resolve_field_job_runtime_mode("unsupported") == "legacy"
+def test_resolve_field_job_runtime_mode_defaults_to_langgraph_primary_for_unknown():
+    service = CrawlService(SimpleNamespace(crawler_field_job_runtime_mode="langgraph_primary", crawler_field_job_graph_durability="sync"))
+    assert service._resolve_field_job_runtime_mode("unsupported") == "langgraph_primary"
 
 
 def test_resolve_field_job_runtime_mode_uses_settings_default():
@@ -33,3 +37,157 @@ def test_resolve_field_job_runtime_mode_uses_settings_default():
 def test_resolve_field_job_graph_durability_defaults_to_sync_for_unknown():
     service = CrawlService(SimpleNamespace(crawler_field_job_runtime_mode="legacy", crawler_field_job_graph_durability="sync"))
     assert service._resolve_field_job_graph_durability("invalid") == "sync"
+
+
+def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
+    claimed = [
+        SimpleNamespace(id="req-1", fraternity_slug="alpha-beta", source_slug="alpha-main", stage="discovery"),
+        SimpleNamespace(id="req-2", fraternity_slug="gamma-delta", source_slug="gamma-main", stage="discovery"),
+    ]
+
+    class FakeRequestGraphRepository:
+        def __init__(self, connection):
+            self._connection = connection
+
+        def reconcile_stale_requests(self, max_age_minutes: int) -> int:
+            assert max_age_minutes == 45
+            return 1
+
+        def claim_next_due_request(self, worker_id: str):
+            assert worker_id == "local-request-worker"
+            return claimed.pop(0) if claimed else None
+
+    class WorkerService(CrawlService):
+        def __init__(self, settings):
+            self._settings = settings
+            self.run_request_calls: list[str] = []
+
+        def run_request(self, *, request_id: str, runtime_mode: str, crawl_runtime_mode: str | None = None, field_job_runtime_mode: str | None = None, graph_durability: str | None = None):
+            self.run_request_calls.append(request_id)
+            return {
+                "requestId": request_id,
+                "status": "succeeded" if request_id == "req-1" else "paused",
+                "terminalReason": "completed" if request_id == "req-1" else "awaiting_confirmation",
+            }
+
+    settings = SimpleNamespace(
+        crawler_v3_request_batch_limit=5,
+        crawler_v3_request_poll_seconds=1,
+        crawler_v3_request_stale_minutes=45,
+        crawler_v3_request_worker_id="local-request-worker",
+        crawler_v3_crawl_runtime_mode="adaptive_primary",
+        crawler_v3_field_job_runtime_mode="langgraph_primary",
+        crawler_v3_field_job_graph_durability="sync",
+    )
+    service = WorkerService(settings)
+
+    monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(object()))
+    monkeypatch.setattr(pipeline_module, "RequestGraphRepository", FakeRequestGraphRepository)
+
+    result = service.run_request_worker(once=True, limit=3)
+
+    assert service.run_request_calls == ["req-1", "req-2"]
+    assert result["processed"] == 2
+    assert result["succeeded"] == 1
+    assert result["paused"] == 1
+    assert result["failed"] == 0
+
+
+class _QueueTriageRepository:
+    def __init__(self, jobs: list[FieldJob], snippets_by_chapter: dict[str, list[str]] | None = None):
+        self.jobs = jobs
+        self.snippets_by_chapter = snippets_by_chapter or {}
+        self.patched: list[dict[str, object]] = []
+        self.repairs: list[dict[str, object]] = []
+
+    def list_queued_field_jobs_for_triage(self, *, limit: int = 200, source_slug: str | None = None, field_name: str | None = None):
+        _ = limit, source_slug, field_name
+        return list(self.jobs)
+
+    def patch_queued_field_job(self, field_job_id: str, **kwargs: object) -> bool:
+        self.patched.append({"field_job_id": field_job_id, **kwargs})
+        return True
+
+    def fetch_provenance_snippets(self, chapter_id: str) -> list[str]:
+        return list(self.snippets_by_chapter.get(chapter_id, []))
+
+    def update_chapter_identity_repair(self, **kwargs: object) -> bool:
+        self.repairs.append(dict(kwargs))
+        return True
+
+
+def _field_job(
+    *,
+    chapter_id: str = "chapter-1",
+    chapter_slug: str = "chapter-1",
+    chapter_name: str = "Alpha Test",
+    field_name: str = "find_website",
+    university_name: str | None = None,
+    payload: dict[str, object] | None = None,
+    source_slug: str | None = "alpha-main",
+) -> FieldJob:
+    return FieldJob(
+        id=f"{chapter_id}-{field_name}",
+        chapter_id=chapter_id,
+        chapter_slug=chapter_slug,
+        chapter_name=chapter_name,
+        field_name=field_name,
+        payload=payload or {"sourceSlug": source_slug},
+        attempts=0,
+        max_attempts=3,
+        claim_token="",
+        source_base_url="https://example.org/chapters",
+        website_url=None,
+        instagram_url=None,
+        contact_email=None,
+        fraternity_slug="alpha-beta",
+        source_id="source-1",
+        source_slug=source_slug,
+        university_name=university_name,
+        crawl_run_id=11,
+        field_states={},
+        priority=0,
+    )
+
+
+def test_reconcile_field_job_queue_cancels_invalid_historical_jobs():
+    settings = SimpleNamespace(crawler_field_job_runtime_mode="langgraph_primary", crawler_field_job_graph_durability="sync")
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[_field_job(chapter_name="School of Medicine", university_name="1819")]
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="sigma-alpha-epsilon-main",
+        field_name="find_website",
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("sigma-alpha-epsilon-main"),
+    )
+
+    assert triage["invalidCancelled"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["status"] == "failed"
+    assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "cancel_invalid"
+
+
+def test_reconcile_field_job_queue_repairs_candidate_school_into_actionable():
+    settings = SimpleNamespace(crawler_field_job_runtime_mode="langgraph_primary", crawler_field_job_graph_durability="sync")
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[_field_job(university_name=None, payload={"candidateSchoolName": "Example University", "sourceSlug": "alpha-main"})]
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-delta-gamma-main",
+        field_name="find_website",
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-delta-gamma-main"),
+    )
+
+    assert triage["actionableRetained"] == 1
+    assert triage["repairQueued"] == 0
+    assert repair["promotedToCanonical"] == 1
+    assert repo.repairs[0]["university_name"] == "Example University"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"

@@ -58,6 +58,20 @@ export interface CrawlRunListItem {
   crawlSessionCount: number;
   pageLevelConfidence: number | null;
   llmCallsUsed: number;
+  chapterSearch?: {
+    sourceClass?: string | null;
+    candidatesExtracted?: number;
+    candidatesRejected?: number;
+    canonicalChaptersCreated?: number;
+    provisionalChaptersCreated?: number;
+    nationalTargetsFollowed?: number;
+    institutionalTargetsFollowed?: number;
+    chapterOwnedTargetsSkipped?: number;
+    broaderWebTargetsFollowed?: number;
+    chapterSearchWallTimeMs?: number;
+    rejectionReasonCounts?: Record<string, number>;
+    coverageState?: string | null;
+  } | null;
 }
 
 export interface ReviewItemListItem {
@@ -152,6 +166,11 @@ export interface BenchmarkRunSummary {
   queueDepthStart: number;
   queueDepthEnd: number;
   queueDepthDelta: number;
+  invalidBlocked?: number;
+  repairableBlocked?: number;
+  repairPromoted?: number;
+  reconciledHistorical?: number;
+  actionableQueueRemaining?: number;
 }
 
 export interface BenchmarkShadowDiff {
@@ -247,6 +266,7 @@ export interface FraternityCrawlRequestConfig {
   fieldJobLimitPerCycle: number;
   maxEnrichmentCycles: number;
   pauseMs: number;
+  crawlPolicyVersion?: string | null;
 }
 
 export interface FraternityCrawlSourceQuality {
@@ -322,6 +342,207 @@ export interface FraternityCrawlProgress {
     sourceQuality?: FraternityCrawlSourceQuality;
     enrichment?: FraternityCrawlEnrichmentAnalytics;
   };
+  graph?: {
+    requestGraphRunId?: number | null;
+    runtimeMode?: string | null;
+    workerId?: string | null;
+    activeNode?: string | null;
+  };
+  provisional?: {
+    evaluated?: boolean;
+    autoPromoted?: number;
+    remaining?: number;
+  };
+  chapterSearch?: {
+    sourceClass?: string | null;
+    candidatesExtracted?: number;
+    candidatesRejected?: number;
+    canonicalChaptersCreated?: number;
+    provisionalChaptersCreated?: number;
+    nationalTargetsFollowed?: number;
+    institutionalTargetsFollowed?: number;
+    chapterOwnedTargetsSkipped?: number;
+    broaderWebTargetsFollowed?: number;
+    chapterSearchWallTimeMs?: number;
+    rejectionReasonCounts?: Record<string, number>;
+    coverageState?: string | null;
+  };
+  chapterValidity?: {
+    invalidCount?: number;
+    repairableCount?: number;
+    provisionalCount?: number;
+    canonicalValidCount?: number;
+    invalidReasonCounts?: Record<string, number>;
+    repairReasonCounts?: Record<string, number>;
+    sourceInvaliditySaturated?: boolean;
+    contactAdmission?: {
+      blocked_invalid?: number;
+      blocked_repairable?: number;
+      admitted_canonical?: number;
+    };
+  };
+  queueTriage?: {
+    invalidCancelled?: number;
+    deferredLongCooldown?: number;
+    repairQueued?: number;
+    actionableRetained?: number;
+    sourceInvaliditySaturated?: boolean;
+  };
+  chapterRepair?: {
+    queued?: number;
+    running?: number;
+    promotedToCanonical?: number;
+    downgradedToProvisional?: number;
+    confirmedInvalid?: number;
+    repairExhausted?: number;
+    reconciledHistorical?: number;
+  };
+  contactResolution?: {
+    queuedActionable?: number;
+    queuedDeferred?: number;
+    processed?: number;
+    requeued?: number;
+    reviewRequired?: number;
+    terminalNoSignal?: number;
+    providerDegraded?: number;
+    autoWritten?: number;
+    writesByField?: Record<string, number>;
+    actionableRemaining?: number;
+    blockedInvalid?: number;
+    blockedRepairable?: number;
+    reconciledHistorical?: number;
+    rejectionReasonCounts?: Record<string, number>;
+  };
+}
+
+export interface RequestGraphRun {
+  id: number;
+  requestId: string;
+  workerId: string;
+  runtimeMode: string;
+  status: string;
+  activeNode: string | null;
+  summary: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  fraternityName: string | null;
+  fraternitySlug: string | null;
+  sourceSlug: string | null;
+  requestStage: string | null;
+  requestStatus: string | null;
+}
+
+export interface ProvisionalChapter {
+  id: string;
+  fraternityId: string;
+  fraternitySlug: string | null;
+  sourceSlug: string | null;
+  requestId: string | null;
+  promotedChapterId: string | null;
+  slug: string;
+  name: string;
+  universityName: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  websiteUrl: string | null;
+  instagramUrl: string | null;
+  contactEmail: string | null;
+  status: string;
+  promotionReason: string | null;
+  evidencePayload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChapterEvidence {
+  id: string;
+  chapterId: string | null;
+  chapterSlug: string | null;
+  fraternitySlug: string | null;
+  sourceSlug: string | null;
+  requestId: string | null;
+  crawlRunId: number | null;
+  fieldName: string;
+  candidateValue: string | null;
+  confidence: number | null;
+  trustTier: string | null;
+  evidenceStatus: string | null;
+  sourceUrl: string | null;
+  sourceSnippet: string | null;
+  provider: string | null;
+  query: string | null;
+  relatedWebsiteUrl: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AgentOpsSummary {
+  requestQueueQueued: number;
+  requestQueueRunning: number;
+  requestAwaitingConfirmation: number;
+  requestCompleted: number;
+  graphRunsTotal: number;
+  graphRunsRunning: number;
+  graphRunsPaused: number;
+  graphRunsFailed: number;
+  graphRunsSucceeded: number;
+  fieldJobsQueued: number;
+  fieldJobsRunning: number;
+  fieldJobsDeferred: number;
+  fieldJobsTerminalNoSignal: number;
+  fieldJobsReviewRequired: number;
+  fieldJobsUpdated: number;
+  provisionalOpen: number;
+  provisionalPromoted: number;
+  evidenceTotal: number;
+  evidenceReview: number;
+  evidenceWrite: number;
+  chapterSearchRuns: number;
+  chapterSearchCanonical: number;
+  chapterSearchProvisional: number;
+  chapterSearchChapterOwnedSkipped: number;
+  chapterValidityInvalid: number;
+  chapterValidityRepairable: number;
+  chapterValidityBlockedInvalid: number;
+  chapterValidityBlockedRepairable: number;
+}
+
+export interface ChapterSearchRun {
+  id: number;
+  sourceSlug: string | null;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  runtimeMode: string | null;
+  strategyUsed: string | null;
+  stopReason: string | null;
+  pagesProcessed: number;
+  recordsSeen: number;
+  recordsUpserted: number;
+  reviewItemsCreated: number;
+  fieldJobsCreated: number;
+  sourceClass: string | null;
+  coverageState: string | null;
+  candidatesExtracted: number;
+  candidatesRejected: number;
+  canonicalChaptersCreated: number;
+  provisionalChaptersCreated: number;
+  nationalTargetsFollowed: number;
+  institutionalTargetsFollowed: number;
+  chapterOwnedTargetsSkipped: number;
+  broaderWebTargetsFollowed: number;
+  chapterSearchWallTimeMs: number;
+  rejectionReasonCounts: Record<string, number>;
+  invalidCount: number;
+  repairableCount: number;
+  canonicalValidCount: number;
+  provisionalCount: number;
+  sourceInvaliditySaturated: boolean;
+  invalidReasonCounts: Record<string, number>;
 }
 
 export interface FraternityCrawlRequestEvent {
@@ -365,6 +586,70 @@ export type CampaignRunItemStatus =
   | "skipped"
   | "canceled";
 
+export type CampaignProgramMode = "standard" | "v4_rl_improvement";
+
+export interface CampaignPromotionDecision {
+  round: number;
+  stagedPolicyVersion: string;
+  snapshotId: number | null;
+  promoted: boolean;
+  reason: string;
+  balancedScore: number;
+  queueQueued: number;
+  placeholderReviewCount: number;
+  overlongReviewCount: number;
+  createdAt: string;
+}
+
+export interface CampaignQueueStallAlert {
+  active: boolean;
+  since: string | null;
+  reason: string | null;
+  queuedDepth: number;
+  lastProcessedTotal: number;
+}
+
+export interface CampaignReviewReasonDrift {
+  reason: string;
+  baselineCount: number;
+  latestCount: number;
+  delta: number;
+}
+
+export interface CampaignDelayedRewardHealth {
+  delayedRewardEventCount: number;
+  delayedRewardTotal: number;
+  placeholderReviewCount: number;
+  overlongReviewCount: number;
+  guardrailHitRate: number;
+  validMissingCount: number;
+  verifiedWebsiteCount: number;
+  topDelayedActions: AdaptiveDelayedAttribution[];
+}
+
+export interface CampaignAcceptanceGateCheck {
+  label: string;
+  value: string;
+  target: string;
+  passed: boolean;
+}
+
+export interface CampaignAcceptanceGate {
+  passed: boolean;
+  checks: CampaignAcceptanceGateCheck[];
+  baselineSnapshot?: Record<string, unknown> | null;
+  finalSnapshot?: Record<string, unknown> | null;
+}
+
+export interface AdaptivePolicySnapshot {
+  id: number;
+  policyVersion: string;
+  runtimeMode: string;
+  featureSchemaVersion: string;
+  metrics: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface CampaignRunConfig {
   targetCount: number;
   controlCount: number;
@@ -376,6 +661,18 @@ export interface CampaignRunConfig {
   preflightRequired: boolean;
   autoTuningEnabled: boolean;
   controlFraternitySlugs: string[];
+  programMode?: CampaignProgramMode;
+  runtimeMode?: "legacy" | "adaptive_shadow" | "adaptive_assisted" | "adaptive_primary";
+  fieldJobRuntimeMode?: "legacy" | "langgraph_shadow" | "langgraph_primary";
+  frozenSourceSlugs?: string[];
+  trainingRounds?: number;
+  epochsPerRound?: number;
+  trainingSourceBatchSize?: number;
+  evalSourceBatchSize?: number;
+  trainingCommandTimeoutMinutes?: number;
+  checkpointPromotionEnabled?: boolean;
+  queueStallThresholdMinutes?: number;
+  reviewWindowDays?: number;
 }
 
 export interface CampaignFailureHistogramEntry {
@@ -480,6 +777,18 @@ export interface CampaignRunTelemetry {
   lastCheckpointAt?: string | null;
   lastTuneAt?: string | null;
   runtimeNotes?: string[];
+  cohortManifest?: string[];
+  activePolicyVersion?: string | null;
+  activePolicySnapshotId?: number | null;
+  promotionDecisions?: CampaignPromotionDecision[];
+  queueStallAlert?: CampaignQueueStallAlert | null;
+  delayedRewardHealth?: CampaignDelayedRewardHealth | null;
+  reviewReasonDrift?: CampaignReviewReasonDrift[];
+  acceptanceGate?: CampaignAcceptanceGate | null;
+  baselineSnapshot?: Record<string, unknown> | null;
+  finalSnapshot?: Record<string, unknown> | null;
+  programPhase?: "baseline" | "training" | "live_campaign" | "completed";
+  programStartedAt?: string | null;
 }
 
 export interface CampaignCohortSummary {
@@ -565,6 +874,11 @@ export interface AdaptiveInsights {
   guardrailPages: number;
   validMissingCount: number;
   verifiedWebsiteCount: number;
+  delayedRewardEventCount: number;
+  delayedRewardTotal: number;
+  placeholderReviewCount: number;
+  overlongReviewCount: number;
+  topReviewReasons: Array<{ reason: string; count: number }>;
 }
 
 export interface FieldJobGraphRunListItem {

@@ -1,3 +1,26 @@
+## [3.0.0] - 2026-04-04
+
+### Added
+- Added the V3 request-worker runtime and LangGraph request supervisor flow across `services/crawler`, including request graph runs, events, checkpoints, evidence writes, provisional chapter persistence, and provider-health snapshots.
+- Added the Agent Ops web surface and API for V3 runtime inspection:
+  - `GET /api/agent-ops`
+  - `/agent-ops`
+- Added request-level queue health and graph metadata visibility to the website, including:
+  - V3 queue/runtime summary cards in Overview
+  - request graph metadata in Fraternity Intake
+  - provisional/evidence summary cards in Agent Ops
+- Added live V3 validation documentation in `docs/reports/V3_MVP_VALIDATION_2026-04-04.md`.
+
+### Changed
+- Production crawl-request execution now routes through the dedicated Python V3 worker path instead of the web-owned shell-out scheduler when `CRAWLER_V3_ENABLED=true`.
+- The default V3 crawl core remains `legacy` while request orchestration, field-job continuation, checkpoints, and observability are LangGraph-native.
+- Website metadata, release framing, and package versions now identify this release as `V3.0.0`.
+
+### Validated
+- Validated a live V3 request against the latest comparable V2 request path, with V3 completing materially faster while matching useful output.
+- Validated a multi-request queue-drain run where the V3 worker processed `2` fresh queued requests, completed both successfully, and left `0` pending request-level backlog.
+- Validated the website through `next build`, `typecheck`, `vitest`, and targeted crawler pytest coverage for the request worker/runtime.
+
 ## [2.1.2] - 2026-04-04
 
 ### Added
@@ -52,7 +75,7 @@
 
 ### Fixed
 - Fixed frontend production verification path by removing stale Node/Next build-process interference and validating successful `next build` output.
-- Fixed chapter map ìall zeros/no dotsî behavior when state summary responses are empty or stale.
+- Fixed chapter map ‚Äúall zeros/no dots‚Äù behavior when state summary responses are empty or stale.
 - Fixed prior changelog gap by documenting the LangGraph field-job runtime migration work completed in this phase.
 ## [2.1.0] - 2026-04-01
 

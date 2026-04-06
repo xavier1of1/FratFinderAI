@@ -198,24 +198,24 @@ def test_field_job_engine_completes_supported_find_jobs():
 
 
 
-def test_field_job_engine_requeues_retryable_find_job_until_max_attempts():
-    retryable = _job("find_email")
+def test_field_job_engine_bounds_no_signal_jobs_after_negative_memory():
+    retryable = _job("find_email", university_name="Example University")
     repo = FakeRepository(jobs=[retryable], snippets_by_chapter={"chapter-1": ["No email in this snippet"]})
     engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker", base_backoff_seconds=2)
 
     result = engine.process(limit=1)
 
     assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
-    assert repo.requeued == [retryable.id]
+    assert repo.requeue_payload_patches[0]["terminal_no_signal_count"] == 1
 
-    terminal = replace(retryable, attempts=3, id="job-find_email-terminal")
-    repo = FakeRepository(jobs=[terminal], snippets_by_chapter={"chapter-1": ["No email in this snippet"]})
+    bounded = replace(retryable, attempts=2, id="job-find_email-bounded", payload={**retryable.payload, "terminal_no_signal_count": 1})
+    repo = FakeRepository(jobs=[bounded], snippets_by_chapter={"chapter-1": ["No email in this snippet"]})
     engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker", base_backoff_seconds=2)
 
     result = engine.process(limit=1)
 
-    assert result == {"processed": 0, "requeued": 0, "failed_terminal": 1}
-    assert repo.failed == [terminal.id]
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert len(repo.completed) == 1
 
 
 
@@ -477,7 +477,7 @@ def test_verify_website_fails_terminal_on_max_attempts_after_server_error():
 
 
 def test_find_website_requeues_when_only_source_base_url_exists():
-    job = _job("find_website")
+    job = _job("find_website", university_name="Example University")
     repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["No website in this snippet"]})
     engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
 

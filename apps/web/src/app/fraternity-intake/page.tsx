@@ -12,7 +12,7 @@ export default async function FraternityIntakePage() {
       <PageIntro
         eyebrow="Fraternity Intake"
         title="Suggest and schedule staged crawl requests"
-        description="Submit a fraternity name, track source discovery, and monitor crawl plus enrichment progress across website, email, and Instagram jobs."
+        description="Submit a fraternity name, track V3 request-worker execution, and monitor crawl plus enrichment progress across website, email, and Instagram jobs."
         meta={[`${requests.length} saved requests`, `${activeCount} active`, requests[0] ? `latest: ${requests[0].fraternityName}` : "no requests yet"]}
       />
       <FraternityIntakeDashboard initialRequests={requests} />

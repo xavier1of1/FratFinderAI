@@ -10,7 +10,8 @@ from bs4 import BeautifulSoup
 from fratfinder_crawler.adapters.registry import AdapterRegistry
 from fratfinder_crawler.analysis import score_chapter_link
 from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
-from fratfinder_crawler.models import ChapterStub, EmbeddedDataResult, PageAnalysis, SourceClassification
+from fratfinder_crawler.models import ChapterCandidate, ChapterIdentity, ChapterStub, ChapterTarget, EmbeddedDataResult, ExtractedChapter, PageAnalysis, SourceClassification
+from fratfinder_crawler.normalization import classify_chapter_validity
 
 _GENERIC_LINK_LABELS = {
     "go to site",
@@ -21,6 +22,7 @@ _GENERIC_LINK_LABELS = {
 }
 
 _BLOCKED_HOST_FRAGMENTS = ("facebook.com", "instagram.com", "linkedin.com", "x.com", "twitter.com")
+_SOCIAL_HOST_FRAGMENTS = ("facebook.com", "instagram.com", "linkedin.com", "x.com", "twitter.com", "youtube.com", "tiktok.com")
 _EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.IGNORECASE)
 _INSTAGRAM_URL_PATTERN = re.compile(r"https?://(?:www\.)?instagram\.com/([A-Za-z0-9_.]+)/?", re.IGNORECASE)
 _INSTAGRAM_HANDLE_PATTERN = re.compile(r"@([A-Za-z0-9_.]{3,30})")
@@ -46,6 +48,30 @@ _CHAPTER_ROLL_BLOCKED_MARKERS = (
     "policies",
     "history",
     "system",
+)
+
+_IRRELEVANT_CHAPTER_TARGET_MARKERS = (
+    "/start-a-chapter",
+    "start a chapter",
+    "/careers",
+    "/career",
+    "/about-us",
+    "/about/",
+    "/history",
+    "/notable",
+    "/news",
+    "/blog",
+    "/events",
+    "/event",
+    "/foundation",
+    "/donate",
+    "/scholarship",
+    "/alumni",
+    "/leadership",
+    "/staff",
+    "/privacy",
+    "/terms",
+    "/contact-us",
 )
 
 
@@ -132,20 +158,18 @@ def follow_chapter_detail_or_outbound(
     http_client: Any,
     max_hops_per_stub: int,
     max_pages_per_run: int,
+    follow_external_chapter_sites: bool = True,
+    allow_institutional_follow: bool = True,
 ) -> tuple[dict[str, list[tuple[str, str]]], dict[str, int]]:
     pages_by_stub: dict[str, list[tuple[str, str]]] = defaultdict(list)
     fetched_pages = 0
     skipped_by_domain = 0
     errors = 0
     cache_hits = 0
+    followed_by_target_type: dict[str, int] = defaultdict(int)
+    skipped_by_target_type: dict[str, int] = defaultdict(int)
+    target_decisions: list[dict[str, str | bool | None]] = []
 
-    national_host = (urlparse(source_url).netloc or "").lower()
-    chapter_hosts = {
-        (urlparse(stub.outbound_chapter_url_candidate or "").netloc or "").lower()
-        for stub in stubs
-        if stub.outbound_chapter_url_candidate
-    }
-    allowed_hosts = {host for host in {national_host, *chapter_hosts} if host}
     fetched_cache: dict[str, str] = {}
 
     for stub in stubs:
@@ -161,14 +185,40 @@ def follow_chapter_detail_or_outbound(
         for candidate_url in candidates[: max(1, max_hops_per_stub)]:
             if fetched_pages >= max_pages_per_run:
                 break
-            host = (urlparse(candidate_url).netloc or "").lower()
-            if not _host_allowed(host, allowed_hosts):
+            target = classify_chapter_target(source_url=source_url, candidate_url=candidate_url)
+            follow_allowed = target.follow_allowed
+            rejection_reason = target.rejection_reason
+            if (
+                target.target_type == "institutional_page"
+                and allow_institutional_follow
+                and _stub_identity_complete(stub)
+            ):
+                follow_allowed = False
+                rejection_reason = "institutional_completion_not_needed"
+            target_decisions.append(
+                {
+                    "url": target.url,
+                    "targetType": target.target_type,
+                    "sourceClass": target.source_class,
+                    "followAllowed": follow_allowed,
+                    "rejectionReason": rejection_reason,
+                }
+            )
+            if target.target_type == "institutional_page" and not allow_institutional_follow:
+                skipped_by_target_type[target.target_type] += 1
+                continue
+            if target.target_type == "chapter_owned_site" and not follow_external_chapter_sites:
+                skipped_by_target_type[target.target_type] += 1
+                continue
+            if not follow_allowed:
+                skipped_by_target_type[target.target_type] += 1
                 skipped_by_domain += 1
                 continue
             cache_key = _normalize_fetch_url(candidate_url)
             if cache_key in fetched_cache:
                 pages_by_stub[key].append((candidate_url, fetched_cache[cache_key]))
                 cache_hits += 1
+                followed_by_target_type[target.target_type] += 1
                 continue
             try:
                 html = http_client.get(candidate_url)
@@ -178,12 +228,16 @@ def follow_chapter_detail_or_outbound(
             fetched_cache[cache_key] = html
             pages_by_stub[key].append((candidate_url, html))
             fetched_pages += 1
+            followed_by_target_type[target.target_type] += 1
 
     return pages_by_stub, {
         "fetched_pages": fetched_pages,
         "skipped_by_domain": skipped_by_domain,
         "errors": errors,
         "cache_hits": cache_hits,
+        "followed_by_target_type": dict(followed_by_target_type),
+        "skipped_by_target_type": dict(skipped_by_target_type),
+        "target_decisions": target_decisions,
     }
 
 
@@ -274,6 +328,8 @@ def _extract_anchor_stubs(html: str, source_url: str) -> list[ChapterStub]:
 
         university_name = _extract_university_name(context)
         absolute_url = urljoin(source_url, href)
+        if _looks_like_irrelevant_chapter_target(absolute_url, label, context):
+            continue
         stubs.append(
             ChapterStub(
                 chapter_name=chapter_name.strip(),
@@ -454,6 +510,84 @@ def _stub_key(stub: ChapterStub) -> str:
     return f"{name}:{school}"
 
 
+def classify_chapter_target(*, source_url: str, candidate_url: str | None) -> ChapterTarget:
+    normalized_url = (candidate_url or "").strip() or None
+    source_host = (urlparse(source_url).netloc or "").lower()
+    parsed = urlparse(normalized_url or "")
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").lower()
+    lowered = (normalized_url or "").lower()
+    if normalized_url is None or not host:
+        return ChapterTarget(url=normalized_url, target_type="unknown", source_class="unknown", follow_allowed=False, rejection_reason="missing_target_url", host=host or None)
+    if any(fragment in host for fragment in _SOCIAL_HOST_FRAGMENTS):
+        return ChapterTarget(url=normalized_url, target_type="social_page", source_class="broader_web", follow_allowed=False, rejection_reason="social_page", host=host)
+    if host == source_host or host.endswith(f".{source_host}"):
+        target_type = "national_listing" if normalized_url.rstrip("/") == source_url.rstrip("/") else "national_detail"
+        return ChapterTarget(url=normalized_url, target_type=target_type, source_class="national", follow_allowed=True, host=host)
+    if host.endswith(".edu") or ".edu." in host:
+        if "/~" in path or path.startswith("/users/") or "/people/" in path:
+            return ChapterTarget(
+                url=normalized_url,
+                target_type="institutional_page",
+                source_class="institutional",
+                follow_allowed=False,
+                rejection_reason="external_target_timeout_risk",
+                host=host,
+            )
+        return ChapterTarget(url=normalized_url, target_type="institutional_page", source_class="institutional", follow_allowed=True, host=host)
+    if lowered.startswith("http://") or lowered.startswith("https://"):
+        return ChapterTarget(url=normalized_url, target_type="chapter_owned_site", source_class="wider_web", follow_allowed=False, rejection_reason="chapter_site_only", host=host)
+    return ChapterTarget(url=normalized_url, target_type="unknown", source_class="unknown", follow_allowed=False, rejection_reason="unknown_target_type", host=host)
+
+
+def build_chapter_candidates(*, stubs: list[ChapterStub], source_url: str) -> list[ChapterCandidate]:
+    candidates: list[ChapterCandidate] = []
+    for stub in stubs:
+        targets: list[ChapterTarget] = []
+        for candidate_url in (stub.detail_url, stub.outbound_chapter_url_candidate):
+            if not candidate_url:
+                continue
+            target = classify_chapter_target(source_url=source_url, candidate_url=candidate_url)
+            if not any(existing.url == target.url for existing in targets):
+                targets.append(target)
+        source_classes = {target.source_class for target in targets if target.source_class != "unknown"}
+        source_class = "national" if "national" in source_classes else next(iter(source_classes), "national")
+        identity = ChapterIdentity(
+            chapter_name=stub.chapter_name,
+            university_name=stub.university_name,
+            source_class=source_class,
+            chapter_intent_signals=sum(1 for value in (stub.chapter_name, stub.university_name) if value),
+            identity_complete=bool((stub.chapter_name or "").strip()) and bool((stub.university_name or "").strip()),
+        )
+        validity = classify_chapter_validity(
+            ExtractedChapter(
+                name=stub.chapter_name,
+                university_name=stub.university_name,
+                source_url=stub.detail_url or stub.outbound_chapter_url_candidate or source_url,
+                source_confidence=float(stub.confidence or 0.0),
+            ),
+            source_class=source_class,
+            provenance=stub.provenance,
+            target_type=targets[0].target_type if targets else None,
+        )
+        candidates.append(
+            ChapterCandidate(
+                chapter_name=stub.chapter_name,
+                university_name=stub.university_name,
+                confidence=float(stub.confidence or 0.0),
+                provenance=stub.provenance,
+                source_class=source_class,
+                identity=identity,
+                targets=targets,
+                validity_class=validity.validity_class,
+                invalid_reason=validity.invalid_reason,
+                repair_reason=validity.repair_reason,
+                semantic_signals=validity.semantic_signals,
+            )
+        )
+    return candidates
+
+
 def _dedupe_stubs(stubs: list[ChapterStub]) -> list[ChapterStub]:
     deduped: dict[str, ChapterStub] = {}
     for stub in stubs:
@@ -462,6 +596,10 @@ def _dedupe_stubs(stubs: list[ChapterStub]) -> list[ChapterStub]:
         if current is None or stub.confidence > current.confidence:
             deduped[key] = stub
     return sorted(deduped.values(), key=lambda item: item.confidence, reverse=True)
+
+
+def _stub_identity_complete(stub: ChapterStub) -> bool:
+    return bool((stub.chapter_name or "").strip()) and bool((stub.university_name or "").strip())
 
 
 def _host_allowed(host: str, allowed_hosts: set[str]) -> bool:
@@ -477,6 +615,11 @@ def _normalize_fetch_url(url: str) -> str:
     parsed = urlparse(url)
     clean = parsed._replace(fragment="")
     return clean.geturl()
+
+
+def _looks_like_irrelevant_chapter_target(url: str, label: str, context: str) -> bool:
+    lowered = " ".join(part for part in (url, label, context) if part).lower()
+    return any(marker in lowered for marker in _IRRELEVANT_CHAPTER_TARGET_MARKERS)
 
 
 def _normalize_instagram_url(url: str) -> str:

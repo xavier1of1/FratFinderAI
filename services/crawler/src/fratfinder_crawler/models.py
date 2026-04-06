@@ -91,6 +91,71 @@ class ChapterStub:
 
 
 @dataclass(slots=True)
+class ChapterTarget:
+    url: str | None
+    target_type: str
+    source_class: str
+    follow_allowed: bool
+    rejection_reason: str | None = None
+    host: str | None = None
+
+
+@dataclass(slots=True)
+class ChapterIdentity:
+    chapter_name: str
+    university_name: str | None
+    source_class: str
+    chapter_intent_signals: int
+    identity_complete: bool
+
+
+@dataclass(slots=True)
+class ChapterValidityDecision:
+    chapter_name: str
+    university_name: str | None
+    source_class: str
+    validity_class: str
+    invalid_reason: str | None = None
+    repair_reason: str | None = None
+    target_type: str | None = None
+    provenance: str | None = None
+    source_url: str | None = None
+    next_action: str | None = None
+    semantic_signals: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ChapterCandidate:
+    chapter_name: str
+    university_name: str | None
+    confidence: float
+    provenance: str
+    source_class: str
+    identity: ChapterIdentity
+    targets: list[ChapterTarget] = field(default_factory=list)
+    validity_class: str = "repairable_candidate"
+    invalid_reason: str | None = None
+    repair_reason: str | None = None
+    semantic_signals: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ChapterSearchDecision:
+    chapter_name: str
+    university_name: str | None
+    source_class: str
+    decision: str
+    validity_class: str = "repairable_candidate"
+    reason: str | None = None
+    target_type: str | None = None
+    provenance: str | None = None
+    source_url: str | None = None
+    invalid_reason: str | None = None
+    repair_reason: str | None = None
+    next_action: str | None = None
+
+
+@dataclass(slots=True)
 class ExtractedChapter:
     name: str
     university_name: str | None = None
@@ -324,3 +389,83 @@ class FieldJobDecision:
     write_allowed: bool = False
     requires_review: bool = False
 
+
+@dataclass(slots=True)
+class FraternityCrawlRequestRecord:
+    id: str
+    fraternity_name: str
+    fraternity_slug: str
+    source_slug: str | None
+    source_url: str | None
+    source_confidence: float | None
+    status: str
+    stage: str
+    scheduled_for: str
+    started_at: str | None
+    finished_at: str | None
+    priority: int
+    config: dict[str, Any] = field(default_factory=dict)
+    progress: dict[str, Any] = field(default_factory=dict)
+    last_error: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+@dataclass(slots=True)
+class RequestGraphRunRecord:
+    id: int
+    request_id: str
+    worker_id: str
+    runtime_mode: str
+    status: str
+    active_node: str | None = None
+    summary: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    error_message: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    finished_at: str | None = None
+
+
+@dataclass(slots=True)
+class ChapterEvidenceRecord:
+    chapter_slug: str
+    field_name: str
+    candidate_value: str | None
+    confidence: float | None
+    source_url: str | None = None
+    source_snippet: str | None = None
+    fraternity_slug: str | None = None
+    source_slug: str | None = None
+    request_id: str | None = None
+    crawl_run_id: int | None = None
+    provider: str | None = None
+    query: str | None = None
+    related_website_url: str | None = None
+    chapter_id: str | None = None
+    trust_tier: str = "medium"
+    evidence_status: str = "observed"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ProvisionalChapterRecord:
+    id: str
+    fraternity_id: str
+    slug: str
+    name: str
+    status: str
+    source_id: str | None = None
+    request_id: str | None = None
+    promoted_chapter_id: str | None = None
+    university_name: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str = "USA"
+    website_url: str | None = None
+    instagram_url: str | None = None
+    contact_email: str | None = None
+    promotion_reason: str | None = None
+    evidence_payload: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None

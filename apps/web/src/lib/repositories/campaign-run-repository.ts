@@ -1,6 +1,7 @@
 import { getDbPool } from "../db";
 import { evaluateSourceUrl } from "../source-selection";
 import type {
+  AdaptivePolicySnapshot,
   CampaignProviderHealthHistoryPoint,
   CampaignProviderHealthSnapshot,
   CampaignRun,
@@ -82,7 +83,19 @@ const DEFAULT_CONFIG: CampaignRunConfig = {
   itemPollIntervalMs: 15_000,
   preflightRequired: true,
   autoTuningEnabled: true,
-  controlFraternitySlugs: []
+  controlFraternitySlugs: [],
+  programMode: "standard",
+  runtimeMode: "adaptive_primary",
+  fieldJobRuntimeMode: "langgraph_primary",
+  frozenSourceSlugs: [],
+  trainingRounds: 3,
+  epochsPerRound: 1,
+  trainingSourceBatchSize: 4,
+  evalSourceBatchSize: 3,
+  trainingCommandTimeoutMinutes: 30,
+  checkpointPromotionEnabled: true,
+  queueStallThresholdMinutes: 15,
+  reviewWindowDays: 14
 };
 
 const EMPTY_SUMMARY: CampaignRunSummary = {
@@ -136,7 +149,47 @@ function normalizeConfig(config: unknown): CampaignRunConfig {
     autoTuningEnabled: value.autoTuningEnabled ?? DEFAULT_CONFIG.autoTuningEnabled,
     controlFraternitySlugs: Array.isArray(value.controlFraternitySlugs)
       ? value.controlFraternitySlugs.map((item) => String(item)).filter(Boolean)
-      : DEFAULT_CONFIG.controlFraternitySlugs
+      : DEFAULT_CONFIG.controlFraternitySlugs,
+    programMode: value.programMode === "v4_rl_improvement" ? "v4_rl_improvement" : DEFAULT_CONFIG.programMode,
+    runtimeMode:
+      value.runtimeMode === "legacy" ||
+      value.runtimeMode === "adaptive_shadow" ||
+      value.runtimeMode === "adaptive_assisted" ||
+      value.runtimeMode === "adaptive_primary"
+        ? value.runtimeMode
+        : DEFAULT_CONFIG.runtimeMode,
+    fieldJobRuntimeMode:
+      value.fieldJobRuntimeMode === "legacy" ||
+      value.fieldJobRuntimeMode === "langgraph_shadow" ||
+      value.fieldJobRuntimeMode === "langgraph_primary"
+        ? value.fieldJobRuntimeMode
+        : DEFAULT_CONFIG.fieldJobRuntimeMode,
+    frozenSourceSlugs: Array.isArray(value.frozenSourceSlugs)
+      ? value.frozenSourceSlugs.map((item) => String(item).trim()).filter(Boolean)
+      : DEFAULT_CONFIG.frozenSourceSlugs,
+    trainingRounds: Number.isFinite(value.trainingRounds)
+      ? Math.max(1, Math.min(6, Number(value.trainingRounds)))
+      : DEFAULT_CONFIG.trainingRounds,
+    epochsPerRound: Number.isFinite(value.epochsPerRound)
+      ? Math.max(1, Math.min(8, Number(value.epochsPerRound)))
+      : DEFAULT_CONFIG.epochsPerRound,
+    trainingSourceBatchSize: Number.isFinite(value.trainingSourceBatchSize)
+      ? Math.max(1, Math.min(20, Number(value.trainingSourceBatchSize)))
+      : DEFAULT_CONFIG.trainingSourceBatchSize,
+    evalSourceBatchSize: Number.isFinite(value.evalSourceBatchSize)
+      ? Math.max(1, Math.min(20, Number(value.evalSourceBatchSize)))
+      : DEFAULT_CONFIG.evalSourceBatchSize,
+    trainingCommandTimeoutMinutes: Number.isFinite(value.trainingCommandTimeoutMinutes)
+      ? Math.max(5, Math.min(180, Number(value.trainingCommandTimeoutMinutes)))
+      : DEFAULT_CONFIG.trainingCommandTimeoutMinutes,
+    checkpointPromotionEnabled:
+      value.checkpointPromotionEnabled ?? DEFAULT_CONFIG.checkpointPromotionEnabled,
+    queueStallThresholdMinutes: Number.isFinite(value.queueStallThresholdMinutes)
+      ? Math.max(5, Math.min(120, Number(value.queueStallThresholdMinutes)))
+      : DEFAULT_CONFIG.queueStallThresholdMinutes,
+    reviewWindowDays: Number.isFinite(value.reviewWindowDays)
+      ? Math.max(1, Math.min(90, Number(value.reviewWindowDays)))
+      : DEFAULT_CONFIG.reviewWindowDays
   };
 }
 
@@ -199,7 +252,40 @@ function normalizeTelemetry(telemetry: unknown): CampaignRunTelemetry {
     activeConcurrency: value.activeConcurrency ?? undefined,
     lastCheckpointAt: value.lastCheckpointAt ?? null,
     lastTuneAt: value.lastTuneAt ?? null,
-    runtimeNotes: Array.isArray(value.runtimeNotes) ? value.runtimeNotes.map((item) => String(item)) : []
+    runtimeNotes: Array.isArray(value.runtimeNotes) ? value.runtimeNotes.map((item) => String(item)) : [],
+    cohortManifest: Array.isArray(value.cohortManifest) ? value.cohortManifest.map((item) => String(item)) : [],
+    activePolicyVersion: typeof value.activePolicyVersion === "string" ? value.activePolicyVersion : null,
+    activePolicySnapshotId: Number.isFinite(Number(value.activePolicySnapshotId)) ? Number(value.activePolicySnapshotId) : null,
+    promotionDecisions: Array.isArray(value.promotionDecisions) ? value.promotionDecisions : [],
+    queueStallAlert:
+      value.queueStallAlert && typeof value.queueStallAlert === "object"
+        ? value.queueStallAlert
+        : null,
+    delayedRewardHealth:
+      value.delayedRewardHealth && typeof value.delayedRewardHealth === "object"
+        ? value.delayedRewardHealth
+        : null,
+    reviewReasonDrift: Array.isArray(value.reviewReasonDrift) ? value.reviewReasonDrift : [],
+    acceptanceGate:
+      value.acceptanceGate && typeof value.acceptanceGate === "object"
+        ? value.acceptanceGate
+        : null,
+    baselineSnapshot:
+      value.baselineSnapshot && typeof value.baselineSnapshot === "object"
+        ? value.baselineSnapshot
+        : null,
+    finalSnapshot:
+      value.finalSnapshot && typeof value.finalSnapshot === "object"
+        ? value.finalSnapshot
+        : null,
+    programPhase:
+      value.programPhase === "baseline" ||
+      value.programPhase === "training" ||
+      value.programPhase === "live_campaign" ||
+      value.programPhase === "completed"
+        ? value.programPhase
+        : undefined,
+    programStartedAt: typeof value.programStartedAt === "string" ? value.programStartedAt : null
   };
 }
 
@@ -649,6 +735,45 @@ export async function reconcileStaleCampaignRuns(maxAgeMinutes = 45): Promise<nu
 }
 
 export async function selectCampaignFraternities(config: CampaignRunConfig): Promise<SelectedCampaignFraternity[]> {
+  if (config.frozenSourceSlugs && config.frozenSourceSlugs.length > 0) {
+    const selected: SelectedCampaignFraternity[] = [];
+    for (const sourceSlug of config.frozenSourceSlugs) {
+      const fraternitySlug = sourceSlug.endsWith("-main") ? sourceSlug.slice(0, -5) : sourceSlug;
+      const preferredSource = await getPreferredCampaignSourceForFraternity(fraternitySlug);
+      const verifiedSource = preferredSource ? null : await getVerifiedSourceForFraternity(fraternitySlug);
+      const source = preferredSource
+        ? {
+            fraternityName: preferredSource.fraternityName,
+            fraternitySlug: preferredSource.fraternitySlug,
+            nationalUrl: preferredSource.sourceUrl,
+            confidence: preferredSource.confidence,
+            sourceSlug: preferredSource.sourceSlug,
+          }
+        : verifiedSource
+          ? {
+              fraternityName: verifiedSource.fraternityName,
+              fraternitySlug: verifiedSource.fraternitySlug,
+              nationalUrl: verifiedSource.nationalUrl,
+              confidence: verifiedSource.confidence,
+              sourceSlug: sourceSlug,
+            }
+          : null;
+      if (!source) {
+        continue;
+      }
+      selected.push({
+        fraternityName: source.fraternityName,
+        fraternitySlug: source.fraternitySlug,
+        nationalUrl: source.nationalUrl,
+        confidence: source.confidence,
+        cohort: "new",
+        selectionReason: `frozen_v4_manifest:${sourceSlug}`,
+        sourceSlug,
+      });
+    }
+    return selected.slice(0, config.targetCount);
+  }
+
   const dbPool = getDbPool();
   const controlCount = Math.min(config.controlCount, Math.max(0, config.targetCount - 1));
   const newCount = Math.max(1, config.targetCount - controlCount);
@@ -776,6 +901,163 @@ export async function getFieldJobQueueDepth(): Promise<number> {
     `SELECT COUNT(*)::int AS count FROM field_jobs WHERE status = 'queued'`
   );
   return Number(rows[0]?.count ?? 0);
+}
+
+export interface FieldJobQueueDiagnostics {
+  queuedTotal: number;
+  oldestQueuedAt: string | null;
+  oldestQueuedAgeMinutes: number | null;
+  perSource: Array<{ sourceSlug: string; queued: number }>;
+}
+
+export async function getFieldJobQueueDiagnostics(sourceSlugs?: string[]): Promise<FieldJobQueueDiagnostics> {
+  const dbPool = getDbPool();
+  const filterClause =
+    sourceSlugs && sourceSlugs.length > 0
+      ? "AND s.slug = ANY($1::text[])"
+      : "";
+  const params = sourceSlugs && sourceSlugs.length > 0 ? [sourceSlugs] : [];
+
+  const queueQuery = `
+      SELECT
+        COUNT(*)::int AS queued_total,
+        MIN(fj.scheduled_at) AS oldest_queued_at
+      FROM field_jobs fj
+      JOIN crawl_runs cr ON cr.id = fj.crawl_run_id
+      JOIN sources s ON s.id = cr.source_id
+      WHERE fj.status = 'queued'
+      ${filterClause}
+    `;
+  const perSourceQuery = `
+      SELECT
+        s.slug AS source_slug,
+        COUNT(*)::int AS queued
+      FROM field_jobs fj
+      JOIN crawl_runs cr ON cr.id = fj.crawl_run_id
+      JOIN sources s ON s.id = cr.source_id
+      WHERE fj.status = 'queued'
+      ${filterClause}
+      GROUP BY s.slug
+      ORDER BY queued DESC, s.slug ASC
+      LIMIT 20
+    `;
+
+  const [queueRows, perSourceRows] = await Promise.all([
+    dbPool.query<{ queued_total: number; oldest_queued_at: string | null }>(queueQuery, params),
+    dbPool.query<{ source_slug: string; queued: number }>(perSourceQuery, params),
+  ]);
+
+  const oldestQueuedAt = queueRows.rows[0]?.oldest_queued_at ?? null;
+  const oldestQueuedAgeMinutes = oldestQueuedAt
+    ? Math.max(0, Math.round((Date.now() - new Date(oldestQueuedAt).getTime()) / 60_000))
+    : null;
+
+  return {
+    queuedTotal: Number(queueRows.rows[0]?.queued_total ?? 0),
+    oldestQueuedAt,
+    oldestQueuedAgeMinutes,
+    perSource: perSourceRows.rows.map((row) => ({
+      sourceSlug: row.source_slug,
+      queued: Number(row.queued ?? 0),
+    })),
+  };
+}
+
+export async function getReviewReasonBreakdown(params?: {
+  sourceSlugs?: string[];
+  windowDays?: number;
+  createdAfter?: string | null;
+  limit?: number;
+}): Promise<Array<{ reason: string; count: number }>> {
+  const dbPool = getDbPool();
+  const conditions = ["TRUE"];
+  const values: Array<string | number | string[]> = [];
+  if (params?.sourceSlugs && params.sourceSlugs.length > 0) {
+    values.push(params.sourceSlugs);
+    conditions.push(`s.slug = ANY($${values.length}::text[])`);
+  }
+  if (params?.windowDays && params.windowDays > 0) {
+    values.push(Math.max(1, Math.floor(params.windowDays)));
+    conditions.push(`ri.created_at >= NOW() - ($${values.length}::int * INTERVAL '1 day')`);
+  }
+  if (params?.createdAfter) {
+    values.push(params.createdAfter);
+    conditions.push(`ri.created_at >= $${values.length}::timestamptz`);
+  }
+  values.push(Math.min(Math.max(params?.limit ?? 20, 1), 100));
+
+  const { rows } = await dbPool.query<{ reason: string; count: number }>(
+    `
+      SELECT
+        ri.reason,
+        COUNT(*)::int AS count
+      FROM review_items ri
+      LEFT JOIN sources s ON s.id = ri.source_id
+      WHERE ${conditions.join(" AND ")}
+      GROUP BY ri.reason
+      ORDER BY count DESC, ri.reason ASC
+      LIMIT $${values.length}
+    `,
+    values
+  );
+
+  return rows.map((row) => ({
+    reason: row.reason,
+    count: Number(row.count ?? 0),
+  }));
+}
+
+export async function listAdaptivePolicySnapshots(params?: {
+  policyVersion?: string | null;
+  runtimeMode?: string | null;
+  limit?: number;
+}): Promise<AdaptivePolicySnapshot[]> {
+  const dbPool = getDbPool();
+  const conditions: string[] = [];
+  const values: Array<string | number> = [];
+  if (params?.policyVersion) {
+    values.push(params.policyVersion);
+    conditions.push(`policy_version = $${values.length}`);
+  }
+  if (params?.runtimeMode) {
+    values.push(params.runtimeMode);
+    conditions.push(`runtime_mode = $${values.length}`);
+  }
+  values.push(Math.min(Math.max(params?.limit ?? 20, 1), 100));
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const { rows } = await dbPool.query<{
+    id: number;
+    policy_version: string;
+    runtime_mode: string;
+    feature_schema_version: string;
+    metrics: Record<string, unknown>;
+    created_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        policy_version,
+        runtime_mode,
+        feature_schema_version,
+        metrics,
+        created_at
+      FROM crawl_policy_snapshots
+      ${whereClause}
+      ORDER BY created_at DESC, id DESC
+      LIMIT $${values.length}
+    `,
+    values
+  );
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    policyVersion: row.policy_version,
+    runtimeMode: row.runtime_mode,
+    featureSchemaVersion: row.feature_schema_version,
+    metrics: row.metrics ?? {},
+    createdAt: row.created_at,
+  }));
 }
 
 export interface SourceCoverageSnapshot {

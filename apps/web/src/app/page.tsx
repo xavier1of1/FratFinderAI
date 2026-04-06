@@ -3,7 +3,7 @@ import { PageIntro } from "@/components/page-intro";
 import { StatusPill } from "@/components/status-pill";
 import { TagPill } from "@/components/tag-pill";
 import { fetchFromApi } from "@/lib/api-client";
-import type { CampaignRun, ChapterListItem, CrawlRunListItem, FieldJobListItem, ReviewItemListItem } from "@/lib/types";
+import type { AgentOpsSummary, CampaignRun, ChapterListItem, CrawlRunListItem, FieldJobListItem, ReviewItemListItem } from "@/lib/types";
 
 const pageGuide = [
   {
@@ -15,6 +15,11 @@ const pageGuide = [
     href: "/runs",
     title: "Crawl Runs",
     description: "Audit how each source performed, which strategy fired, and how many records and follow-up jobs were created."
+  },
+  {
+    href: "/agent-ops",
+    title: "Agent Ops",
+    description: "Inspect V3 request graph runs, provisional chapter discoveries, and the evidence ledger behind adaptive writes."
   },
   {
     href: "/review-items",
@@ -39,12 +44,13 @@ const pageGuide = [
 ];
 
 export default async function OverviewPage() {
-  const [chapters, runs, reviewItems, fieldJobs, campaigns] = await Promise.all([
+  const [chapters, runs, reviewItems, fieldJobs, campaigns, agentOps] = await Promise.all([
     fetchFromApi<ChapterListItem[]>("/api/chapters?limit=5"),
     fetchFromApi<CrawlRunListItem[]>("/api/runs?limit=8"),
     fetchFromApi<ReviewItemListItem[]>("/api/review-items?limit=8"),
     fetchFromApi<FieldJobListItem[]>("/api/field-jobs?limit=8"),
-    fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=8")
+    fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=8"),
+    fetchFromApi<{ summary: AgentOpsSummary }>("/api/agent-ops?limit=20")
   ]);
 
   const latestRun = runs[0];
@@ -53,12 +59,13 @@ export default async function OverviewPage() {
     <div className="sectionStack">
       <PageIntro
         eyebrow="Overview"
-        title="Command center for sourcing, enrichment, and review"
-        description="Use this page to get your bearings fast: how much data is loaded, whether crawls are healthy, and where manual attention is needed next."
+        title="V3.0.0 command center for sourcing, agents, and review"
+        description="Use this page to get your bearings fast: whether the V3 worker queue is healthy, how much data is loaded, and where operator attention is needed next."
         meta={[
           `${chapters.length} preview chapters`,
           `${runs.length} recent runs`,
-          `${campaigns.filter((item) => item.status === "running" || item.status === "queued").length} active campaigns`
+          `${campaigns.filter((item) => item.status === "running" || item.status === "queued").length} active campaigns`,
+          agentOps.summary.requestQueueQueued === 0 && agentOps.summary.requestQueueRunning === 0 ? "V3 queue clear" : "V3 queue active"
         ]}
       />
 
@@ -70,6 +77,9 @@ export default async function OverviewPage() {
           <MetricCard label="Campaigns" value={campaigns.length} />
           <MetricCard label="Open Reviews" value={reviewItems.filter((item) => item.status === "open").length} />
           <MetricCard label="Queued Jobs" value={fieldJobs.filter((item) => item.status === "queued").length} />
+          <MetricCard label="V3 Graph Runs" value={agentOps.summary.graphRunsTotal} />
+          <MetricCard label="Queued Requests" value={agentOps.summary.requestQueueQueued} />
+          <MetricCard label="Provisional Chapters" value={agentOps.summary.provisionalOpen} />
         </div>
       </section>
 

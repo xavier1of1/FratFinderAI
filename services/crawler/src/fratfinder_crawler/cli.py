@@ -12,6 +12,7 @@ from fratfinder_crawler.pipeline import CrawlService
 
 ADAPTIVE_RUNTIME_CHOICES = ["adaptive_shadow", "adaptive_assisted", "adaptive_primary"]
 FIELD_JOB_RUNTIME_CHOICES = ["legacy", "langgraph_shadow", "langgraph_primary"]
+REQUEST_RUNTIME_CHOICES = ["v3_request_supervisor"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +41,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Adaptive runtime mode to execute",
     )
     adaptive_parser.add_argument("--policy-mode", choices=["live", "train"], default="live")
+
+    request_parser = subparsers.add_parser("run-request", help="Run one fraternity crawl request through the V3 request graph")
+    request_parser.add_argument("--request-id", required=True)
+    request_parser.add_argument("--runtime-mode", choices=REQUEST_RUNTIME_CHOICES, default="v3_request_supervisor")
+    request_parser.add_argument("--crawl-runtime-mode", choices=["legacy", *ADAPTIVE_RUNTIME_CHOICES], default=None)
+    request_parser.add_argument("--field-job-runtime-mode", choices=FIELD_JOB_RUNTIME_CHOICES, default=None)
+    request_parser.add_argument("--graph-durability", choices=["exit", "async", "sync"], default=None)
+
+    request_worker_parser = subparsers.add_parser("run-request-worker", help="Claim and execute queued fraternity crawl requests")
+    request_worker_parser.add_argument("--once", action="store_true", help="Process up to the current batch limit and then exit")
+    request_worker_parser.add_argument("--limit", type=int, default=None, help="Maximum requests to process in one batch")
+    request_worker_parser.add_argument("--poll-seconds", type=int, default=None, help="Worker idle poll interval in seconds")
+    request_worker_parser.add_argument("--runtime-mode", choices=REQUEST_RUNTIME_CHOICES, default="v3_request_supervisor")
 
     jobs_parser = subparsers.add_parser("process-field-jobs", help="Process queued field jobs")
     jobs_parser.add_argument("--limit", type=int, default=25)
@@ -163,6 +177,27 @@ def main() -> None:
     if args.command == "run-adaptive":
         result = service.run_adaptive(source_slug=args.source_slug, runtime_mode=args.runtime_mode, policy_mode=args.policy_mode)
         print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "run-request":
+        result = service.run_request(
+            request_id=args.request_id,
+            runtime_mode=args.runtime_mode,
+            crawl_runtime_mode=args.crawl_runtime_mode,
+            field_job_runtime_mode=args.field_job_runtime_mode,
+            graph_durability=args.graph_durability,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "run-request-worker":
+        result = service.run_request_worker(
+            once=args.once,
+            limit=args.limit,
+            poll_seconds=args.poll_seconds,
+            runtime_mode=args.runtime_mode,
+        )
+        print(json.dumps(result, indent=2, default=str))
         return
 
     if args.command == "process-field-jobs":

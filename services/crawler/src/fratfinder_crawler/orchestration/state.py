@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from fratfinder_crawler.models import (
+    ChapterCandidate,
+    ChapterSearchDecision,
     CrawlMetrics,
     ChapterStub,
     EmbeddedDataResult,
@@ -86,9 +88,19 @@ class AdaptiveCrawlState(TypedDict, total=False):
     navigation_stats: dict[str, int]
     page_level_confidence: float
     extraction_notes: str
+    chapter_index_mode: str
+    chapter_index_mode_confidence: float
+    chapter_index_mode_reason: str
+    chapter_stubs: list[ChapterStub]
+    chapter_follow_pages: dict[str, list[tuple[str, str]]]
+    chapter_contact_hints: dict[str, dict[str, str]]
     current_guardrail_flags: list[str]
     current_risk_score: float
     context_bucket: str
+    chapter_search_candidates: list[ChapterCandidate]
+    chapter_search_decisions: list[ChapterSearchDecision]
+    chapter_search_metrics: dict[str, Any]
+    chapter_validity_metrics: dict[str, Any]
     valid_missing_count_current: int
     verified_website_count_current: int
     observation_index: dict[str, dict[str, Any]]

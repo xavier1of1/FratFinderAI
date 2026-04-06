@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { TagPill } from "@/components/tag-pill";
+import { instagramHandleFromUrl } from "@/lib/social";
 import type { ChapterActionResult, ChapterFieldName, ChapterListItem, ChapterMapStateSummary } from "@/lib/types";
 
 type ContactFilter = "all" | "present" | "missing" | "found" | "low_confidence";
@@ -547,7 +548,9 @@ export function ChaptersDashboard({
                   </td>
                   <td>
                     {chapter.instagramUrl ? (
-                      <a href={chapter.instagramUrl} target="_blank" rel="noreferrer">Profile</a>
+                      <a href={chapter.instagramUrl} target="_blank" rel="noreferrer">
+                        @{instagramHandleFromUrl(chapter.instagramUrl) ?? "profile"}
+                      </a>
                     ) : (
                       <span className="muted">Missing</span>
                     )}

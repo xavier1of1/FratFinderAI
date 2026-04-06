@@ -305,16 +305,18 @@ class FieldJobGraphRuntime:
             confidence = self._extract_confidence(result)
             candidate_value = self._extract_candidate_value(result)
             candidate_kind = self._candidate_kind_for_field(job.field_name)
+            completed_status = str(result.completed_payload.get("status") or "complete")
             decision = FieldJobDecision(
-                status="complete",
+                status=completed_status,
                 confidence=confidence,
                 candidate_kind=candidate_kind,
                 candidate_value=candidate_value,
-                reason_codes=["resolved"],
-                write_allowed=True,
-                requires_review=result.review_item is not None,
+                reason_codes=[completed_status],
+                write_allowed=completed_status in {"updated", "verified", "already_populated"},
+                requires_review=result.review_item is not None or completed_status == "review_required",
             )
             decision_metadata = {
+                "completedStatus": completed_status,
                 "fieldStates": result.field_state_updates,
                 "chapterUpdates": result.chapter_updates,
                 "hasReviewItem": result.review_item is not None,
