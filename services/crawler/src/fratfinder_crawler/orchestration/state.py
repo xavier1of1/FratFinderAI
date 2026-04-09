@@ -38,6 +38,7 @@ class CrawlGraphState(TypedDict, total=False):
     llm_calls_used: int
     page_level_confidence: float
     extraction_notes: str
+    directory_layout_profile: dict[str, Any]
     chapter_index_mode: str
     chapter_index_mode_confidence: float
     chapter_index_mode_reason: str
@@ -88,6 +89,7 @@ class AdaptiveCrawlState(TypedDict, total=False):
     navigation_stats: dict[str, int]
     page_level_confidence: float
     extraction_notes: str
+    directory_layout_profile: dict[str, Any]
     chapter_index_mode: str
     chapter_index_mode_confidence: float
     chapter_index_mode_reason: str

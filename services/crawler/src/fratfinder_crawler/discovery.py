@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 import re
 import unicodedata
 
+import requests
+
 from fratfinder_crawler.models import ExistingSourceCandidate, VerifiedSourceRecord
+from fratfinder_crawler.precision_tools import tool_same_host_directory_ranker, tool_source_identity_guard
 from fratfinder_crawler.search import SearchClient, SearchResult
 
 _BLOCKED_HOSTS = {
@@ -113,6 +116,9 @@ _NON_ORG_CONTEXT_MARKERS = (
     "island",
     "hotel",
     "airline",
+    "store",
+    "shop",
+    "merchandise",
 )
 
 _INVALID_EXISTING_SOURCE_PARSER_KEYS = {
@@ -135,6 +141,26 @@ _WEAK_SOURCE_HOST_MARKERS = (
     "dynamic.omegafi.com",
     "omegafi.com",
 )
+
+_GENERIC_INFO_PATH_SEGMENTS = {
+    "about",
+    "history",
+    "ideals",
+    "mission",
+    "values",
+    "recruitment",
+    "join",
+    "news",
+    "events",
+    "careers",
+    "contact",
+    "staff",
+    "board",
+    "foundation",
+    "housing",
+    "merchandise",
+    "giving",
+}
 
 _GREEK_SYMBOLS = {
     "Α": "alpha",
@@ -297,6 +323,27 @@ def _root_url(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return url
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _normalized_candidate_url(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url.rstrip("/")
+    normalized_path = (parsed.path or "/").rstrip("/") or "/"
+    return f"{parsed.scheme}://{parsed.netloc}{normalized_path}"
+
+
+def _path_segments(path: str) -> list[str]:
+    return [segment for segment in path.lower().split("/") if segment]
+
+
+def _is_generic_info_page(url: str) -> bool:
+    parsed = urlparse(url)
+    path = (parsed.path or "").lower().strip("/")
+    if not path:
+        return True
+    segments = _path_segments(path)
+    return len(segments) == 1 and segments[0] in _GENERIC_INFO_PATH_SEGMENTS
 
 
 def _host_is_blocked(host: str) -> bool:
@@ -542,6 +589,10 @@ def _score_candidate(fraternity_name: str, fraternity_slug: str, result: SearchR
 
     if any(marker in path for marker in _DIRECTORY_MARKERS):
         score += 0.12
+    else:
+        path_segments = _path_segments(path)
+        if len(path_segments) == 1 and path_segments[0] in _GENERIC_INFO_PATH_SEGMENTS:
+            score -= 0.18
 
     if any(marker in lowered_title for marker in ("official", "international", "fraternity")):
         score += 0.08
@@ -566,7 +617,22 @@ def _score_candidate(fraternity_name: str, fraternity_slug: str, result: SearchR
     if any(marker in combined for marker in ("travel", "vacation", "resort", "island")) and context_hits == 0:
         score -= 0.2
 
-    if host in _BLOCKED_HOSTS:
+    identity_guard = tool_source_identity_guard(
+        fraternity_name=fraternity_name,
+        fraternity_slug=fraternity_slug,
+        candidate_url=result.url,
+        title=result.title,
+        snippet=result.snippet,
+    )
+    if identity_guard.decision == "match":
+        score += 0.12
+    elif identity_guard.decision == "weak_match":
+        score += 0.02
+    else:
+        score = min(score, 0.25)
+    if "cross_fraternity_conflict" in identity_guard.reason_codes:
+        score = 0.0
+    if "blocked_host" in identity_guard.reason_codes:
         score -= 0.45
 
     score += max(0.0, 0.08 - (max(result.rank, 1) - 1) * 0.01)
@@ -576,6 +642,63 @@ def _score_candidate(fraternity_name: str, fraternity_slug: str, result: SearchR
 def _text_has_directory_signal(*values: str) -> bool:
     combined = " ".join(value.lower() for value in values if value)
     return any(marker in combined for marker in _DIRECTORY_MARKERS)
+
+
+def _text_has_chapter_directory_signal(*values: str) -> bool:
+    combined = " ".join(value.lower() for value in values if value)
+    strong_markers = (
+        "chapters",
+        "chapter list",
+        "chapter-directory",
+        "chapter directory",
+        "our chapters",
+        "find a chapter",
+        "find-a-chapter",
+        "chapter roll",
+        "chapter-roll",
+        "active chapters",
+        "colonies",
+        "colony",
+    )
+    return any(marker in combined for marker in strong_markers)
+
+
+def _default_html_fetcher(url: str) -> str | None:
+    response = requests.get(
+        url,
+        timeout=8,
+        headers={
+            "User-Agent": "FratFinderAI/3.0.1 (+https://github.com/openai)"
+        },
+    )
+    response.raise_for_status()
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "html" not in content_type:
+        return None
+    return response.text
+
+
+def _recover_same_host_directory_candidate(
+    url: str,
+    *,
+    html_fetcher: Callable[[str], str | None] | None = None,
+) -> str | None:
+    if not _is_generic_info_page(url):
+        return None
+
+    fetch = html_fetcher or _default_html_fetcher
+    try:
+        html = fetch(url)
+    except Exception:
+        return None
+    if not html:
+        return None
+
+    ranker = tool_same_host_directory_ranker(source_url=url, html=html)
+    if ranker.decision != "ranked_directory_link":
+        return None
+    selected_url = ranker.metadata.get("selectedUrl")
+    return str(selected_url) if selected_url else None
 
 
 def _confidence_tier(score: float) -> str:
@@ -715,9 +838,13 @@ def _source_quality_from_url(url: str | None) -> DiscoverySourceQuality:
         reasons.append("weak_path")
         score -= min(0.45, 0.18 * len(weak_markers))
 
+    path_segments = _path_segments(path)
     if path.strip("/") == "":
         reasons.append("generic_root_path")
         score -= 0.08
+    elif len(path_segments) == 1 and path_segments[0] in _GENERIC_INFO_PATH_SEGMENTS and not any(marker in path for marker in _DIRECTORY_MARKERS):
+        reasons.append("generic_info_path")
+        score -= 0.16
 
     score = max(0.0, min(1.0, score))
     return DiscoverySourceQuality(
@@ -728,18 +855,37 @@ def _source_quality_from_url(url: str | None) -> DiscoverySourceQuality:
     )
 
 
-def _search_candidate_is_runnable(candidate: DiscoveryCandidate) -> tuple[bool, DiscoverySourceQuality, list[str]]:
+def _search_candidate_is_runnable(
+    fraternity_name: str,
+    fraternity_slug: str,
+    candidate: DiscoveryCandidate,
+) -> tuple[bool, DiscoverySourceQuality, list[str], dict[str, Any]]:
     quality = _source_quality_from_url(candidate.url)
     reasons = list(quality.reasons)
     combined = f"{candidate.title} {candidate.snippet}".lower()
+    identity_guard = tool_source_identity_guard(
+        fraternity_name=fraternity_name,
+        fraternity_slug=fraternity_slug,
+        candidate_url=candidate.url,
+        title=candidate.title,
+        snippet=candidate.snippet,
+    )
     if any(marker in combined for marker in _NON_ORG_CONTEXT_MARKERS):
         reasons.append("non_org_context")
     if "alumni" in combined and "international" not in combined and "headquarters" not in combined:
         reasons.append("noisy_alumni_context")
     if candidate.score < 0.5:
         reasons.append("low_candidate_score")
-    runnable = not quality.is_weak and "non_org_context" not in reasons and "noisy_alumni_context" not in reasons
-    return runnable, quality, reasons
+    for reason in identity_guard.reason_codes:
+        if reason not in reasons:
+            reasons.append(reason)
+    runnable = (
+        not quality.is_weak
+        and identity_guard.decision != "reject"
+        and "non_org_context" not in reasons
+        and "noisy_alumni_context" not in reasons
+    )
+    return runnable, quality, reasons, identity_guard.as_dict()
 
 def _build_search_queries(fraternity_name: str, fraternity_slug: str) -> list[str]:
     variants = _name_variants(fraternity_name, fraternity_slug)
@@ -750,8 +896,11 @@ def _build_search_queries(fraternity_name: str, fraternity_slug: str) -> list[st
                 f'"{variant}" national fraternity website',
                 f'"{variant}" fraternity national website',
                 f'"{variant}" chapter directory',
+                f'"{variant}" chapter list',
+                f'"{variant}" chapters',
                 f'"{variant}" official fraternity',
                 f'"{variant}" find a chapter',
+                f'"{variant}" active chapters',
                 f'"{variant}" chapter roll',
             ]
         )
@@ -866,6 +1015,7 @@ def discover_source(
     *,
     max_candidates: int = 5,
     verified_min_confidence: float = 0.65,
+    html_fetcher: Callable[[str], str | None] | None = None,
 ) -> DiscoveryResult:
     normalized_name, slug, trace = _normalize_fraternity_identity(fraternity_name)
     normalized_name, slug = _resolve_alias_from_repository(normalized_name, slug, repository, trace)
@@ -1070,7 +1220,7 @@ def discover_source(
 
         deduped: dict[str, SearchResult] = {}
         for result in raw_results:
-            key = _root_url(result.url)
+            key = _normalized_candidate_url(result.url)
             if key not in deduped or result.rank < deduped[key].rank:
                 deduped[key] = result
 
@@ -1093,10 +1243,21 @@ def discover_source(
             top_candidate = search_candidates[0]
 
             for candidate in search_candidates:
-                runnable, candidate_quality, candidate_reasons = _search_candidate_is_runnable(candidate)
+                runnable, candidate_quality, candidate_reasons, guard_metadata = _search_candidate_is_runnable(
+                    normalized_name,
+                    slug,
+                    candidate,
+                )
                 if runnable and candidate.score >= 0.6:
                     selected_search_candidate = candidate
                     selected_search_quality = candidate_quality
+                    trace.append(
+                        {
+                            "step": "source_identity_guard",
+                            "url": candidate.url,
+                            "decision": guard_metadata,
+                        }
+                    )
                     break
                 rejected_candidates.append(
                     {
@@ -1105,6 +1266,7 @@ def discover_source(
                         "score": candidate.score,
                         "reasons": candidate_reasons,
                         "quality": candidate_quality.as_dict(),
+                        "identityGuard": guard_metadata,
                     }
                 )
 
@@ -1160,6 +1322,24 @@ def discover_source(
                             "rationale": selected_candidate_rationale,
                         }
                     )
+
+                    recovered_directory_url = _recover_same_host_directory_candidate(
+                        selected_url,
+                        html_fetcher=html_fetcher,
+                    )
+                    if recovered_directory_url and recovered_directory_url != selected_url:
+                        selected_url = recovered_directory_url
+                        selected_confidence = max(selected_confidence, 0.82)
+                        source_quality = _source_quality_from_url(selected_url)
+                        selected_candidate_rationale = "recovered_same_host_directory_link"
+                        fallback_reason = fallback_reason or "recovered_same_host_directory_link"
+                        trace.append(
+                            {
+                                "step": "recovered_same_host_directory_link",
+                                "from_url": selected_search_candidate.url,
+                                "to_url": selected_url,
+                            }
+                        )
             else:
                 hinted_source = _FRATERNITY_SOURCE_HINTS.get(slug)
                 hinted_quality = _source_quality_from_url(hinted_source) if hinted_source else _source_quality_from_url(None)
@@ -1223,10 +1403,10 @@ def discover_source(
     deduped_candidates: list[DiscoveryCandidate] = []
     seen_candidate_urls: set[str] = set()
     for candidate in sorted(combined_candidates, key=lambda item: (item.score, -item.rank, item.url), reverse=True):
-        root = _root_url(candidate.url)
-        if root in seen_candidate_urls:
+        candidate_key = _normalized_candidate_url(candidate.url)
+        if candidate_key in seen_candidate_urls:
             continue
-        seen_candidate_urls.add(root)
+        seen_candidate_urls.add(candidate_key)
         deduped_candidates.append(candidate)
         if len(deduped_candidates) >= max_candidates:
             break

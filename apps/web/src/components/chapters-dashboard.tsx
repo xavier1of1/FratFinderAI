@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 import { TagPill } from "@/components/tag-pill";
 import { instagramHandleFromUrl } from "@/lib/social";
@@ -146,7 +147,6 @@ export function ChaptersDashboard({
   pageSize: number;
   totalPages: number;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [chapters, setChapters] = useState<ChapterListItem[]>(initialChapters);
@@ -271,18 +271,11 @@ export function ChaptersDashboard({
     );
   }
 
-  function updatePagination(nextPage: number, nextPageSize = pageSize) {
+  function buildPaginationHref(nextPage: number, nextPageSize = pageSize) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("page", String(Math.max(1, Math.min(nextPage, totalPages))));
     params.set("pageSize", String(nextPageSize));
-    router.push(`${pathname}?${params.toString()}`);
-  }
-
-  function changePageSize(nextPageSize: number) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("pageSize", String(nextPageSize));
-    params.set("page", "1");
-    router.push(`${pathname}?${params.toString()}`);
+    return `${pathname}?${params.toString()}`;
   }
 
   async function requestRerun() {
@@ -612,54 +605,67 @@ export function ChaptersDashboard({
           </table>
         </div>
         <div className="chaptersHeaderRow" style={{ marginTop: 20, alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          <div className="fieldStack" style={{ minWidth: 180 }}>
-            <label htmlFor="chapters-page-size">Page Size</label>
-            <select
-              id="chapters-page-size"
-              className="filterSelect"
-              value={pageSize}
-              onChange={(event) => changePageSize(Number(event.target.value))}
-            >
-              {PAGE_SIZE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option} chapters
-                </option>
+          <form action={pathname} method="get" className="fieldStack" style={{ minWidth: 220 }}>
+            {Array.from(searchParams.entries())
+              .filter(([key]) => key !== "page" && key !== "pageSize")
+              .map(([key, value]) => (
+                <input key={`${key}-${value}`} type="hidden" name={key} value={value} />
               ))}
-            </select>
-          </div>
+            <input type="hidden" name="page" value="1" />
+            <label htmlFor="chapters-page-size">Page Size</label>
+            <div className="buttonRow" style={{ alignItems: "end" }}>
+              <select
+                id="chapters-page-size"
+                name="pageSize"
+                className="filterSelect"
+                defaultValue={String(pageSize)}
+              >
+                {PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option} chapters
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className="buttonSecondary">
+                Apply
+              </button>
+            </div>
+          </form>
           <div className="buttonRow" style={{ flexWrap: "wrap" }}>
-            <button
-              type="button"
+            <Link
+              href={buildPaginationHref(currentPage - 1)}
               className="buttonSecondary"
-              disabled={currentPage <= 1}
-              onClick={() => updatePagination(currentPage - 1)}
+              aria-disabled={currentPage <= 1}
+              tabIndex={currentPage <= 1 ? -1 : undefined}
+              onClick={currentPage <= 1 ? (event) => event.preventDefault() : undefined}
             >
               Previous Page
-            </button>
+            </Link>
             {pageNumbers.map((page, index) => {
               const previousPage = pageNumbers[index - 1];
               const showGap = previousPage !== undefined && page - previousPage > 1;
               return (
                 <div key={page} style={{ display: "contents" }}>
                   {showGap ? <span className="muted" style={{ alignSelf: "center" }}>...</span> : null}
-                  <button
-                    type="button"
+                  <Link
+                    href={buildPaginationHref(page)}
                     className={`buttonSecondary toggleButton${page === currentPage ? " isActiveFilter" : ""}`}
-                    onClick={() => updatePagination(page)}
+                    aria-current={page === currentPage ? "page" : undefined}
                   >
                     {page}
-                  </button>
+                  </Link>
                 </div>
               );
             })}
-            <button
-              type="button"
+            <Link
+              href={buildPaginationHref(currentPage + 1)}
               className="buttonSecondary"
-              disabled={currentPage >= totalPages}
-              onClick={() => updatePagination(currentPage + 1)}
+              aria-disabled={currentPage >= totalPages}
+              tabIndex={currentPage >= totalPages ? -1 : undefined}
+              onClick={currentPage >= totalPages ? (event) => event.preventDefault() : undefined}
             >
               Next Page
-            </button>
+            </Link>
           </div>
         </div>
       </section>

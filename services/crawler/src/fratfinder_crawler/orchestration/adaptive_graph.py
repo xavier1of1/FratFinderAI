@@ -32,8 +32,10 @@ from fratfinder_crawler.models import (
     PageObservation,
     PolicyDecision,
     ReviewItemCandidate,
+    SourceClassification,
 )
 from fratfinder_crawler.normalization import classify_chapter_validity, normalize_record
+from fratfinder_crawler.precision_tools import tool_directory_layout_profiler
 from fratfinder_crawler.search import SearchClient
 from fratfinder_crawler.orchestration.state import AdaptiveCrawlState
 from fratfinder_crawler.orchestration.navigation import (
@@ -211,6 +213,7 @@ class AdaptiveCrawlOrchestrator:
             "select_frontier_item": self._select_frontier_item,
             "fetch_page_http": self._fetch_page_http,
             "analyze_page": self._analyze_page,
+            "profile_directory_layout": self._profile_directory_layout,
             "compute_template_signature": self._compute_template_signature,
             "propose_actions": self._propose_actions,
             "score_actions": self._score_actions,
@@ -232,7 +235,8 @@ class AdaptiveCrawlOrchestrator:
         graph.add_conditional_edges("seed_frontier", self._after_branch, {"continue": "select_frontier_item", "done": "finalize"})
         graph.add_conditional_edges("select_frontier_item", self._after_branch, {"continue": "fetch_page_http", "done": "finalize"})
         graph.add_conditional_edges("fetch_page_http", self._has_error, {"ok": "analyze_page", "error": "finalize"})
-        graph.add_conditional_edges("analyze_page", self._has_error, {"ok": "compute_template_signature", "error": "finalize"})
+        graph.add_conditional_edges("analyze_page", self._has_error, {"ok": "profile_directory_layout", "error": "finalize"})
+        graph.add_conditional_edges("profile_directory_layout", self._has_error, {"ok": "compute_template_signature", "error": "finalize"})
         graph.add_edge("compute_template_signature", "propose_actions")
         graph.add_edge("propose_actions", "score_actions")
         graph.add_edge("score_actions", "execute_action")
@@ -323,6 +327,21 @@ class AdaptiveCrawlOrchestrator:
             "chapter_index_mode_reason": chapter_index_mode_reason,
         }
 
+    def _profile_directory_layout(self, state: AdaptiveCrawlState) -> dict[str, Any]:
+        profile = tool_directory_layout_profiler(
+            html=state["current_page_html"],
+            page_url=state["current_page_url"],
+        )
+        classification = self._apply_directory_layout_profile(
+            state["classification"],
+            profile.as_dict(),
+        )
+        return {
+            "directory_layout_profile": profile.as_dict(),
+            "classification": classification,
+            "page_level_confidence": classification.confidence,
+        }
+
     def _compute_template_signature(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         analysis = state["page_analysis"]
         template_signature = compute_template_signature(state["current_page_url"], analysis)
@@ -335,6 +354,31 @@ class AdaptiveCrawlOrchestrator:
             "structural_template_signature": structural_signature,
             "template_signature_raw": template_signature_raw,
         }
+
+    def _apply_directory_layout_profile(
+        self,
+        classification: SourceClassification,
+        profile: dict[str, Any] | None,
+    ) -> SourceClassification:
+        if not profile or str(profile.get("decision")) != "directory_layout_profiled":
+            return classification
+        metadata = profile.get("metadata") or {}
+        layout_family = str(metadata.get("layoutFamily") or "unclassified")
+        if layout_family == "unclassified":
+            return classification
+        recommended_strategy = str(metadata.get("recommendedStrategy") or classification.recommended_strategy or "repeated_block")
+        possible_data_locations = list(metadata.get("possibleDataLocations") or classification.possible_data_locations or [])
+        profile_confidence = float(profile.get("confidence") or 0.0)
+        if classification.page_type == "static_directory" and classification.confidence >= profile_confidence:
+            return classification
+        return SourceClassification(
+            page_type="static_directory",
+            confidence=max(classification.confidence, min(profile_confidence, 0.95)),
+            recommended_strategy=recommended_strategy,
+            needs_follow_links=False,
+            possible_data_locations=possible_data_locations,
+            classified_by="heuristic",
+        )
 
     def _propose_actions(self, state: AdaptiveCrawlState) -> dict[str, Any]:
         plan = select_extraction_plan(page_analysis=state["page_analysis"], classification=state["classification"], embedded_data=state["embedded_data"], llm_enabled=False, source_metadata=state["source"].metadata)

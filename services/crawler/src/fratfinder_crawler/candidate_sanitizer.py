@@ -7,7 +7,21 @@ import re
 
 _EMAIL_RE = re.compile(r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$", re.IGNORECASE)
 _INSTAGRAM_PATH_RE = re.compile(r"(?:https?://)?(?:www\.)?instagram\.com/([A-Za-z0-9_.-]+)", re.IGNORECASE)
-_IGNORED_INSTAGRAM_SEGMENTS = {"p", "reel", "tv", "stories", "explore", "accounts", "mailto"}
+_IGNORED_INSTAGRAM_SEGMENTS = {
+    "p",
+    "reel",
+    "tv",
+    "stories",
+    "explore",
+    "accounts",
+    "mailto",
+    "tel",
+    "index.html",
+    "index.php",
+    "home",
+    "default",
+    "default.aspx",
+}
 
 
 class CandidateKind(StrEnum):

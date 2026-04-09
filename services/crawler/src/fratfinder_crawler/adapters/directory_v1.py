@@ -35,7 +35,9 @@ _UNIVERSITY_CHAPTER_PATTERN = re.compile(r"^(?P<university>.+?)\s+[–—-]\s+(?
 _DEFAULT_CARD_SELECTORS = (
     "[data-chapter-card]",
     ".chapter-card",
+    ".chapter-item",
     "li.chapter-item",
+    "a.chapter-link",
     ".grid-item .card",
     ".card.h-100",
 )
@@ -232,6 +234,62 @@ def _selector_list(
     return merged
 
 
+def _extract_structured_card_identity(card) -> tuple[str | None, str | None]:
+    classes = {str(value).lower() for value in card.get("class", [])}
+    has_chapter_structure = (
+        "chapter-item" in classes
+        or "chapter-link" in classes
+        or any("chapter" in value for value in classes)
+        or card.select_one(".chapter-logo") is not None
+    )
+    if not has_chapter_structure:
+        return None, None
+
+    chapter_heading = card.select_one("h2")
+    university_heading = card.select_one("h3")
+    if chapter_heading is None or university_heading is None:
+        return None, None
+
+    chapter_name = _title_case_if_loud(chapter_heading.get_text(" ", strip=True))
+    university_name = _title_case_if_loud(university_heading.get_text(" ", strip=True))
+    if not chapter_name or not university_name:
+        return None, None
+    if chapter_name.strip().casefold() == university_name.strip().casefold():
+        return None, None
+    return chapter_name, university_name
+
+
+def _extract_card_identity(
+    card,
+    *,
+    name_selectors: list[str],
+    university_selectors: list[str],
+) -> tuple[str | None, str | None]:
+    chapter_name, university_name = _extract_structured_card_identity(card)
+    if chapter_name:
+        return chapter_name, university_name
+
+    name_node = next((card.select_one(selector) for selector in name_selectors if card.select_one(selector)), None)
+    if not name_node:
+        return None, None
+
+    raw_name = _title_case_if_loud(name_node.get_text(" ", strip=True))
+    if not raw_name:
+        return None, None
+
+    university_node = next(
+        (card.select_one(selector) for selector in university_selectors if card.select_one(selector)),
+        None,
+    )
+    split_chapter_name, fallback_university = _split_combined_heading(raw_name)
+    university_text = (
+        _title_case_if_loud(university_node.get_text(" ", strip=True))
+        if university_node
+        else _title_case_if_loud(fallback_university)
+    )
+    return split_chapter_name or raw_name, university_text
+
+
 def _archive_contact_entries(soup: BeautifulSoup, source_url: str) -> list[dict[str, str | None]]:
     entries: list[dict[str, str | None]] = []
     seen: set[tuple[str, str]] = set()
@@ -279,7 +337,10 @@ def _archive_contact_entries(soup: BeautifulSoup, source_url: str) -> list[dict[
 
 
 def _pick_best_link(container, source_url: str, chapter_name: str | None, university_name: str | None) -> tuple[str | None, float]:
-    anchors = container.select("a[href]")
+    anchors = []
+    if getattr(container, "name", None) == "a" and container.get("href"):
+        anchors.append(container)
+    anchors.extend(container.select("a[href]"))
     if not anchors:
         return None, 0.0
 
@@ -327,19 +388,14 @@ class DirectoryV1Adapter:
                 seen_card_ids.add(id(node))
                 cards.append(node)
         for card in cards:
-            name_node = next((card.select_one(selector) for selector in name_selectors if card.select_one(selector)), None)
-            if not name_node:
-                continue
-            name = name_node.get_text(" ", strip=True)
-            if not name:
+            chapter_name, university_text = _extract_card_identity(
+                card,
+                name_selectors=name_selectors,
+                university_selectors=university_selectors,
+            )
+            if not chapter_name:
                 continue
 
-            university = next(
-                (card.select_one(selector) for selector in university_selectors if card.select_one(selector)),
-                None,
-            )
-            chapter_name, fallback_university = _split_combined_heading(name)
-            university_text = university.get_text(" ", strip=True) if university else fallback_university
             detail_or_outbound, link_score = _pick_best_link(
                 card,
                 source_url,
@@ -350,9 +406,9 @@ class DirectoryV1Adapter:
             confidence = 0.75 + min(0.2, link_score * 0.2)
             records.append(
                 ChapterStub(
-                    chapter_name=chapter_name or name,
+                    chapter_name=chapter_name,
                     university_name=university_text,
-                    detail_url=detail_or_outbound,
+                    detail_url=detail_or_outbound or source_url,
                     outbound_chapter_url_candidate=detail_or_outbound,
                     confidence=min(0.99, confidence),
                     provenance="directory_v1:card",
@@ -444,17 +500,14 @@ class DirectoryV1Adapter:
         card_lookup: dict[tuple[str, str], tuple[str | None, str | None, str | None]] = {}
         if cards:
             for card in cards:
-                name_node = next((card.select_one(selector) for selector in name_selectors if card.select_one(selector)), None)
-                if name_node is None:
-                    continue
-                name = name_node.get_text(" ", strip=True)
-                university = next(
-                    (card.select_one(selector) for selector in university_selectors if card.select_one(selector)),
-                    None,
+                chapter_name, university_name = _extract_card_identity(
+                    card,
+                    name_selectors=name_selectors,
+                    university_selectors=university_selectors,
                 )
-                chapter_name, fallback_university = _split_combined_heading(name)
-                university_name = university.get_text(" ", strip=True) if university else fallback_university
-                key = ((chapter_name or name or "").strip().lower(), (university_name or "").strip().lower())
+                if chapter_name is None:
+                    continue
+                key = ((chapter_name or "").strip().lower(), (university_name or "").strip().lower())
                 location = card.select_one("[data-location], .location")
                 city, state = _parse_city_state(location.get_text(" ", strip=True) if location else None)
                 card_lookup[key] = (city, state, card.get_text(" ", strip=True)[:400])

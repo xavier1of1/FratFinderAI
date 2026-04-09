@@ -4,12 +4,14 @@ import logging
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 import requests
 
 from fratfinder_crawler.field_jobs import (
     CandidateMatch,
     FieldJobEngine,
     NationalsChapterEntry,
+    RetryableJobError,
     SearchDocument,
     _fraternity_matches,
     _nationals_entry_match_score,
@@ -18,6 +20,7 @@ from fratfinder_crawler.field_jobs import (
 )
 from fratfinder_crawler.models import FieldJob
 from fratfinder_crawler.search import SearchResult, SearchUnavailableError
+from fratfinder_crawler.models import ChapterActivityRecord, SchoolPolicyRecord
 
 
 class FakeRepository:
@@ -26,10 +29,12 @@ class FakeRepository:
         jobs: list[FieldJob],
         snippets_by_chapter: dict[str, list[str]],
         pending_field_jobs: set[tuple[str, str]] | None = None,
+        latest_provenance_by_chapter: dict[str, dict[str, object]] | None = None,
     ):
         self.jobs = jobs
         self.snippets_by_chapter = snippets_by_chapter
         self.pending_field_jobs = pending_field_jobs or set()
+        self.latest_provenance_by_chapter = latest_provenance_by_chapter or {}
         self.completed: list[tuple[str, dict[str, str], dict[str, str], int]] = []
         self.requeued: list[str] = []
         self.requeue_details: list[tuple[str, int, str]] = []
@@ -43,6 +48,11 @@ class FakeRepository:
         self.claim_order: list[str] = []
         self.discovery_upserts: list[object] = []
         self.discovery_field_jobs: list[tuple[str, int, str, str, list[str]]] = []
+        self.school_policies: dict[str, SchoolPolicyRecord] = {}
+        self.school_policy_upserts: list[dict[str, object]] = []
+        self.chapter_activities: dict[tuple[str, str], ChapterActivityRecord] = {}
+        self.inactive_applied: list[dict[str, object]] = []
+        self.completed_siblings: list[dict[str, object]] = []
 
     def claim_next_field_job(self, worker_id: str, source_slug: str | None = None, field_name: str | None = None, require_confident_website_for_email: bool = False) -> FieldJob | None:
         self.claimed_source_slugs.append(source_slug)
@@ -56,6 +66,9 @@ class FakeRepository:
 
     def fetch_provenance_snippets(self, chapter_id: str) -> list[str]:
         return self.snippets_by_chapter.get(chapter_id, [])
+
+    def fetch_latest_provenance_context(self, chapter_id: str):
+        return self.latest_provenance_by_chapter.get(chapter_id)
 
     def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
         return (chapter_id, field_name) in self.pending_field_jobs
@@ -119,6 +132,88 @@ class FakeRepository:
     def create_field_jobs(self, chapter_id, crawl_run_id, chapter_slug, source_slug, missing_fields):
         self.discovery_field_jobs.append((chapter_id, crawl_run_id, chapter_slug, source_slug, list(missing_fields)))
         return len(missing_fields)
+
+    def get_school_policy(self, school_name: str | None):
+        key = (school_name or "").strip().lower()
+        return self.school_policies.get(key)
+
+    def upsert_school_policy(
+        self,
+        *,
+        school_name: str,
+        greek_life_status: str,
+        confidence: float,
+        evidence_url: str | None = None,
+        evidence_source_type: str | None = None,
+        reason_code: str | None = None,
+        metadata: dict | None = None,
+    ):
+        self.school_policy_upserts.append(
+            {
+                "school_name": school_name,
+                "greek_life_status": greek_life_status,
+                "confidence": confidence,
+                "evidence_url": evidence_url,
+                "evidence_source_type": evidence_source_type,
+                "reason_code": reason_code,
+                "metadata": metadata or {},
+            }
+        )
+        record = SchoolPolicyRecord(
+            school_slug=(school_name or "").strip().lower().replace(" ", "-"),
+            school_name=school_name,
+            greek_life_status=greek_life_status,
+            confidence=confidence,
+            evidence_url=evidence_url,
+            evidence_source_type=evidence_source_type,
+            reason_code=reason_code,
+            metadata=metadata or {},
+            last_verified_at="2026-04-08T00:00:00+00:00",
+            created_at="2026-04-08T00:00:00+00:00",
+            updated_at="2026-04-08T00:00:00+00:00",
+        )
+        self.school_policies[(school_name or "").strip().lower()] = record
+        return record
+
+    def get_chapter_activity(self, *, fraternity_slug: str | None, school_name: str | None):
+        return self.chapter_activities.get(((fraternity_slug or "").strip(), (school_name or "").strip().lower()))
+
+    def upsert_chapter_activity(
+        self,
+        *,
+        fraternity_slug: str,
+        school_name: str,
+        chapter_activity_status: str,
+        confidence: float,
+        evidence_url: str | None = None,
+        evidence_source_type: str | None = None,
+        reason_code: str | None = None,
+        metadata: dict | None = None,
+    ):
+        record = ChapterActivityRecord(
+            fraternity_slug=fraternity_slug,
+            school_slug=(school_name or "").strip().lower().replace(" ", "-"),
+            school_name=school_name,
+            chapter_activity_status=chapter_activity_status,
+            confidence=confidence,
+            evidence_url=evidence_url,
+            evidence_source_type=evidence_source_type,
+            reason_code=reason_code,
+            metadata=metadata or {},
+            last_verified_at="2026-04-08T00:00:00+00:00",
+            created_at="2026-04-08T00:00:00+00:00",
+            updated_at="2026-04-08T00:00:00+00:00",
+        )
+        self.chapter_activities[(fraternity_slug.strip(), school_name.strip().lower())] = record
+        return record
+
+    def apply_chapter_inactive_status(self, **kwargs):
+        self.inactive_applied.append(dict(kwargs))
+
+    def complete_pending_field_jobs_for_chapter(self, **kwargs):
+        self.completed_siblings.append(dict(kwargs))
+        field_names = list(kwargs.get("field_names") or [])
+        return len(field_names)
 
 
 class FakeSearchClient:
@@ -219,6 +314,114 @@ def test_field_job_engine_bounds_no_signal_jobs_after_negative_memory():
 
 
 
+def test_search_documents_aborts_early_when_all_providers_are_unavailable(monkeypatch: pytest.MonkeyPatch):
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+    search_client = FailingSearchClient(SearchUnavailableError("all providers unavailable"))
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+    )
+    provider_attempts = [
+        {"provider": "searxng_json", "status": "unavailable", "circuit_open": True},
+        {"provider": "serper_api", "status": "unavailable", "circuit_open": True},
+        {"provider": "tavily_api", "status": "unavailable", "circuit_open": True},
+        {"provider": "duckduckgo_html", "status": "unavailable", "circuit_open": True},
+        {"provider": "bing_html", "status": "unavailable", "circuit_open": True},
+        {"provider": "brave_html", "status": "unavailable", "circuit_open": True},
+    ]
+    monkeypatch.setattr(engine, "_consume_provider_attempts", lambda: list(provider_attempts))
+
+    documents = engine._search_documents(
+        _job("find_website", university_name="Vanderbilt University", chapter_name="Gamma Chapter"),
+        "website_fallback",
+        include_existing=False,
+    )
+
+    assert documents == []
+    assert len(search_client.queries) == 2
+    assert engine._search_fanout_aborted is True
+
+
+def test_validation_document_search_aborts_early_when_all_providers_are_unavailable(monkeypatch: pytest.MonkeyPatch):
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+    search_client = FailingSearchClient(SearchUnavailableError("all providers unavailable"))
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+    )
+    provider_attempts = [
+        {"provider": "searxng_json", "status": "unavailable", "circuit_open": True},
+        {"provider": "serper_api", "status": "unavailable", "circuit_open": True},
+        {"provider": "tavily_api", "status": "unavailable", "circuit_open": True},
+        {"provider": "duckduckgo_html", "status": "unavailable", "circuit_open": True},
+        {"provider": "bing_html", "status": "unavailable", "circuit_open": True},
+        {"provider": "brave_html", "status": "unavailable", "circuit_open": True},
+    ]
+    monkeypatch.setattr(engine, "_consume_provider_attempts", lambda: list(provider_attempts))
+
+    documents = engine._build_validation_documents(
+        _job("find_website", university_name="Vanderbilt University", chapter_name="Gamma Chapter"),
+        target="school_chapter_list",
+        query_limit=10,
+        page_limit=1,
+        require_official_school=True,
+    )
+
+    assert documents == []
+    assert len(search_client.queries) == 2
+    assert engine._search_fanout_aborted is True
+
+
+def test_provider_hard_block_skips_followup_validation_and_external_searches(monkeypatch: pytest.MonkeyPatch):
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+    search_client = FailingSearchClient(SearchUnavailableError("all providers unavailable"))
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+    )
+    provider_attempts = [
+        {"provider": "searxng_json", "status": "unavailable", "circuit_open": True},
+        {"provider": "serper_api", "status": "unavailable", "circuit_open": True},
+        {"provider": "tavily_api", "status": "unavailable", "circuit_open": True},
+        {"provider": "duckduckgo_html", "status": "unavailable", "circuit_open": True},
+        {"provider": "bing_html", "status": "unavailable", "circuit_open": True},
+        {"provider": "brave_html", "status": "unavailable", "circuit_open": True},
+    ]
+    monkeypatch.setattr(engine, "_consume_provider_attempts", lambda: list(provider_attempts))
+    job = _job("find_website", university_name="Vanderbilt University", chapter_name="Gamma Chapter")
+
+    first_documents = engine._build_validation_documents(
+        job,
+        target="school_chapter_list",
+        query_limit=10,
+        page_limit=1,
+        require_official_school=True,
+    )
+    second_documents = engine._build_validation_documents(
+        job,
+        target="website_school",
+        query_limit=10,
+        page_limit=1,
+        require_official_school=True,
+    )
+    external_documents = engine._search_documents(job, "website_school", include_existing=False)
+
+    assert first_documents == []
+    assert second_documents == []
+    assert external_documents == []
+    assert engine._provider_search_hard_blocked() is True
+    assert len(search_client.queries) == 2
+
+
 def test_field_job_engine_forwards_field_name_filter_to_repository():
     repo = FakeRepository(
         jobs=[_job("find_instagram")],
@@ -255,7 +458,7 @@ def test_non_bing_claim_does_not_require_confident_website_for_email():
 
     engine.process(limit=1)
 
-    assert repo.claimed_require_confident_website_for_email == [False]
+    assert repo.claimed_require_confident_website_for_email == [True]
 
 
 def test_bing_email_waits_for_pending_website_job_without_consuming_attempt():
@@ -305,6 +508,69 @@ def test_search_unavailable_preserves_attempts_for_instagram_jobs():
     assert "search provider or network unavailable" in repo.requeue_details[0][2]
     assert len(search_client.queries) > 2
 
+
+def test_degraded_mode_skips_external_search_and_requeues_with_long_cooldown():
+    job = _job("find_website", university_name="Demo University")
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["No website in provenance"]})
+    search_client = FakeSearchClient({})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        transient_long_cooldown_seconds=600,
+        dependency_wait_seconds=30,
+        search_degraded_mode=True,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert search_client.queries == []
+    assert repo.requeue_preserve_attempt_flags == [True]
+    assert repo.requeue_details[0][1] == 600
+    assert "search preflight degraded" in repo.requeue_details[0][2]
+    assert repo.requeue_payload_patches[0]["contactResolution"]["reasonCode"] == "provider_degraded"
+
+
+def test_degraded_mode_still_uses_existing_authoritative_context_before_requeue():
+    job = _job("find_instagram", university_name="Demo University")
+    repo = FakeRepository(
+        jobs=[job],
+        snippets_by_chapter={"chapter-1": ["Follow us at https://instagram.com/sigmachi_demochapter"]},
+    )
+    search_client = FakeSearchClient({})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_degraded_mode=True,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert search_client.queries == []
+    assert len(repo.completed) == 1
+
+
+def test_degraded_mode_skips_trusted_school_email_search_helpers():
+    job = _job("find_email", university_name="Demo University")
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_degraded_mode=True,
+    )
+
+    matches = engine._extract_email_matches_from_trusted_school_pages(job)
+
+    assert matches == []
+    assert search_client.queries == []
 
 
 def test_search_request_exception_preserves_attempts_for_instagram_jobs():
@@ -423,6 +689,47 @@ def test_field_job_engine_forwards_source_filter_to_repository():
 
     assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
     assert repo.claimed_source_slugs == ["sigma-chi-main"]
+
+
+def test_extract_website_matches_rejects_cross_fraternity_candidate():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_website", university_name="University of Rhode Island", chapter_name="Eta Chapter"),
+        fraternity_slug="theta-chi",
+    )
+    document = SearchDocument(
+        text="Kappa Kappa Psi official chapter listing for University of Rhode Island.",
+        links=["https://www.kkpsi.org/eta"],
+        url="https://www.kkpsi.org/about/chapters-districts/chapter-listing-2/",
+        title="Kappa Kappa Psi Chapter Listing",
+        provider="search_page",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_website_matches_accepts_official_school_affiliation_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_website", university_name="University of Rhode Island", chapter_name="Eta Chapter"),
+        fraternity_slug="theta-chi",
+    )
+    document = SearchDocument(
+        text="Recognized fraternity chapter profile for Theta Chi at the University of Rhode Island.",
+        links=["https://fsl.uri.edu/theta-chi"],
+        url="https://fsl.uri.edu/organizations",
+        title="Theta Chi | University of Rhode Island Greek Life",
+        provider="search_page",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert len(matches) == 1
+    assert matches[0].value == "https://fsl.uri.edu/theta-chi"
 
 
 
@@ -835,6 +1142,46 @@ def test_candidate_result_does_not_backfill_generic_source_directory_url_as_webs
     assert "website_url" not in result.chapter_updates
 
 
+def test_candidate_result_rejects_provenance_map_export_as_website():
+    job = replace(
+        _job("find_website", university_name="Louisiana State University", chapter_name="Beta Rho Chapter"),
+        fraternity_slug="phi-gamma-delta",
+        source_base_url="https://phigam.org/about/overview/our-chapters/",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    with pytest.raises(RetryableJobError):
+        engine._candidate_result(
+            job,
+            CandidateMatch(
+                value="https://www.google.com/maps/d/kml?mid=1497z-lFQzqOBrDnwB3z0r_qiqNU&forcekml=1",
+                confidence=0.8,
+                source_url="https://phigam.org/about/overview/our-chapters/",
+                source_snippet="Chapter map export",
+                field_name="website_url",
+                source_provider="provenance",
+            ),
+            "website_url",
+        )
+
+
+def test_search_result_rejects_wrong_school_same_fraternity_instagram():
+    job = replace(
+        _job("find_instagram", university_name="University of Pennsylvania", chapter_name="Kappa Chapter"),
+        fraternity_slug="theta-chi",
+    )
+    result = SearchResult(
+        title="Theta Chi at IUP",
+        url="https://www.instagram.com/thetachi_iup/",
+        snippet="Indiana University of Pennsylvania Theta Chi official Instagram.",
+        provider="searxng_json",
+        rank=1,
+    )
+
+    assert _search_result_is_useful(job, result, "instagram") is False
+
+
 def test_field_job_engine_finds_instagram_from_chapter_website_html_and_normalizes_url():
     job = _job("find_instagram", website_url="https://chapter.example.edu", university_name="Demo University")
     repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["Follow the chapter online"]})
@@ -1225,7 +1572,7 @@ def test_bing_only_email_job_searches_even_without_confident_website():
     assert repo.requeue_details[0][1] == 30 * 24 * 60 * 60
     assert "No candidate email found" in repo.requeue_details[0][2]
     assert repo.requeue_preserve_attempt_flags == [False]
-    assert repo.claimed_require_confident_website_for_email == [False]
+    assert repo.claimed_require_confident_website_for_email == [True]
 
 
 
@@ -1882,6 +2229,29 @@ def test_instagram_rejects_institutional_school_account_on_chapter_directory_pag
     assert repo.completed == []
 
 
+def test_website_rejects_cross_school_edu_link_from_official_school_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_website", university_name="Norwich University", chapter_name="Alpha Chapter"),
+        fraternity_slug="theta-chi",
+        source_slug="theta-chi-main",
+        source_base_url="https://www.thetachi.org/chapters/",
+        payload={"candidateSchoolName": "Norwich University", "sourceSlug": "theta-chi-main"},
+    )
+    document = SearchDocument(
+        text="Theta Chi on a school page. Visit chapter website.",
+        links=["https://web.uri.edu/greek/fraternities/theta-chi/"],
+        url="https://fsaffairs.illinois.edu/organizations/fraternities/ThetaChi",
+        title="Theta Chi | Fraternity and Sorority Affairs",
+        provider="search_page",
+    )
+
+    matches = engine._extract_website_matches(document, job)
+
+    assert matches == []
+
+
 def test_instagram_rejects_wrong_greek_organization_results_like_tri_sigma_uva():
     repo = FakeRepository(
         jobs=[_job("find_instagram", university_name="University of Virginia", chapter_name="Psi")],
@@ -1957,6 +2327,15 @@ def test_instagram_miss_marks_chapter_inactive_when_official_school_list_exclude
     )
     search_client = FakeSearchClient(
         {
+            '"Columbia University" fraternities site:.edu -"sigma aldrich" -sigmaaldrich -millipore -merck': [
+                SearchResult(
+                    title="Fraternities and Sororities | Columbia University",
+                    url="https://www.cc-seas.columbia.edu/reslife/fsl/chapters",
+                    snippet="Official chapter list for Columbia University fraternities and sororities.",
+                    provider="bing_html",
+                    rank=1,
+                )
+            ],
             '"sigma chi" Columbia University fraternity site:.edu -"sigma aldrich" -sigmaaldrich -millipore -merck': [
                 SearchResult(
                     title="Fraternities and Sororities | Columbia University",
@@ -1985,7 +2364,619 @@ def test_instagram_miss_marks_chapter_inactive_when_official_school_list_exclude
 
     assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
     assert repo.completed[0][1] == {"chapter_status": "inactive"}
-    assert repo.completed[0][2]["instagram_url"] == "missing"
+    assert repo.completed[0][2]["instagram_url"] == "inactive"
+
+
+def test_campus_policy_validation_runs_once_per_school_and_is_reused_for_sibling_jobs():
+    school_policy = SchoolPolicyRecord(
+        school_slug="norwich-university",
+        school_name="Norwich University",
+        greek_life_status="banned",
+        confidence=0.97,
+        evidence_url="https://archives.norwich.edu/fraternities-banned",
+        evidence_source_type="official_school",
+        reason_code="strong_ban_phrase",
+        metadata={"sourceSnippet": "There are no fraternities at Norwich."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    repo = FakeRepository(
+        jobs=[
+            _job("find_website", university_name="Norwich University", chapter_name="Alpha Chapter"),
+            _job("find_email", university_name="Norwich University", chapter_name="Alpha Chapter"),
+        ],
+        snippets_by_chapter={"chapter-1": []},
+    )
+    repo.school_policies["norwich university"] = school_policy
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=2)
+
+    assert result == {"processed": 2, "requeued": 0, "failed_terminal": 0}
+    assert len(repo.inactive_applied) == 2
+    assert repo.requeue_details == []
+    assert repo.completed[0][2]["website_url"] == "inactive"
+    assert repo.completed[1][2]["contact_email"] == "inactive"
+
+
+def test_invalid_entity_gate_marks_wikipedia_seeded_junk_and_cancels_siblings():
+    job = replace(
+        _job(
+            "find_website",
+            university_name="4",
+            chapter_name="Cardiac & Cardiovascular Systems",
+        ),
+        fraternity_slug="pi-kappa-alpha",
+    )
+    repo = FakeRepository(
+        jobs=[job],
+        snippets_by_chapter={"chapter-1": []},
+        pending_field_jobs={("chapter-1", "find_email"), ("chapter-1", "find_instagram")},
+        latest_provenance_by_chapter={
+            "chapter-1": {
+                "source_url": "https://en.wikipedia.org/wiki/Duke_University",
+                "source_snippet": "Academic rankings and departments for Duke University.",
+                "field_name": "name",
+                "confidence": 0.72,
+            }
+        },
+    )
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {}
+    assert repo.completed[0][2]["website_url"] == "invalid_entity"
+    assert repo.completed_siblings[0]["status"] == "invalid_entity_filtered"
+    assert repo.completed_siblings[0]["reason_code"] == "ranking_or_report_row"
+    assert repo.completed_siblings[0]["field_states"]["contact_email"] == "invalid_entity"
+    assert repo.completed_siblings[0]["field_states"]["instagram_url"] == "invalid_entity"
+
+
+def test_campus_policy_unknown_without_official_school_evidence_stays_process_local():
+    school_name = "Mystery State University"
+    job_one = _job("find_website", university_name=school_name, chapter_name="Alpha Chapter")
+    repo = FakeRepository(jobs=[job_one], snippets_by_chapter={"chapter-1": []})
+    search_client_one = FakeSearchClient({})
+    engine_one = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker-one",
+        search_client=search_client_one,
+        search_provider="bing_html",
+    )
+
+    first_result = engine_one.process(limit=1)
+
+    assert first_result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.school_policy_upserts == []
+    assert any("fraternities banned" in query for query in search_client_one.queries)
+
+    repo.jobs = [_job("find_website", university_name=school_name, chapter_name="Beta Chapter")]
+    search_client_two = FakeSearchClient({})
+    engine_two = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker-two",
+        search_client=search_client_two,
+        search_provider="bing_html",
+    )
+
+    second_result = engine_two.process(limit=1)
+
+    assert second_result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.school_policy_upserts == []
+    assert any("fraternities banned" in query for query in search_client_two.queries)
+
+
+def test_legacy_nonofficial_unknown_school_policy_is_ignored_and_revalidated():
+    school_name = "Norwich University"
+    job = _job("find_website", university_name=school_name, chapter_name="Alpha Chapter")
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    repo.school_policies[school_name.lower()] = SchoolPolicyRecord(
+        school_slug="norwich-university",
+        school_name=school_name,
+        greek_life_status="unknown",
+        confidence=0.0,
+        evidence_url="https://example.com/not-official",
+        evidence_source_type="official_school",
+        reason_code="non_official_school_source",
+        metadata={},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    search_client = FakeSearchClient({})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert any("fraternities banned" in query for query in search_client.queries)
+
+
+def test_low_confidence_existing_website_does_not_block_inactive_revalidation():
+    school_name = "University of Pennsylvania"
+    job = replace(
+        _job(
+            "find_website",
+            university_name=school_name,
+            chapter_name="Kappa Chapter",
+            website_url="https://drexel.edu/studentlife/activities-involvement/fraternity-sorority-life/councils-and-chapters/fraternities",
+        ),
+        fraternity_slug="theta-chi",
+        field_states={"website_url": "low_confidence"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    repo.chapter_activities[("theta-chi", school_name.lower())] = ChapterActivityRecord(
+        fraternity_slug="theta-chi",
+        school_slug="university-of-pennsylvania",
+        school_name=school_name,
+        chapter_activity_status="confirmed_inactive",
+        confidence=0.9,
+        evidence_url="https://ofsl.universitylife.upenn.edu/chapters/",
+        evidence_source_type="official_school",
+        reason_code="fraternity_absent_from_official_school_list",
+        metadata={"sourceSnippet": "Recognized chapters at Penn"},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.inactive_applied[0]["reason_code"] == "fraternity_absent_from_official_school_list"
+    assert repo.completed[0][2]["website_url"] == "inactive"
+
+
+def test_found_school_directory_website_does_not_block_inactive_revalidation():
+    school_name = "University of Pennsylvania"
+    job = replace(
+        _job(
+            "find_website",
+            university_name=school_name,
+            chapter_name="Kappa Chapter",
+            website_url="https://drexel.edu/studentlife/activities-involvement/fraternity-sorority-life/councils-and-chapters/fraternities",
+        ),
+        fraternity_slug="theta-chi",
+        field_states={"website_url": "found"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    repo.chapter_activities[("theta-chi", school_name.lower())] = ChapterActivityRecord(
+        fraternity_slug="theta-chi",
+        school_slug="university-of-pennsylvania",
+        school_name=school_name,
+        chapter_activity_status="confirmed_inactive",
+        confidence=0.9,
+        evidence_url="https://ofsl.universitylife.upenn.edu/chapters/",
+        evidence_source_type="official_school",
+        reason_code="fraternity_absent_from_official_school_list",
+        metadata={"sourceSnippet": "Recognized chapters at Penn"},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(
+            status_code=200,
+            text="<html><body><h1>Fraternities</h1><p>Official school list.</p></body></html>",
+        ),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.inactive_applied[0]["reason_code"] == "fraternity_absent_from_official_school_list"
+    assert repo.completed[0][2]["website_url"] == "inactive"
+
+
+def test_found_wrong_school_instagram_does_not_short_circuit_rerun():
+    school_name = "University of Pennsylvania"
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name=school_name,
+            chapter_name="Kappa Chapter",
+            instagram_url="https://www.instagram.com/thetachi_iup",
+        ),
+        fraternity_slug="theta-chi",
+        field_states={"instagram_url": "found"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": []})
+    repo.chapter_activities[("theta-chi", school_name.lower())] = ChapterActivityRecord(
+        fraternity_slug="theta-chi",
+        school_slug="university-of-pennsylvania",
+        school_name=school_name,
+        chapter_activity_status="confirmed_inactive",
+        confidence=0.9,
+        evidence_url="https://ofsl.universitylife.upenn.edu/chapters/",
+        evidence_source_type="official_school",
+        reason_code="fraternity_absent_from_official_school_list",
+        metadata={"sourceSnippet": "Recognized chapters at Penn"},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.inactive_applied[0]["reason_code"] == "fraternity_absent_from_official_school_list"
+    assert repo.completed[0][2]["instagram_url"] == "inactive"
+
+
+def test_authoritative_school_page_can_mark_website_confirmed_absent_and_capture_instagram():
+    website_job = replace(
+        _job("find_website", university_name="William Woods College", chapter_name="Kappa Chi Chapter"),
+        fraternity_slug="phi-gamma-delta",
+        source_slug="phi-gamma-delta-main",
+        source_base_url="https://phigam.org/about/overview/our-chapters/",
+        payload={"candidateSchoolName": "William Woods College", "sourceSlug": "phi-gamma-delta-main"},
+    )
+    repo = FakeRepository(
+        jobs=[website_job],
+        snippets_by_chapter={"chapter-1": []},
+        pending_field_jobs={("chapter-1", "find_instagram")},
+    )
+    repo.chapter_activities[("phi-gamma-delta", "william woods college")] = ChapterActivityRecord(
+        fraternity_slug="phi-gamma-delta",
+        school_slug="william-woods-college",
+        school_name="William Woods College",
+        chapter_activity_status="confirmed_active",
+        confidence=0.93,
+        evidence_url="https://www.williamwoods.edu/fraternity-chapters",
+        evidence_source_type="official_school",
+        reason_code="fraternity_present_on_official_school_list",
+        metadata={"sourceSnippet": "Phi Gamma Delta"},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    search_client = FakeSearchClient(
+        {
+            '"William Woods College" fraternities site:.edu': [
+                SearchResult(
+                    title="Fraternity Chapters | William Woods University",
+                    url="https://www.williamwoods.edu/student-experience/undergraduate-student-experience/clubs-and-organizations/fraternity-sorority/fraternity-chapters/",
+                    snippet="Fraternity chapters with Fiji on Instagram and Fiji National Website.",
+                    provider="bing_html",
+                    rank=1,
+                )
+            ],
+            '"William Woods College" fraternities site:.edu -"sigma aldrich" -sigmaaldrich -millipore -merck': [
+                SearchResult(
+                    title="Fraternity Chapters | William Woods University",
+                    url="https://www.williamwoods.edu/student-experience/undergraduate-student-experience/clubs-and-organizations/fraternity-sorority/fraternity-chapters/",
+                    snippet="Fraternity chapters with Fiji on Instagram and Fiji National Website.",
+                    provider="bing_html",
+                    rank=1,
+                )
+            ]
+        }
+    )
+    html = """
+    <html><body>
+      <h1>Fraternity Chapters</h1>
+      <section>
+        <h2>Phi Gamma Delta</h2>
+        <a href="https://phigam.org/">Fiji National Website</a>
+        <a href="https://www.instagram.com/wwufiji/">Fiji on Instagram</a>
+      </section>
+    </body></html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][2]["website_url"] == "confirmed_absent"
+    assert repo.completed[0][1]["instagram_url"] == "https://www.instagram.com/wwufiji"
+    assert repo.completed_siblings[-1]["field_names"] == ["find_instagram"]
+
+
+def test_authoritative_school_page_does_not_capture_institutional_instagram_as_chapter_contact():
+    website_job = replace(
+        _job("find_website", university_name="Norwich University", chapter_name="Alpha Chapter"),
+        fraternity_slug="theta-chi",
+        source_slug="theta-chi-main",
+        source_base_url="https://www.thetachi.org/chapters/",
+        payload={"candidateSchoolName": "Norwich University", "sourceSlug": "theta-chi-main"},
+    )
+    repo = FakeRepository(
+        jobs=[website_job],
+        snippets_by_chapter={"chapter-1": []},
+        pending_field_jobs={("chapter-1", "find_instagram")},
+    )
+    repo.chapter_activities[("theta-chi", "norwich university")] = ChapterActivityRecord(
+        fraternity_slug="theta-chi",
+        school_slug="norwich-university",
+        school_name="Norwich University",
+        chapter_activity_status="confirmed_active",
+        confidence=0.93,
+        evidence_url="https://www.norwich.edu/student-life/",
+        evidence_source_type="official_school",
+        reason_code="fraternity_present_on_official_school_list",
+        metadata={"sourceSnippet": "Theta Chi"},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    search_client = FakeSearchClient(
+        {
+            '"Norwich University" chapters at site:.edu': [
+                SearchResult(
+                    title="Student Life | Norwich University",
+                    url="https://www.norwich.edu/student-life/",
+                    snippet="Student life resources and campus involvement at Norwich University.",
+                    provider="bing_html",
+                    rank=1,
+                )
+            ]
+        }
+    )
+    html = """
+    <html><body>
+      <h1>Student Life</h1>
+      <a href="https://www.instagram.com/norwichuniversity/">Instagram</a>
+    </body></html>
+    """
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        get_requester=lambda url, timeout, allow_redirects: SimpleNamespace(status_code=200, text=html),
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][2]["website_url"] == "confirmed_absent"
+    assert "instagram_url" not in repo.completed[0][1]
+    assert repo.completed_siblings == []
+
+
+def test_instagram_search_gate_rejects_school_branded_handle_on_official_school_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_instagram", university_name="Norwich University", chapter_name="Alpha Chapter"),
+        fraternity_slug="theta-chi",
+        source_slug="theta-chi-main",
+        source_base_url="https://www.thetachi.org/chapters/",
+        payload={"candidateSchoolName": "Norwich University", "sourceSlug": "theta-chi-main"},
+    )
+    document = SearchDocument(
+        text="Student Life resources at Norwich University. Follow Norwich University on Instagram.",
+        links=["https://www.instagram.com/norwichuniversity/"],
+        url="https://www.norwich.edu/student-life/",
+        title="Student Life | Norwich University",
+        provider="search_page",
+        query='"Norwich University" fraternities site:.edu',
+    )
+
+    matches = engine._extract_instagram_matches(document, job)
+
+    assert matches == []
+
+
+def test_instagram_search_gate_keeps_valid_school_page_chapter_handle():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_instagram", university_name="William Woods College", chapter_name="Kappa Chi Chapter"),
+        fraternity_slug="phi-gamma-delta",
+        source_slug="phi-gamma-delta-main",
+        source_base_url="https://phigam.org/about/overview/our-chapters/",
+        payload={"candidateSchoolName": "William Woods College", "sourceSlug": "phi-gamma-delta-main"},
+    )
+    document = SearchDocument(
+        text="Fraternity Chapters Phi Gamma Delta Fiji on Instagram William Woods College.",
+        links=["https://www.instagram.com/wwufiji/"],
+        url="https://www.williamwoods.edu/student-experience/undergraduate-student-experience/clubs-and-organizations/fraternity-sorority/fraternity-chapters/",
+        title="Fraternity Chapters | William Woods College",
+        provider="search_page",
+        query='"phi gamma delta" William Woods College student organization site:.edu',
+    )
+
+    matches = engine._extract_instagram_matches(document, job)
+
+    assert [match.value for match in matches] == ["https://www.instagram.com/wwufiji"]
+
+
+def test_instagram_source_page_rejects_hq_handle_without_local_identity():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_instagram", university_name="Norwich University", chapter_name="Alpha Chapter"),
+        fraternity_slug="theta-chi",
+        source_slug="theta-chi-main",
+        source_base_url="https://www.thetachi.org/chapters/",
+        payload={"candidateSchoolName": "Norwich University", "sourceSlug": "theta-chi-main"},
+    )
+    document = SearchDocument(
+        text="Theta Chi chapters include Norwich University. Follow Theta Chi HQ on Instagram for updates.",
+        links=["https://www.instagram.com/thetachiihq/"],
+        url="https://www.thetachi.org/chapters/",
+        title="Theta Chi Chapters",
+        provider="source_page",
+    )
+
+    matches = engine._extract_instagram_matches(document, job)
+
+    assert matches == []
+
+
+def test_school_validation_follows_same_host_scorecard_link_before_marking_inactive():
+    job = replace(
+        _job("find_website", university_name="Louisiana State University", chapter_name="Beta Rho Chapter"),
+        fraternity_slug="phi-gamma-delta",
+        source_slug="phi-gamma-delta-main",
+        source_base_url="https://phigam.org/about/overview/our-chapters/",
+        payload={"candidateSchoolName": "Louisiana State University", "sourceSlug": "phi-gamma-delta-main"},
+    )
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+
+    class CommunitySearchClient:
+        def __init__(self):
+            self.queries: list[str] = []
+
+        def search(self, query: str, max_results: int | None = None):
+            self.queries.append(query)
+            return [
+                SearchResult(
+                    title="Fraternity & Sorority Community",
+                    url="https://www.lsu.edu/greeks/community/index.php",
+                    snippet="Our community and councils for Greek Life at LSU.",
+                    provider="bing_html",
+                    rank=1,
+                )
+            ]
+
+    community_html = """
+    <html><body>
+      <h1>Our Community</h1>
+      <a href="/greeks/scorecard/index.php">Community Scorecard</a>
+      <a href="/greeks/councils">Councils and Chapters</a>
+    </body></html>
+    """
+    scorecard_html = """
+    <html><body>
+      <h1>Community Scorecard</h1>
+      <p>Active Chapters</p>
+      <a href="#fraternities">Fraternities</a>
+      <a href="#sororities">Sororities</a>
+      <a href="#suspended">Suspended Chapters</a>
+      <a href="#closed">Closed Chapters</a>
+      <h3>Phi Gamma Delta</h3>
+      <p>Active</p>
+      <p>FIJI</p>
+      <a href="/greeks/scorecard/fiji">View Scorecard</a>
+      <h3>Sigma Chi</h3>
+      <p>Active</p>
+      <a href="/greeks/scorecard/sigma-chi">View Scorecard</a>
+      <h3>Delta Chi</h3>
+      <p>Active</p>
+      <a href="/greeks/scorecard/delta-chi">View Scorecard</a>
+    </body></html>
+    """
+
+    def get_requester(url, timeout, allow_redirects):
+        normalized = url.lower().rstrip("/")
+        if normalized.endswith("/greeks/community/index.php"):
+            return SimpleNamespace(status_code=200, text=community_html)
+        if normalized.endswith("/greeks/scorecard/index.php"):
+            return SimpleNamespace(status_code=200, text=scorecard_html)
+        return SimpleNamespace(status_code=404, text="")
+
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=CommunitySearchClient(),
+        search_provider="bing_html",
+        get_requester=get_requester,
+    )
+
+    decision = engine._get_or_resolve_chapter_activity(job)
+
+    assert decision.chapter_activity_status == "confirmed_active"
+    assert decision.reason_code == "fraternity_present_on_official_school_list"
+    assert decision.evidence_url == "https://www.lsu.edu/greeks/scorecard/index.php"
+
+
+def test_chapter_activity_falls_back_to_official_school_website_queries_when_roster_queries_miss():
+    job = replace(
+        _job("find_website", university_name="University of Pennsylvania", chapter_name="Kappa"),
+        fraternity_slug="theta-chi",
+        source_slug="theta-chi-main",
+        source_base_url="https://www.thetachi.org/chapters",
+        payload={"candidateSchoolName": "University of Pennsylvania", "sourceSlug": "theta-chi-main"},
+    )
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+    search_client = FakeSearchClient({})
+
+    seed_engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+    )
+    for query in seed_engine._build_search_queries(job, target="website_school")[:2]:
+        search_client.results_by_query[query] = [
+            SearchResult(
+                title="Penn Fraternity & Sorority Life",
+                url="https://ofsl.universitylife.upenn.edu/",
+                snippet="Official fraternity and sorority life page for Penn.",
+                provider="bing_html",
+                rank=1,
+            )
+        ]
+
+    community_html = """
+    <html><body>
+      <h1>Penn Fraternity & Sorority Life</h1>
+      <a href="/chapters/">Chapters at Penn</a>
+      <a href="/about/">About</a>
+    </body></html>
+    """
+    chapters_html = """
+    <html><body>
+      <h1>Chapters at Penn</h1>
+      <ul>
+        <li>Alpha Chi Rho</li>
+        <li>Theta Chi</li>
+        <li>Phi Gamma Delta</li>
+      </ul>
+    </body></html>
+    """
+
+    def get_requester(url, timeout, allow_redirects):
+        normalized = url.lower().rstrip("/")
+        if normalized == "https://ofsl.universitylife.upenn.edu":
+            return SimpleNamespace(status_code=200, text=community_html)
+        if normalized == "https://ofsl.universitylife.upenn.edu/chapters":
+            return SimpleNamespace(status_code=200, text=chapters_html)
+        return SimpleNamespace(status_code=404, text="")
+
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_provider="bing_html",
+        get_requester=get_requester,
+    )
+
+    decision = engine._get_or_resolve_chapter_activity(job)
+
+    assert decision.chapter_activity_status == "confirmed_active"
+    assert decision.reason_code == "fraternity_present_on_official_school_list"
+    assert decision.evidence_url == "https://ofsl.universitylife.upenn.edu/chapters/"
+    assert any("student organization" in query or "greek life" in query for query in search_client.queries)
 
 
 def test_instagram_falls_back_to_nationals_provenance_when_search_is_weak():

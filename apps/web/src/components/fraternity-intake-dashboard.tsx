@@ -373,9 +373,9 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
               </div>
 
               <div className="stageRail">
-                {["discovery", "awaiting_confirmation", "crawl_run", "enrichment", "completed"].map((stage) => {
-                  const currentIndex = ["discovery", "awaiting_confirmation", "crawl_run", "enrichment", "completed", "failed"].indexOf(selectedRequest.stage);
-                  const stepIndex = ["discovery", "awaiting_confirmation", "crawl_run", "enrichment", "completed"].indexOf(stage);
+                {["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "completed"].map((stage) => {
+                  const currentIndex = ["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "completed", "failed"].indexOf(selectedRequest.stage);
+                  const stepIndex = ["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "completed"].indexOf(stage);
                   const isReached = currentIndex >= stepIndex;
                   return (
                     <div key={stage} className={`stageRailStep${selectedRequest.stage === stage ? " active" : ""}${isReached ? " reached" : ""}`}>

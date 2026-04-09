@@ -57,7 +57,25 @@ const WEAK_URL_MARKERS = [
   "portal",
   "login",
   "account",
-  "donate"
+  "donate",
+  "store",
+  "shop",
+  "merchandise"
+];
+
+const GENERIC_INFO_PATH_MARKERS = [
+  "about",
+  "history",
+  "ideals",
+  "mission",
+  "values",
+  "join",
+  "news",
+  "events",
+  "careers",
+  "contact",
+  "staff",
+  "board"
 ];
 
 const POSITIVE_TEXT_MARKERS = [
@@ -116,13 +134,20 @@ export function evaluateSourceUrl(url: string | null | undefined): SourceQuality
       reasons.push(...weakHits.map((marker) => `weak:${marker}`));
     }
 
+    const path = parsed.pathname.replace(/\/+$/, "");
+    const genericInfoHits = GENERIC_INFO_PATH_MARKERS.filter((marker) =>
+      path === `/${marker}` || path.endsWith(`/${marker}`)
+    );
+    if (genericInfoHits.length > 0 && !POSITIVE_URL_MARKERS.some((marker) => normalized.includes(marker))) {
+      score -= Math.min(0.4, genericInfoHits.length * 0.16);
+      reasons.push(...genericInfoHits.map((marker) => `generic_info:${marker}`));
+    }
+
     const weakHostHits = WEAK_HOST_MARKERS.filter((marker) => parsed.hostname.toLowerCase().includes(marker));
     if (weakHostHits.length > 0) {
       score -= Math.min(0.7, weakHostHits.length * 0.3);
       reasons.push(...weakHostHits.map((marker) => `weak_host:${marker}`));
     }
-
-    const path = parsed.pathname.replace(/\/+$/, "");
     if (!path || path === "") {
       score -= 0.12;
       reasons.push("generic_root_path");

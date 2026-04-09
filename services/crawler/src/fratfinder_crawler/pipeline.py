@@ -18,7 +18,7 @@ from fratfinder_crawler.config import Settings
 from fratfinder_crawler.db.connection import get_connection
 from fratfinder_crawler.db import CrawlerRepository, RequestGraphRepository
 from fratfinder_crawler.discovery import discover_source
-from fratfinder_crawler.field_jobs import FieldJobEngine
+from fratfinder_crawler.field_jobs import FIELD_JOB_FIND_EMAIL, FIELD_JOB_FIND_WEBSITE, FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.normalization import classify_chapter_validity
@@ -1027,6 +1027,7 @@ class CrawlService:
             "triaged": 0,
             "invalidCancelled": 0,
             "deferredLongCooldown": 0,
+            "dependencyDeferred": 0,
             "repairQueued": 0,
             "actionableRetained": 0,
             "sourceInvaliditySaturated": False,
@@ -1076,22 +1077,69 @@ class CrawlService:
                 triage_summary["invalidCancelled"] = int(triage_summary["invalidCancelled"]) + 1
                 repair_summary["reconciledHistorical"] += 1
                 continue
-            if decision.validity_class == "canonical_valid":
+            website_field_state = str((job.field_states or {}).get("website_url") or "").strip().lower()
+            has_confident_website = bool(
+                job.website_url
+                and website_field_state not in {"", "missing", "low_confidence"}
+            )
+            if (
+                decision.validity_class == "canonical_valid"
+                and job.field_name == FIELD_JOB_FIND_EMAIL
+                and bool(getattr(self._settings, "crawler_search_require_confident_website_for_email", True))
+                and not has_confident_website
+            ):
+                has_pending_website_job = repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE)
+                reason_code = "dependency_wait" if has_pending_website_job else "website_required"
+                queue_outcome = "defer_email_until_website" if has_pending_website_job else "defer_email_without_website"
+                delay_seconds = max(300, int(getattr(self._settings, "crawler_search_dependency_wait_seconds", 300)))
+                if not has_pending_website_job:
+                    delay_seconds = max(delay_seconds, 1_800)
                 repository.patch_queued_field_job(
                     job.id,
                     payload_patch={
                         "queueTriage": {
-                            "outcome": "keep_actionable",
+                            "outcome": queue_outcome,
                             "validityClass": decision.validity_class,
                         },
                         "contactResolution": {
-                            "queueState": "actionable",
+                            "queueState": "deferred",
                             "validityClass": decision.validity_class,
+                            "reasonCode": reason_code,
                         },
                     },
                     status="queued",
-                    scheduled_delay_seconds=0,
-                    last_error="",
+                    scheduled_delay_seconds=delay_seconds,
+                    last_error=(
+                        "Deferred until confident website discovery is available for email enrichment"
+                        if has_pending_website_job
+                        else "Deferred because a confident website is required before email enrichment can continue"
+                    ),
+                    terminal_failure=False,
+                )
+                triage_summary["dependencyDeferred"] = int(triage_summary["dependencyDeferred"]) + 1
+                repair_summary["reconciledHistorical"] += 1
+                continue
+            if decision.validity_class == "canonical_valid":
+                current_queue_state = str(job.queue_state or "actionable").strip().lower() or "actionable"
+                current_reason_code = ""
+                if isinstance(job.payload.get("contactResolution"), dict):
+                    current_reason_code = str((job.payload.get("contactResolution") or {}).get("reasonCode") or "").strip()
+                repository.patch_queued_field_job(
+                    job.id,
+                    payload_patch={
+                        "queueTriage": {
+                            "outcome": "keep_deferred" if current_queue_state == "deferred" else "keep_actionable",
+                            "validityClass": decision.validity_class,
+                        },
+                        "contactResolution": {
+                            "queueState": current_queue_state,
+                            "validityClass": decision.validity_class,
+                            **({"reasonCode": current_reason_code} if current_queue_state == "deferred" and current_reason_code else {}),
+                        },
+                    },
+                    status="queued",
+                    scheduled_delay_seconds=0 if current_queue_state != "deferred" else None,
+                    last_error="" if current_queue_state != "deferred" else None,
                     terminal_failure=False,
                 )
                 triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
@@ -1271,11 +1319,21 @@ class CrawlService:
 
             if outcome["status"] == "promoted_to_canonical_valid":
                 for job in related_jobs:
+                    website_field_state = str((job.field_states or {}).get("website_url") or "").strip().lower()
+                    has_confident_website = bool(
+                        job.website_url
+                        and website_field_state not in {"", "missing", "low_confidence"}
+                    )
+                    defer_email_for_missing_website = bool(
+                        job.field_name == FIELD_JOB_FIND_EMAIL
+                        and getattr(self._settings, "crawler_search_require_confident_website_for_email", True)
+                        and not has_confident_website
+                    )
                     repository.patch_queued_field_job(
                         job.id,
                         payload_patch={
                             "queueTriage": {
-                                "outcome": "keep_actionable",
+                                "outcome": "defer_email_without_website" if defer_email_for_missing_website else "keep_actionable",
                                 "validityClass": "canonical_valid",
                                 "repairOutcome": outcome["status"],
                             },
@@ -1283,13 +1341,18 @@ class CrawlService:
                                 "state": "promoted_to_canonical_valid",
                             },
                             "contactResolution": {
-                                "queueState": "actionable",
+                                "queueState": "deferred" if defer_email_for_missing_website else "actionable",
                                 "validityClass": "canonical_valid",
+                                **({"reasonCode": "website_required"} if defer_email_for_missing_website else {}),
                             },
                         },
                         status="queued",
-                        scheduled_delay_seconds=0,
-                        last_error="",
+                        scheduled_delay_seconds=1_800 if defer_email_for_missing_website else 0,
+                        last_error=(
+                            "Deferred because a confident website is required before email enrichment can continue"
+                            if defer_email_for_missing_website
+                            else ""
+                        ),
                         terminal_failure=False,
                     )
                 repository.complete_chapter_repair_job(
@@ -1427,7 +1490,10 @@ class CrawlService:
                 repository,
                 source_slug=source_slug,
                 field_name=field_name,
-                limit=max(limit * 6, 120) if source_slug is None else max(limit * 20, 1000),
+                # On large all-source runs, cheap semantic triage should sweep much
+                # further ahead than the immediate worker batch so obvious junk rows
+                # are canceled before they consume claim slots.
+                limit=max(limit * 30, 2_000) if source_slug is None else max(limit * 20, 1_000),
                 policy_pack=policy_pack,
             )
             queued_repair_summary = self._process_chapter_repair_queue(
@@ -1598,6 +1664,7 @@ class CrawlService:
                 instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
                 instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
                 greedy_collect_mode=self._settings.crawler_greedy_collect,
+                search_degraded_mode=degraded_mode,
             )
             if runtime_mode == "legacy":
                 result = engine.process(limit=limit)

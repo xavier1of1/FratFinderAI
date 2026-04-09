@@ -419,6 +419,57 @@ def test_auto_free_skips_unconfigured_api_providers_and_uses_duckduckgo_html():
     assert calls[1].startswith("https://lite.duckduckgo.com")
 
 
+def test_auto_free_falls_back_from_low_signal_searxng_results_to_duckduckgo():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        if "localhost:8888/search" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text='{"results":[{"title":"Directory Opus和Total Commander","url":"https://www.zhihu.com/question/22737842/answers/updated","content":"Directory Opus versus Total Commander"}]}',
+                json=lambda: {
+                    "results": [
+                        {
+                            "title": "Directory Opus和Total Commander",
+                            "url": "https://www.zhihu.com/question/22737842/answers/updated",
+                            "content": "Directory Opus versus Total Commander",
+                        }
+                    ]
+                },
+                raise_for_status=lambda: None,
+            )
+        if "duckduckgo" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text=(
+                    "<html><body><table>"
+                    "<tr><td><a href=\"//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.thetachi.org%2Fchapters\">Theta Chi Chapters</a></td></tr>"
+                    "</table></body></html>"
+                ),
+                raise_for_status=lambda: None,
+            )
+        raise AssertionError(f"Unexpected URL call: {url}")
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="auto_free",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,duckduckgo_html",
+        ),
+        get_requester=requester,
+    )
+
+    results = client.search("theta chi official fraternity chapters")
+
+    assert len(results) == 1
+    assert results[0].provider == "duckduckgo_html"
+    assert results[0].url == "https://www.thetachi.org/chapters"
+    assert calls[0] == "http://localhost:8888/search"
+    assert calls[1].startswith("https://lite.duckduckgo.com")
+
+
 def test_search_client_caches_duplicate_queries():
     calls: list[str] = []
 

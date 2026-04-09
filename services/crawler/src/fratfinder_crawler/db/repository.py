@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
 from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
+    ChapterActivityRecord,
     ChapterEvidenceRecord,
     ChapterRepairJob,
     CrawlMetrics,
@@ -31,6 +32,7 @@ from fratfinder_crawler.models import (
     ProvisionalChapterRecord,
     RewardEvent,
     ReviewItemCandidate,
+    SchoolPolicyRecord,
     TemplateProfile,
     SourceRecord,
     VerifiedSourceRecord,
@@ -71,6 +73,15 @@ def _extract_field_job_typed_state(
         "terminal_outcome": completed_payload.get("status") if isinstance(completed_payload, dict) else None,
     }
     return typed
+
+
+def _normalize_school_slug(value: Any) -> str | None:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    normalized = "".join(ch if ch.isalnum() else "-" for ch in text)
+    normalized = "-".join(part for part in normalized.split("-") if part)
+    return normalized or None
 
 
 class CrawlerRepository:
@@ -339,6 +350,259 @@ class CrawlerRepository:
                 )
             )
         return candidates
+
+    def get_school_policy(self, school_name: str | None) -> SchoolPolicyRecord | None:
+        school_slug = _normalize_school_slug(school_name)
+        if school_slug is None:
+            return None
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    school_slug,
+                    school_name,
+                    greek_life_status,
+                    confidence,
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    metadata,
+                    last_verified_at::text AS last_verified_at,
+                    created_at::text AS created_at,
+                    updated_at::text AS updated_at
+                FROM school_greek_life_registry
+                WHERE school_slug = %s
+                LIMIT 1
+                """,
+                (school_slug,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return SchoolPolicyRecord(
+            school_slug=row["school_slug"],
+            school_name=row["school_name"],
+            greek_life_status=row["greek_life_status"],
+            confidence=float(row["confidence"] or 0.0),
+            evidence_url=row["evidence_url"],
+            evidence_source_type=row["evidence_source_type"],
+            reason_code=row["reason_code"],
+            metadata=row["metadata"] or {},
+            last_verified_at=row["last_verified_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def upsert_school_policy(
+        self,
+        *,
+        school_name: str,
+        greek_life_status: str,
+        confidence: float,
+        evidence_url: str | None = None,
+        evidence_source_type: str | None = None,
+        reason_code: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SchoolPolicyRecord:
+        school_slug = _normalize_school_slug(school_name)
+        if school_slug is None:
+            raise ValueError("school_name is required for school policy upsert")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO school_greek_life_registry (
+                    school_slug,
+                    school_name,
+                    greek_life_status,
+                    confidence,
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    metadata,
+                    last_verified_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (school_slug)
+                DO UPDATE SET
+                    school_name = EXCLUDED.school_name,
+                    greek_life_status = EXCLUDED.greek_life_status,
+                    confidence = EXCLUDED.confidence,
+                    evidence_url = EXCLUDED.evidence_url,
+                    evidence_source_type = EXCLUDED.evidence_source_type,
+                    reason_code = EXCLUDED.reason_code,
+                    metadata = COALESCE(school_greek_life_registry.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+                    last_verified_at = NOW(),
+                    updated_at = NOW()
+                RETURNING
+                    school_slug,
+                    school_name,
+                    greek_life_status,
+                    confidence,
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    metadata,
+                    last_verified_at::text AS last_verified_at,
+                    created_at::text AS created_at,
+                    updated_at::text AS updated_at
+                """,
+                (
+                    school_slug,
+                    school_name,
+                    greek_life_status,
+                    max(0.0, min(float(confidence), 0.99)),
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    Jsonb(metadata or {}),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return SchoolPolicyRecord(
+            school_slug=row["school_slug"],
+            school_name=row["school_name"],
+            greek_life_status=row["greek_life_status"],
+            confidence=float(row["confidence"] or 0.0),
+            evidence_url=row["evidence_url"],
+            evidence_source_type=row["evidence_source_type"],
+            reason_code=row["reason_code"],
+            metadata=row["metadata"] or {},
+            last_verified_at=row["last_verified_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def get_chapter_activity(self, *, fraternity_slug: str | None, school_name: str | None) -> ChapterActivityRecord | None:
+        school_slug = _normalize_school_slug(school_name)
+        fraternity_slug = str(fraternity_slug or "").strip()
+        if school_slug is None or not fraternity_slug:
+            return None
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    fraternity_slug,
+                    school_slug,
+                    school_name,
+                    chapter_activity_status,
+                    confidence,
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    metadata,
+                    last_verified_at::text AS last_verified_at,
+                    created_at::text AS created_at,
+                    updated_at::text AS updated_at
+                FROM fraternity_school_activity_cache
+                WHERE fraternity_slug = %s
+                  AND school_slug = %s
+                LIMIT 1
+                """,
+                (fraternity_slug, school_slug),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return ChapterActivityRecord(
+            fraternity_slug=row["fraternity_slug"],
+            school_slug=row["school_slug"],
+            school_name=row["school_name"],
+            chapter_activity_status=row["chapter_activity_status"],
+            confidence=float(row["confidence"] or 0.0),
+            evidence_url=row["evidence_url"],
+            evidence_source_type=row["evidence_source_type"],
+            reason_code=row["reason_code"],
+            metadata=row["metadata"] or {},
+            last_verified_at=row["last_verified_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def upsert_chapter_activity(
+        self,
+        *,
+        fraternity_slug: str,
+        school_name: str,
+        chapter_activity_status: str,
+        confidence: float,
+        evidence_url: str | None = None,
+        evidence_source_type: str | None = None,
+        reason_code: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ChapterActivityRecord:
+        school_slug = _normalize_school_slug(school_name)
+        if school_slug is None:
+            raise ValueError("school_name is required for chapter activity upsert")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO fraternity_school_activity_cache (
+                    fraternity_slug,
+                    school_slug,
+                    school_name,
+                    chapter_activity_status,
+                    confidence,
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    metadata,
+                    last_verified_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (fraternity_slug, school_slug)
+                DO UPDATE SET
+                    school_name = EXCLUDED.school_name,
+                    chapter_activity_status = EXCLUDED.chapter_activity_status,
+                    confidence = EXCLUDED.confidence,
+                    evidence_url = EXCLUDED.evidence_url,
+                    evidence_source_type = EXCLUDED.evidence_source_type,
+                    reason_code = EXCLUDED.reason_code,
+                    metadata = COALESCE(fraternity_school_activity_cache.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+                    last_verified_at = NOW(),
+                    updated_at = NOW()
+                RETURNING
+                    fraternity_slug,
+                    school_slug,
+                    school_name,
+                    chapter_activity_status,
+                    confidence,
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    metadata,
+                    last_verified_at::text AS last_verified_at,
+                    created_at::text AS created_at,
+                    updated_at::text AS updated_at
+                """,
+                (
+                    fraternity_slug,
+                    school_slug,
+                    school_name,
+                    chapter_activity_status,
+                    max(0.0, min(float(confidence), 0.99)),
+                    evidence_url,
+                    evidence_source_type,
+                    reason_code,
+                    Jsonb(metadata or {}),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return ChapterActivityRecord(
+            fraternity_slug=row["fraternity_slug"],
+            school_slug=row["school_slug"],
+            school_name=row["school_name"],
+            chapter_activity_status=row["chapter_activity_status"],
+            confidence=float(row["confidence"] or 0.0),
+            evidence_url=row["evidence_url"],
+            evidence_source_type=row["evidence_source_type"],
+            reason_code=row["reason_code"],
+            metadata=row["metadata"] or {},
+            last_verified_at=row["last_verified_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     def upsert_fraternity(self, slug: str, name: str, nic_affiliated: bool = True) -> tuple[str, str]:
         with self._connection.cursor() as cursor:
@@ -1003,6 +1267,209 @@ class CrawlerRepository:
                     },
                 )
 
+    def list_chapters_for_crawl_run(self, crawl_run_id: int) -> list[dict[str, Any]]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT DISTINCT ON (c.id)
+                    c.id::text AS chapter_id,
+                    c.slug AS chapter_slug,
+                    c.name AS chapter_name,
+                    c.university_name,
+                    c.chapter_status,
+                    c.website_url,
+                    c.instagram_url,
+                    c.contact_email,
+                    c.field_states,
+                    f.slug AS fraternity_slug
+                FROM chapter_provenance cp
+                JOIN chapters c ON c.id = cp.chapter_id
+                JOIN fraternities f ON f.id = c.fraternity_id
+                WHERE cp.crawl_run_id = %s
+                ORDER BY c.id, cp.extracted_at DESC, cp.created_at DESC
+                """,
+                (crawl_run_id,),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def apply_chapter_inactive_status(
+        self,
+        *,
+        chapter_id: str,
+        chapter_slug: str,
+        fraternity_slug: str | None,
+        source_slug: str | None,
+        crawl_run_id: int | None,
+        reason_code: str,
+        evidence_url: str | None = None,
+        evidence_source_type: str | None = None,
+        source_snippet: str | None = None,
+        provider: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        field_states = {
+            "website_url": "inactive",
+            "instagram_url": "inactive",
+            "contact_email": "inactive",
+        }
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE chapters
+                SET
+                    chapter_status = 'inactive',
+                    website_url = NULL,
+                    instagram_url = NULL,
+                    contact_email = NULL,
+                    field_states = COALESCE(field_states, '{}'::jsonb) || %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (Jsonb(field_states), chapter_id),
+            )
+            if crawl_run_id is not None:
+                cursor.execute("SELECT source_id FROM crawl_runs WHERE id = %s", (crawl_run_id,))
+                source_row = cursor.fetchone()
+                source_id = str(source_row["source_id"]) if source_row and source_row["source_id"] is not None else None
+                if source_id is not None:
+                    cursor.execute(
+                        """
+                        INSERT INTO chapter_provenance (
+                            chapter_id,
+                            source_id,
+                            crawl_run_id,
+                            field_name,
+                            field_value,
+                            source_url,
+                            source_snippet,
+                            confidence
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            chapter_id,
+                            source_id,
+                            crawl_run_id,
+                            "chapter_status",
+                            "inactive",
+                            evidence_url or source_slug or "validation",
+                            (source_snippet or reason_code)[:400],
+                            0.95,
+                        ),
+                    )
+            cursor.execute(
+                """
+                INSERT INTO chapter_evidence (
+                    chapter_id,
+                    chapter_slug,
+                    fraternity_slug,
+                    source_slug,
+                    crawl_run_id,
+                    field_name,
+                    candidate_value,
+                    confidence,
+                    trust_tier,
+                    evidence_status,
+                    source_url,
+                    source_snippet,
+                    provider,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    chapter_id,
+                    chapter_slug,
+                    fraternity_slug,
+                    source_slug,
+                    crawl_run_id,
+                    "chapter_status",
+                    "inactive",
+                    0.95,
+                    "strong_official" if evidence_source_type == "official_school" else "high",
+                    "accepted",
+                    evidence_url or source_slug,
+                    (source_snippet or reason_code)[:400],
+                    provider,
+                    Jsonb(
+                        {
+                            "reasonCode": reason_code,
+                            "evidenceSourceType": evidence_source_type,
+                            **(metadata or {}),
+                        }
+                    ),
+                ),
+            )
+        self._connection.commit()
+
+    def complete_pending_field_jobs_for_chapter(
+        self,
+        *,
+        chapter_id: str,
+        reason_code: str,
+        status: str,
+        chapter_updates: dict[str, str] | None = None,
+        field_states: dict[str, str] | None = None,
+        field_names: list[str] | None = None,
+    ) -> int:
+        chapter_updates = chapter_updates or {}
+        field_states = field_states or {}
+        field_names = [name for name in (field_names or []) if name]
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE chapters
+                SET
+                    website_url = COALESCE(%(website_url)s, website_url),
+                    instagram_url = COALESCE(%(instagram_url)s, instagram_url),
+                    contact_email = COALESCE(%(contact_email)s, contact_email),
+                    university_name = COALESCE(%(university_name)s, university_name),
+                    chapter_status = COALESCE(%(chapter_status)s, chapter_status),
+                    field_states = COALESCE(field_states, '{}'::jsonb) || %(field_states)s,
+                    updated_at = NOW()
+                WHERE id = %(chapter_id)s
+                """,
+                {
+                    "website_url": chapter_updates.get("website_url"),
+                    "instagram_url": chapter_updates.get("instagram_url"),
+                    "contact_email": chapter_updates.get("contact_email"),
+                    "university_name": chapter_updates.get("university_name"),
+                    "chapter_status": chapter_updates.get("chapter_status"),
+                    "field_states": Jsonb(field_states),
+                    "chapter_id": chapter_id,
+                },
+            )
+            cursor.execute(
+                """
+                UPDATE field_jobs
+                SET
+                    status = 'done',
+                    terminal_outcome = %s,
+                    finished_at = NOW(),
+                    last_error = NULL,
+                    completed_payload = %s,
+                    claim_token = NULL,
+                    terminal_failure = FALSE
+                WHERE chapter_id = %s
+                  AND status IN ('queued', 'running')
+                  AND (
+                    cardinality(%s::text[]) = 0
+                    OR field_name = ANY(%s::text[])
+                  )
+                """,
+                (
+                    status,
+                    Jsonb({"status": status, "reasonCode": reason_code}),
+                    chapter_id,
+                    field_names,
+                    field_names,
+                ),
+            )
+            affected = cursor.rowcount or 0
+        self._connection.commit()
+        return int(affected)
+
     def create_field_jobs(
         self,
         chapter_id: str,
@@ -1020,6 +1487,27 @@ class CrawlerRepository:
         created = 0
         with self._connection.cursor() as cursor:
             for field_name in sorted(requested_jobs):
+                cursor.execute(
+                    """
+                    SELECT chapter_status, field_states
+                    FROM chapters
+                    WHERE id = %s
+                    """,
+                    (chapter_id,),
+                )
+                chapter_row = cursor.fetchone()
+                if chapter_row is not None:
+                    chapter_status = str(chapter_row["chapter_status"] or "active").strip().lower()
+                    field_states = dict(chapter_row["field_states"] or {})
+                    state_key = FIELD_TO_CHAPTER_COLUMN.get(field_name)
+                    if chapter_status == "inactive":
+                        continue
+                    if state_key and str(field_states.get(state_key) or "").strip().lower() in {
+                        "inactive",
+                        "confirmed_absent",
+                        "invalid_entity",
+                    }:
+                        continue
                 if field_name in {FIELD_JOB_FIND_WEBSITE, FIELD_JOB_FIND_INSTAGRAM, FIELD_JOB_FIND_EMAIL}:
                     if self._is_field_already_populated(cursor, chapter_id, field_name):
                         continue
@@ -1163,6 +1651,7 @@ class CrawlerRepository:
                     c.instagram_url,
                     c.contact_email,
                     c.university_name,
+                    c.chapter_status,
                     c.field_states,
                     s.base_url AS source_base_url,
                     s.list_path AS source_list_path
@@ -1208,6 +1697,7 @@ class CrawlerRepository:
                 source_slug=row["source_slug"],
                 university_name=row["university_name"],
                 crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
+                chapter_status=row["chapter_status"] or "active",
                 field_states=row["field_states"] or {},
                 queue_state=row["queue_state"] or "actionable",
                 validity_class=row["validity_class"],
@@ -1259,6 +1749,7 @@ class CrawlerRepository:
                     c.instagram_url,
                     c.contact_email,
                     c.university_name,
+                    c.chapter_status,
                     c.field_states,
                     s.base_url AS source_base_url,
                     s.list_path AS source_list_path
@@ -1319,6 +1810,7 @@ class CrawlerRepository:
                     source_slug=row["source_slug"],
                     university_name=row["university_name"],
                     crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
+                    chapter_status=row["chapter_status"] or "active",
                     field_states=row["field_states"] or {},
                     queue_state=row["queue_state"] or "actionable",
                     validity_class=row["validity_class"],
@@ -1608,6 +2100,7 @@ class CrawlerRepository:
                     c.instagram_url,
                     c.contact_email,
                     c.university_name,
+                    c.chapter_status,
                     c.field_states,
                     s.base_url AS source_base_url,
                     s.list_path AS source_list_path
@@ -1657,6 +2150,7 @@ class CrawlerRepository:
                     source_slug=row["source_slug"],
                     university_name=row["university_name"],
                     crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
+                    chapter_status=row["chapter_status"] or "active",
                     field_states=row["field_states"] or {},
                     queue_state=row["queue_state"] or "actionable",
                     validity_class=row["validity_class"],
@@ -1759,6 +2253,32 @@ class CrawlerRepository:
             )
             rows = cursor.fetchall()
         return [row["source_snippet"] for row in rows if row["source_snippet"]]
+
+    def fetch_latest_provenance_context(self, chapter_id: str) -> dict[str, Any] | None:
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    source_url,
+                    source_snippet,
+                    field_name,
+                    confidence
+                FROM chapter_provenance
+                WHERE chapter_id = %s
+                ORDER BY extracted_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (chapter_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "source_url": row["source_url"],
+            "source_snippet": row["source_snippet"],
+            "field_name": row["field_name"],
+            "confidence": float(row["confidence"] or 0.0),
+        }
 
     def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
         with self._connection.transaction(), self._connection.cursor() as cursor:

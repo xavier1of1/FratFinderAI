@@ -21,6 +21,7 @@ def test_sanitize_email_normalizes_mailto():
 def test_sanitize_instagram_normalizes_handle_and_url():
     assert sanitize_as_instagram("@sigmachiuchicago") == "https://www.instagram.com/sigmachiuchicago"
     assert sanitize_as_instagram("https://www.instagram.com/sigmachiuchicago/") == "https://www.instagram.com/sigmachiuchicago"
+    assert sanitize_as_instagram("https://www.instagram.com/tel") is None
 
 
 def test_sanitize_candidate_reroutes_website_kind_mismatch():

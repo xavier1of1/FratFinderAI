@@ -354,6 +354,7 @@ class FieldJob:
     source_slug: str | None = None
     university_name: str | None = None
     crawl_run_id: int | None = None
+    chapter_status: str = "active"
     field_states: dict[str, str] = field(default_factory=dict)
     priority: int = 0
     queue_state: str = "actionable"
@@ -494,5 +495,36 @@ class ProvisionalChapterRecord:
     contact_email: str | None = None
     promotion_reason: str | None = None
     evidence_payload: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+@dataclass(slots=True)
+class SchoolPolicyRecord:
+    school_slug: str
+    school_name: str
+    greek_life_status: str
+    confidence: float = 0.0
+    evidence_url: str | None = None
+    evidence_source_type: str | None = None
+    reason_code: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    last_verified_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+@dataclass(slots=True)
+class ChapterActivityRecord:
+    fraternity_slug: str
+    school_slug: str
+    school_name: str
+    chapter_activity_status: str
+    confidence: float = 0.0
+    evidence_url: str | None = None
+    evidence_source_type: str | None = None
+    reason_code: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    last_verified_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None

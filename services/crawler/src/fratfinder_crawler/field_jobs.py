@@ -30,7 +30,15 @@ from fratfinder_crawler.models import (
     ReviewItemCandidate,
     SourceRecord,
 )
-from fratfinder_crawler.normalization import normalize_record
+from fratfinder_crawler.normalization import classify_chapter_validity, normalize_record
+from fratfinder_crawler.precision_tools import (
+    PrecisionDecision,
+    tool_campus_greek_life_policy,
+    tool_directory_block_matcher,
+    tool_official_domain_verifier,
+    tool_school_chapter_list_validator,
+    tool_site_scope_classifier,
+)
 from fratfinder_crawler.search import SearchClient, SearchResult, SearchUnavailableError
 
 if TYPE_CHECKING:
@@ -293,6 +301,11 @@ _DEFAULT_BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/123.0.0.0 Safari/537.36"
 )
+_STATE_KEY_TO_FIELD_JOB = {
+    "website_url": FIELD_JOB_FIND_WEBSITE,
+    "contact_email": FIELD_JOB_FIND_EMAIL,
+    "instagram_url": FIELD_JOB_FIND_INSTAGRAM,
+}
 
 
 @dataclass(slots=True)
@@ -325,6 +338,30 @@ class CandidateMatch:
     source_provider: str = "provenance"
     related_website_url: str | None = None
     query: str | None = None
+
+
+@dataclass(slots=True)
+class ActivityValidationDecision:
+    school_policy_status: str = "unknown"
+    chapter_activity_status: str = "unknown"
+    evidence_url: str | None = None
+    evidence_source_type: str | None = None
+    reason_code: str | None = None
+    source_snippet: str | None = None
+    confidence: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AuthoritativeBundle:
+    website_match: CandidateMatch | None = None
+    email_match: CandidateMatch | None = None
+    instagram_match: CandidateMatch | None = None
+    website_confirmed_absent: bool = False
+    authoritative_context_found: bool = False
+    evidence_url: str | None = None
+    evidence_source_type: str | None = None
+    reason_code: str | None = None
 
 
 @dataclass(slots=True)
@@ -369,6 +406,7 @@ class FieldJobEngine:
         min_no_candidate_backoff_seconds: int = 60,
         greedy_collect_mode: str = _GREEDY_COLLECT_NONE,
         field_name: str | None = None,
+        search_degraded_mode: bool = False,
     ):
         self._repository = repository
         self._logger = logger
@@ -395,11 +433,13 @@ class FieldJobEngine:
         self._min_no_candidate_backoff_seconds = max(0, min_no_candidate_backoff_seconds)
         self._greedy_collect_mode = _normalize_greedy_collect_mode(greedy_collect_mode)
         self._field_name = field_name
+        self._search_degraded_mode = bool(search_degraded_mode)
         self._search_errors_encountered = False
         self._search_queries_attempted = 0
         self._search_queries_failed = 0
         self._search_queries_succeeded = 0
         self._search_fanout_aborted = False
+        self._search_skipped_due_to_degraded_mode = False
         self._last_provider_attempts: list[dict[str, object]] = []
         self._last_query_provider_attempts: list[dict[str, object]] = []
         self._last_search_failure_kind: str | None = None
@@ -411,6 +451,10 @@ class FieldJobEngine:
         self._nationals_entries_cache: dict[str, list[NationalsChapterEntry]] = {}
         self._nationals_collect_attempted: set[str] = set()
         self._source_record_cache: dict[str, SourceRecord | None] = {}
+        self._school_policy_cache: dict[str, ActivityValidationDecision] = {}
+        self._chapter_activity_cache: dict[tuple[str, str], ActivityValidationDecision] = {}
+        self._authoritative_bundle_cache: dict[str, AuthoritativeBundle] = {}
+        self._latest_provenance_context_cache: dict[str, dict[str, Any]] = {}
         search_settings = getattr(search_client, "_settings", None)
         configured_user_agent = str(getattr(search_settings, "crawler_http_user_agent", "") or "").strip()
         if configured_user_agent.lower().startswith("fratfinderai/") or not configured_user_agent:
@@ -476,7 +520,7 @@ class FieldJobEngine:
                 self._worker_id,
                 source_slug=self._source_slug,
                 field_name=self._field_name,
-                require_confident_website_for_email=False,
+                require_confident_website_for_email=self._require_confident_website_for_email,
             )
             if job is None:
                 break
@@ -580,6 +624,7 @@ class FieldJobEngine:
         self._search_queries_failed = 0
         self._search_queries_succeeded = 0
         self._search_fanout_aborted = False
+        self._search_skipped_due_to_degraded_mode = False
         self._last_provider_attempts = []
         self._last_query_provider_attempts = []
         self._last_search_failure_kind = None
@@ -597,10 +642,22 @@ class FieldJobEngine:
         )
         self._trace("load_context", source_slug=job.source_slug, source_base_url=bool(job.source_base_url), university_name=job.university_name)
 
+        inactive_result = self._existing_inactive_chapter_result(job)
+        if inactive_result is not None:
+            return inactive_result
+
+        invalid_entity_result = self._existing_invalid_entity_result(job)
+        if invalid_entity_result is not None:
+            return invalid_entity_result
+
         if job.field_name == FIELD_JOB_FIND_EMAIL:
-            if job.contact_email:
+            existing_email = sanitize_as_email(job.contact_email)
+            if existing_email and self._existing_email_is_confident(job, existing_email):
                 self._trace("already_populated", target="contact_email")
-                return self._already_populated_result(job.field_name, job.contact_email)
+                return self._already_populated_result(job.field_name, existing_email)
+            invalid_entity_result = self._resolve_invalid_entity_gate(job, target_field="contact_email")
+            if invalid_entity_result is not None:
+                return invalid_entity_result
             admission_result = self._admission_gate(job, "contact_email", allow_confident_website=True)
             if admission_result is not None:
                 return admission_result
@@ -612,6 +669,13 @@ class FieldJobEngine:
                     preserve_attempt=True,
                     reason_code="dependency_wait",
                 )
+            if not _website_is_confident(job):
+                validation_result = self._resolve_activity_gate(job, target_field="contact_email")
+                if validation_result is not None:
+                    return validation_result
+                bundle_result = self._authoritative_bundle_result(job, target_field="contact_email")
+                if bundle_result is not None:
+                    return bundle_result
             match = self._find_email_candidate(job)
             if match is None:
                 if self._should_complete_provider_degraded(job):
@@ -624,12 +688,23 @@ class FieldJobEngine:
             return self._candidate_result(job, match, "contact_email")
 
         if job.field_name == FIELD_JOB_FIND_INSTAGRAM:
-            if job.instagram_url:
+            existing_instagram = sanitize_as_instagram(job.instagram_url)
+            if existing_instagram and self._existing_instagram_is_confident(job, existing_instagram):
                 self._trace("already_populated", target="instagram_url")
-                return self._already_populated_result(job.field_name, job.instagram_url)
+                return self._already_populated_result(job.field_name, existing_instagram)
+            invalid_entity_result = self._resolve_invalid_entity_gate(job, target_field="instagram_url")
+            if invalid_entity_result is not None:
+                return invalid_entity_result
             admission_result = self._admission_gate(job, "instagram_url")
             if admission_result is not None:
                 return admission_result
+            if not _website_is_confident(job):
+                validation_result = self._resolve_activity_gate(job, target_field="instagram_url")
+                if validation_result is not None:
+                    return validation_result
+                bundle_result = self._authoritative_bundle_result(job, target_field="instagram_url")
+                if bundle_result is not None:
+                    return bundle_result
             match = self._find_instagram_candidate(job)
             if match is not None:
                 self._trace("candidate_selected", target="instagram_url", confidence=round(match.confidence, 4), provider=match.source_provider)
@@ -647,12 +722,21 @@ class FieldJobEngine:
 
         if job.field_name == FIELD_JOB_FIND_WEBSITE:
             existing_website = _current_website_url(job)
-            if existing_website:
+            if existing_website and self._existing_website_is_confident(job, existing_website):
                 self._trace("already_populated", target="website_url")
                 return self._already_populated_result(job.field_name, existing_website)
+            invalid_entity_result = self._resolve_invalid_entity_gate(job, target_field="website_url")
+            if invalid_entity_result is not None:
+                return invalid_entity_result
             admission_result = self._admission_gate(job, "website_url")
             if admission_result is not None:
                 return admission_result
+            validation_result = self._resolve_activity_gate(job, target_field="website_url")
+            if validation_result is not None:
+                return validation_result
+            bundle_result = self._authoritative_bundle_result(job, target_field="website_url")
+            if bundle_result is not None:
+                return bundle_result
             match = self._find_website_candidate(job)
             if match is None:
                 if self._should_complete_provider_degraded(job):
@@ -726,6 +810,836 @@ class FieldJobEngine:
         queue_state = job.queue_state or ((job.payload.get("contactResolution") or {}).get("queueState") if isinstance(job.payload.get("contactResolution"), dict) else None) or "actionable"
         return queue_state == "deferred" and self._payload_int(job.payload.get("transient_provider_failures")) >= self._transient_short_retries and int(job.attempts or 0) > 1
 
+    def _school_name_for_job(self, job: FieldJob) -> str:
+        return str(job.university_name or job.payload.get("candidateSchoolName") or "").strip()
+
+    def _school_slug_for_job(self, job: FieldJob) -> str:
+        return str(_slugify(self._school_name_for_job(job)) or "")
+
+    def _fraternity_name_for_job(self, job: FieldJob) -> str:
+        return _display_name(job.fraternity_slug)
+
+    def _decision_from_school_policy(self, record) -> ActivityValidationDecision:
+        return ActivityValidationDecision(
+            school_policy_status=str(getattr(record, "greek_life_status", "unknown") or "unknown"),
+            evidence_url=getattr(record, "evidence_url", None),
+            evidence_source_type=getattr(record, "evidence_source_type", None),
+            reason_code=getattr(record, "reason_code", None),
+            source_snippet=str((getattr(record, "metadata", {}) or {}).get("sourceSnippet") or "")[:400] or None,
+            confidence=float(getattr(record, "confidence", 0.0) or 0.0),
+            metadata=dict(getattr(record, "metadata", {}) or {}),
+        )
+
+    def _decision_from_chapter_activity(self, record) -> ActivityValidationDecision:
+        return ActivityValidationDecision(
+            chapter_activity_status=str(getattr(record, "chapter_activity_status", "unknown") or "unknown"),
+            evidence_url=getattr(record, "evidence_url", None),
+            evidence_source_type=getattr(record, "evidence_source_type", None),
+            reason_code=getattr(record, "reason_code", None),
+            source_snippet=str((getattr(record, "metadata", {}) or {}).get("sourceSnippet") or "")[:400] or None,
+            confidence=float(getattr(record, "confidence", 0.0) or 0.0),
+            metadata=dict(getattr(record, "metadata", {}) or {}),
+        )
+
+    def _existing_inactive_chapter_result(self, job: FieldJob) -> FieldJobResult | None:
+        state_key = FIELD_JOB_TO_STATE_KEY.get(job.field_name)
+        if not state_key:
+            return None
+        chapter_status = str(getattr(job, "chapter_status", "active") or "active").strip().lower()
+        target_state = str((job.field_states or {}).get(state_key) or "").strip().lower()
+        all_contact_states = {
+            key: str((job.field_states or {}).get(key) or "").strip().lower()
+            for key in _STATE_KEY_TO_FIELD_JOB
+        }
+        chapter_inactive = chapter_status == "inactive" or target_state == "inactive" or (
+            all_contact_states and all(state == "inactive" for state in all_contact_states.values())
+        )
+        if not chapter_inactive:
+            return None
+        sibling_field_names = [
+            field_name
+            for candidate_state_key, field_name in _STATE_KEY_TO_FIELD_JOB.items()
+            if candidate_state_key != state_key
+        ]
+        self._repository.apply_chapter_inactive_status(
+            chapter_id=job.chapter_id,
+            chapter_slug=job.chapter_slug,
+            fraternity_slug=job.fraternity_slug,
+            source_slug=job.source_slug,
+            crawl_run_id=job.crawl_run_id,
+            reason_code="chapter_already_inactive",
+            evidence_url=None,
+            evidence_source_type="system",
+            source_snippet=None,
+            provider="field_job_validation",
+            metadata={"revalidated": True},
+        )
+        self._repository.complete_pending_field_jobs_for_chapter(
+            chapter_id=job.chapter_id,
+            reason_code="chapter_already_inactive",
+            status="inactive_by_school_validation",
+            field_states={candidate_state_key: "inactive" for candidate_state_key in _STATE_KEY_TO_FIELD_JOB if candidate_state_key != state_key},
+            field_names=sibling_field_names,
+        )
+        self._trace("chapter_status_gate", status="inactive", target=state_key)
+        return FieldJobResult(
+            chapter_updates={},
+            completed_payload={
+                "status": "inactive_by_school_validation",
+                "field": state_key,
+                "reasonCode": "chapter_already_inactive",
+                "decision_trace": self._build_decision_trace_summary(),
+            },
+            field_state_updates={state_key: "inactive"},
+        )
+
+    def _latest_provenance_context_for_job(self, job: FieldJob) -> dict[str, Any]:
+        cached = self._latest_provenance_context_cache.get(job.chapter_id)
+        if cached is not None:
+            return cached
+        fetcher = getattr(self._repository, "fetch_latest_provenance_context", None)
+        context: dict[str, Any] | None = None
+        if callable(fetcher):
+            raw = fetcher(job.chapter_id)
+            if isinstance(raw, dict):
+                context = dict(raw)
+        if context is None:
+            snippets = self._repository.fetch_provenance_snippets(job.chapter_id)
+            context = {
+                "source_url": None,
+                "source_snippet": snippets[0] if snippets else None,
+                "field_name": None,
+                "confidence": 0.0,
+            }
+        self._latest_provenance_context_cache[job.chapter_id] = context
+        return context
+
+    def _existing_invalid_entity_result(self, job: FieldJob) -> FieldJobResult | None:
+        state_key = FIELD_JOB_TO_STATE_KEY.get(job.field_name)
+        if not state_key:
+            return None
+        target_state = str((job.field_states or {}).get(state_key) or "").strip().lower()
+        all_contact_states = {
+            key: str((job.field_states or {}).get(key) or "").strip().lower()
+            for key in _STATE_KEY_TO_FIELD_JOB
+        }
+        chapter_invalid = target_state == "invalid_entity" or (
+            all_contact_states and all(state == "invalid_entity" for state in all_contact_states.values())
+        )
+        if not chapter_invalid:
+            return None
+        sibling_field_names = [
+            field_name
+            for candidate_state_key, field_name in _STATE_KEY_TO_FIELD_JOB.items()
+            if candidate_state_key != state_key
+        ]
+        self._repository.complete_pending_field_jobs_for_chapter(
+            chapter_id=job.chapter_id,
+            reason_code="invalid_entity_cached",
+            status="invalid_entity_filtered",
+            field_states={candidate_state_key: "invalid_entity" for candidate_state_key in _STATE_KEY_TO_FIELD_JOB if candidate_state_key != state_key},
+            field_names=sibling_field_names,
+        )
+        self._trace("invalid_entity_gate", status="cached_invalid_entity", target=state_key)
+        return FieldJobResult(
+            chapter_updates={},
+            completed_payload={
+                "status": "invalid_entity_filtered",
+                "field": state_key,
+                "reasonCode": "invalid_entity_cached",
+                "decision_trace": self._build_decision_trace_summary(),
+            },
+            field_state_updates={state_key: "invalid_entity"},
+        )
+
+    def _mark_invalid_entity(
+        self,
+        job: FieldJob,
+        *,
+        target_field: str,
+        reason_code: str,
+        evidence_url: str | None,
+        source_snippet: str | None,
+    ) -> FieldJobResult:
+        sibling_field_names = [
+            field_name
+            for state_key, field_name in _STATE_KEY_TO_FIELD_JOB.items()
+            if state_key != target_field
+        ]
+        self._repository.complete_pending_field_jobs_for_chapter(
+            chapter_id=job.chapter_id,
+            reason_code=reason_code,
+            status="invalid_entity_filtered",
+            field_states={state_key: "invalid_entity" for state_key in _STATE_KEY_TO_FIELD_JOB if state_key != target_field},
+            field_names=sibling_field_names,
+        )
+        return FieldJobResult(
+            chapter_updates={},
+            completed_payload={
+                "status": "invalid_entity_filtered",
+                "field": target_field,
+                "reasonCode": reason_code,
+                "evidenceUrl": evidence_url,
+                "sourceSnippet": source_snippet,
+                "decision_trace": self._build_decision_trace_summary(),
+            },
+            field_state_updates={target_field: "invalid_entity"},
+        )
+
+    def _resolve_invalid_entity_gate(self, job: FieldJob, *, target_field: str) -> FieldJobResult | None:
+        provenance = self._latest_provenance_context_for_job(job)
+        source_url = str(
+            provenance.get("source_url")
+            or job.payload.get("sourceUrl")
+            or job.payload.get("sourceListUrl")
+            or job.source_base_url
+            or ""
+        ).strip()
+        source_snippet = str(provenance.get("source_snippet") or "").strip() or None
+        confidence = float(provenance.get("confidence") or 0.0)
+        decision = classify_chapter_validity(
+            ExtractedChapter(
+                name=job.chapter_name or "",
+                university_name=self._school_name_for_job(job) or None,
+                source_url=source_url,
+                source_snippet=source_snippet,
+                source_confidence=confidence or 0.72,
+            ),
+            source_class="national",
+            provenance="field_job_validation",
+        )
+        if decision.validity_class != "invalid_non_chapter":
+            return None
+        reason_code = str(decision.invalid_reason or "invalid_non_chapter").strip() or "invalid_non_chapter"
+        self._trace("invalid_entity_gate", status="invalid_non_chapter", reason=reason_code, source_url=source_url or None)
+        return self._mark_invalid_entity(
+            job,
+            target_field=target_field,
+            reason_code=reason_code,
+            evidence_url=source_url or None,
+            source_snippet=source_snippet,
+        )
+
+    def _existing_email_is_confident(self, job: FieldJob, email: str) -> bool:
+        if not _field_value_is_confident(job, "contact_email"):
+            return False
+        return _email_looks_relevant_to_job(email, job)
+
+    def _existing_instagram_is_confident(self, job: FieldJob, instagram_url: str) -> bool:
+        if not _field_value_is_confident(job, "instagram_url"):
+            return False
+        if _instagram_has_generic_handle(instagram_url, job):
+            return False
+        return _instagram_looks_relevant_to_job(instagram_url, job)
+
+    def _existing_website_is_confident(self, job: FieldJob, website_url: str) -> bool:
+        if not _field_value_is_confident(job, "website_url"):
+            return False
+        normalized_url = _normalize_url(website_url)
+        if normalized_url.endswith(_DOCUMENT_URL_EXTENSIONS):
+            return False
+        parsed = urlparse(website_url)
+        path_text = _normalized_match_text(f"{parsed.netloc} {parsed.path} {parsed.query}")
+        if any(marker in path_text for marker in ("archive", "archives", "download", "digital")):
+            return False
+        if _candidate_is_source_domain(website_url, job):
+            return False
+        if _website_candidate_looks_low_signal(website_url):
+            return False
+
+        document = self._fetch_search_document(website_url, provider="chapter_website")
+        if document is None:
+            return True
+
+        scope = tool_site_scope_classifier(
+            page_url=website_url,
+            title=document.title or "",
+            text=document.text[:1600],
+            fraternity_name=self._fraternity_name_for_job(job),
+            school_name=self._school_name_for_job(job),
+            chapter_name=job.chapter_name,
+        )
+        if scope.decision in {"nationals", "school_affiliation"}:
+            return False
+        combined = _document_match_text(document, limit=1200)
+        if _school_has_conflicting_signal(job, combined):
+            return False
+        if _website_document_has_conflicting_org_signal(job, document):
+            return False
+        if scope.decision == "chapter_site":
+            return True
+
+        return _website_trust_tier(job, website_url) == "unknown"
+
+    def _build_validation_documents(
+        self,
+        job: FieldJob,
+        *,
+        target: str,
+        query_limit: int,
+        page_limit: int,
+        require_official_school: bool = False,
+    ) -> list[SearchDocument]:
+        if self._search_degraded_mode:
+            self._trace("validation_search_skipped", target=target, reason="preflight_degraded")
+            return []
+        if self._provider_search_hard_blocked():
+            self._trace("validation_search_skipped", target=target, reason="provider_unavailable")
+            return []
+        documents: list[SearchDocument] = []
+        seen_urls: set[str] = set()
+        fetched_pages = 0
+        school_name = self._school_name_for_job(job)
+        for query in self._build_search_queries(job, target)[:query_limit]:
+            query_results = self._run_search(query)
+            if self._maybe_abort_search_sequence(job, target=target, query_results=query_results):
+                break
+            for result in query_results[:6]:
+                normalized_url = _normalize_url(result.url)
+                if normalized_url in seen_urls:
+                    continue
+                seen_urls.add(normalized_url)
+                host = (urlparse(result.url).netloc or "").lower()
+                is_official_school = bool(host) and (_website_trust_tier(job, result.url) == "tier1" or any(host == domain or host.endswith(f".{domain}") for domain in _campus_domains(job)))
+                if require_official_school and not is_official_school:
+                    continue
+                documents.append(
+                    SearchDocument(
+                        text=result.snippet,
+                        links=[result.url],
+                        url=result.url,
+                        title=result.title,
+                        provider="search_result",
+                        query=query,
+                    )
+                )
+                if fetched_pages >= page_limit or _should_skip_search_page_fetch(result.url):
+                    continue
+                if require_official_school and not is_official_school:
+                    continue
+                fetched = self._fetch_search_document(result.url, provider="search_page", query=query)
+                if fetched is None:
+                    continue
+                follow_urls: list[str] = []
+                if target in {"school_chapter_list", "website_school"}:
+                    follow_urls = self._school_validation_follow_links(fetched)
+                if require_official_school:
+                    scoped = tool_site_scope_classifier(
+                        page_url=fetched.url or result.url,
+                        title=fetched.title or result.title,
+                        text=fetched.text,
+                        fraternity_name=self._fraternity_name_for_job(job),
+                        school_name=school_name,
+                        chapter_name=job.chapter_name,
+                    )
+                    if scoped.decision in {"school_affiliation"}:
+                        documents.append(fetched)
+                        fetched_pages += 1
+                else:
+                    documents.append(fetched)
+                    fetched_pages += 1
+                if target in {"school_chapter_list", "website_school"}:
+                    for follow_url in follow_urls:
+                        normalized_follow_url = _normalize_url(follow_url)
+                        if normalized_follow_url in seen_urls or fetched_pages >= page_limit:
+                            continue
+                        seen_urls.add(normalized_follow_url)
+                        follow_document = self._fetch_search_document(follow_url, provider="search_page", query=query)
+                        if follow_document is None:
+                            continue
+                        follow_scope = tool_site_scope_classifier(
+                            page_url=follow_document.url or follow_url,
+                            title=follow_document.title or "",
+                            text=follow_document.text,
+                            fraternity_name=self._fraternity_name_for_job(job),
+                            school_name=school_name,
+                            chapter_name=job.chapter_name,
+                        )
+                        if follow_scope.decision != "school_affiliation":
+                            continue
+                        documents.append(follow_document)
+                        fetched_pages += 1
+        return documents
+
+    def _school_validation_follow_links(self, document: SearchDocument) -> list[str]:
+        if not document.html or not document.url:
+            return []
+        base_host = (urlparse(document.url).netloc or "").lower()
+        if not base_host:
+            return []
+        soup = BeautifulSoup(document.html, "html.parser")
+        candidates: list[tuple[int, str]] = []
+        seen: set[str] = set()
+        for anchor in soup.select("a[href]"):
+            href = str(anchor.get("href") or "").strip()
+            if not href:
+                continue
+            resolved = urljoin(document.url, href)
+            host = (urlparse(resolved).netloc or "").lower()
+            if not host or host != base_host:
+                continue
+            normalized = _normalize_url(resolved)
+            if normalized in seen:
+                continue
+            text = anchor.get_text(" ", strip=True)
+            combined = _normalized_match_text(f"{text} {resolved}")
+            if any(marker in combined for marker in ("contact us", "about us", "apply", "visit", "give", "search", "menu")):
+                continue
+            score = 0
+            if "community scorecard" in combined or "chapter scorecards" in combined:
+                score += 6
+            if "scorecard" in combined:
+                score += 4
+            if "chapters at" in combined or "chapter list" in combined or "recognized chapters" in combined:
+                score += 4
+            if "fraternity chapters" in combined:
+                score += 4
+            if "fraternities" in combined:
+                score += 3
+            if "chapters" in combined:
+                score += 2
+            if "interfraternity" in combined or "ifc" in combined:
+                score += 2
+            if "suspended" in combined or "closed" in combined:
+                score -= 1
+            if score <= 0:
+                continue
+            seen.add(normalized)
+            candidates.append((score, resolved))
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        return [url for _, url in candidates[:3]]
+
+    def _get_or_resolve_school_policy(self, job: FieldJob) -> ActivityValidationDecision:
+        school_name = self._school_name_for_job(job)
+        school_slug = self._school_slug_for_job(job)
+        if not school_name or not school_slug:
+            return ActivityValidationDecision()
+        cached = self._school_policy_cache.get(school_slug)
+        if cached is not None:
+            return cached
+        stored = self._repository.get_school_policy(school_name)
+        if stored is not None:
+            stored_status = str(stored.greek_life_status or "unknown").strip().lower()
+            stored_source_type = str(stored.evidence_source_type or "").strip().lower()
+            stored_reason_code = str(stored.reason_code or "").strip().lower()
+            stored_evidence_url = str(stored.evidence_url or "").strip()
+            stored_unknown_is_reusable = (
+                stored_status == "unknown"
+                and stored_source_type == "official_school"
+                and bool(stored_evidence_url)
+                and stored_reason_code not in {"non_official_school_source", "no_official_school_policy_source_found"}
+            )
+            if stored_status != "unknown" or stored_unknown_is_reusable:
+                decision = self._decision_from_school_policy(stored)
+                self._school_policy_cache[school_slug] = decision
+                return decision
+
+        best_decision = ActivityValidationDecision()
+        official_unknown: ActivityValidationDecision | None = None
+        for document in self._build_validation_documents(
+            job,
+            target="campus_policy",
+            query_limit=3,
+            page_limit=3,
+            require_official_school=True,
+        ):
+            if not document.url:
+                continue
+            decision = tool_campus_greek_life_policy(
+                school_name=school_name,
+                page_url=document.url,
+                title=document.title or "",
+                text=document.text,
+            )
+            if decision.decision == "banned":
+                best_decision = ActivityValidationDecision(
+                    school_policy_status="banned",
+                    evidence_url=document.url,
+                    evidence_source_type="official_school",
+                    reason_code=(decision.reason_codes or ["school_policy_banned"])[0],
+                    source_snippet=document.text[:400],
+                    confidence=decision.confidence,
+                    metadata=decision.as_dict(),
+                )
+                break
+            if decision.decision == "allowed" and best_decision.school_policy_status == "unknown":
+                best_decision = ActivityValidationDecision(
+                    school_policy_status="allowed",
+                    evidence_url=document.url,
+                    evidence_source_type="official_school",
+                    reason_code=(decision.reason_codes or ["school_policy_allowed"])[0],
+                    source_snippet=document.text[:400],
+                    confidence=decision.confidence,
+                    metadata=decision.as_dict(),
+                )
+            elif decision.decision == "unknown" and official_unknown is None:
+                official_unknown = ActivityValidationDecision(
+                    school_policy_status="unknown",
+                    evidence_url=document.url,
+                    evidence_source_type="official_school",
+                    reason_code=(decision.reason_codes or ["school_policy_unknown"])[0],
+                    source_snippet=document.text[:400],
+                    confidence=decision.confidence,
+                    metadata=decision.as_dict(),
+                )
+
+        persisted = best_decision if best_decision.school_policy_status != "unknown" else official_unknown
+        if persisted is not None and persisted.evidence_source_type == "official_school":
+            record = self._repository.upsert_school_policy(
+                school_name=school_name,
+                greek_life_status=persisted.school_policy_status,
+                confidence=persisted.confidence,
+                evidence_url=persisted.evidence_url,
+                evidence_source_type=persisted.evidence_source_type,
+                reason_code=persisted.reason_code,
+                metadata={**persisted.metadata, "sourceSnippet": persisted.source_snippet},
+            )
+            decision = self._decision_from_school_policy(record)
+            self._school_policy_cache[school_slug] = decision
+            return decision
+
+        decision = ActivityValidationDecision(
+            school_policy_status="unknown",
+            evidence_url=official_unknown.evidence_url if official_unknown is not None else None,
+            evidence_source_type=official_unknown.evidence_source_type if official_unknown is not None else None,
+            reason_code=official_unknown.reason_code if official_unknown is not None else "no_official_school_policy_source_found",
+            source_snippet=official_unknown.source_snippet if official_unknown is not None else None,
+            confidence=official_unknown.confidence if official_unknown is not None else 0.0,
+            metadata={
+                **(official_unknown.metadata if official_unknown is not None else {}),
+                "cacheScope": "process",
+            },
+        )
+        self._school_policy_cache[school_slug] = decision
+        return decision
+
+    def _get_or_resolve_chapter_activity(self, job: FieldJob) -> ActivityValidationDecision:
+        school_name = self._school_name_for_job(job)
+        school_slug = self._school_slug_for_job(job)
+        fraternity_slug = str(job.fraternity_slug or "").strip()
+        if not school_name or not school_slug or not fraternity_slug:
+            return ActivityValidationDecision()
+        cache_key = (fraternity_slug, school_slug)
+        cached = self._chapter_activity_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        stored = self._repository.get_chapter_activity(fraternity_slug=fraternity_slug, school_name=school_name)
+        if stored is not None:
+            decision = self._decision_from_chapter_activity(stored)
+            self._chapter_activity_cache[cache_key] = decision
+            return decision
+
+        best_decision = ActivityValidationDecision()
+        validation_documents: list[SearchDocument] = []
+        seen_validation_urls: set[str] = set()
+        for target_name, query_limit, page_limit in (
+            ("school_chapter_list", 4, 3),
+            # This fallback stays constrained to official-school evidence but gives
+            # the validator a second chance when the roster-specific queries miss
+            # and a school Greek-life/OFSL page can still lead us to the roster.
+            ("website_school", 2, 2),
+        ):
+            for document in self._build_validation_documents(
+                job,
+                target=target_name,
+                query_limit=query_limit,
+                page_limit=page_limit,
+                require_official_school=True,
+            ):
+                key = _normalize_url(document.url or f"{target_name}:{document.title}:{document.query}")
+                if key in seen_validation_urls:
+                    continue
+                seen_validation_urls.add(key)
+                validation_documents.append(document)
+
+        for document in validation_documents:
+            if not document.url:
+                continue
+            decision = tool_school_chapter_list_validator(
+                school_name=school_name,
+                fraternity_name=self._fraternity_name_for_job(job),
+                fraternity_slug=fraternity_slug,
+                page_url=document.url,
+                title=document.title or "",
+                text=document.text,
+                html=document.html or "",
+            )
+            if decision.decision == "confirmed_inactive":
+                best_decision = ActivityValidationDecision(
+                    chapter_activity_status="confirmed_inactive",
+                    evidence_url=document.url,
+                    evidence_source_type="official_school",
+                    reason_code=(decision.reason_codes or ["chapter_inactive"])[0],
+                    source_snippet=document.text[:400],
+                    confidence=decision.confidence,
+                    metadata=decision.as_dict(),
+                )
+                break
+            if decision.decision == "confirmed_active" and best_decision.chapter_activity_status == "unknown":
+                best_decision = ActivityValidationDecision(
+                    chapter_activity_status="confirmed_active",
+                    evidence_url=document.url,
+                    evidence_source_type="official_school",
+                    reason_code=(decision.reason_codes or ["chapter_active"])[0],
+                    source_snippet=document.text[:400],
+                    confidence=decision.confidence,
+                    metadata=decision.as_dict(),
+                )
+
+        if best_decision.chapter_activity_status != "unknown":
+            record = self._repository.upsert_chapter_activity(
+                fraternity_slug=fraternity_slug,
+                school_name=school_name,
+                chapter_activity_status=best_decision.chapter_activity_status,
+                confidence=best_decision.confidence,
+                evidence_url=best_decision.evidence_url,
+                evidence_source_type=best_decision.evidence_source_type,
+                reason_code=best_decision.reason_code,
+                metadata={**best_decision.metadata, "sourceSnippet": best_decision.source_snippet},
+            )
+            decision = self._decision_from_chapter_activity(record)
+            self._chapter_activity_cache[cache_key] = decision
+            return decision
+
+        self._chapter_activity_cache[cache_key] = best_decision
+        return best_decision
+
+    def _mark_chapter_inactive(self, job: FieldJob, *, target_field: str, decision: ActivityValidationDecision) -> FieldJobResult:
+        sibling_field_names = [
+            field_name
+            for state_key, field_name in _STATE_KEY_TO_FIELD_JOB.items()
+            if state_key != target_field
+        ]
+        self._repository.apply_chapter_inactive_status(
+            chapter_id=job.chapter_id,
+            chapter_slug=job.chapter_slug,
+            fraternity_slug=job.fraternity_slug,
+            source_slug=job.source_slug,
+            crawl_run_id=job.crawl_run_id,
+            reason_code=decision.reason_code or "inactive_by_school_validation",
+            evidence_url=decision.evidence_url,
+            evidence_source_type=decision.evidence_source_type,
+            source_snippet=decision.source_snippet,
+            provider="field_job_validation",
+            metadata=decision.metadata,
+        )
+        self._repository.complete_pending_field_jobs_for_chapter(
+            chapter_id=job.chapter_id,
+            reason_code=decision.reason_code or "inactive_by_school_validation",
+            status="inactive_by_school_validation",
+            field_states={state_key: "inactive" for state_key in _STATE_KEY_TO_FIELD_JOB if state_key != target_field},
+            field_names=sibling_field_names,
+        )
+        return FieldJobResult(
+            chapter_updates={"chapter_status": "inactive"},
+            completed_payload={
+                "status": "inactive_by_school_validation",
+                "field": target_field,
+                "reasonCode": decision.reason_code or "inactive_by_school_validation",
+                "evidenceUrl": decision.evidence_url,
+                "decision_trace": self._build_decision_trace_summary(),
+            },
+            field_state_updates={target_field: "inactive"},
+        )
+
+    def _resolve_activity_gate(self, job: FieldJob, *, target_field: str) -> FieldJobResult | None:
+        school_policy = self._get_or_resolve_school_policy(job)
+        if school_policy.school_policy_status == "banned":
+            self._trace("campus_policy_validation", status="banned", school=self._school_name_for_job(job))
+            return self._mark_chapter_inactive(job, target_field=target_field, decision=school_policy)
+
+        chapter_activity = self._get_or_resolve_chapter_activity(job)
+        if chapter_activity.chapter_activity_status == "confirmed_inactive":
+            self._trace("chapter_activity_validation", status="confirmed_inactive", school=self._school_name_for_job(job))
+            return self._mark_chapter_inactive(job, target_field=target_field, decision=chapter_activity)
+        if chapter_activity.chapter_activity_status == "confirmed_active":
+            self._trace("chapter_activity_validation", status="confirmed_active", school=self._school_name_for_job(job))
+        return None
+
+    def _get_or_resolve_authoritative_bundle(self, job: FieldJob) -> AuthoritativeBundle:
+        cached = self._authoritative_bundle_cache.get(job.chapter_id)
+        if cached is not None:
+            return cached
+
+        bundle = AuthoritativeBundle()
+        authoritative_documents: list[SearchDocument] = []
+        school_name = self._school_name_for_job(job)
+        fraternity_name = self._fraternity_name_for_job(job)
+
+        for document in self._build_validation_documents(
+            job,
+            target="school_chapter_list",
+            query_limit=3,
+            page_limit=2,
+            require_official_school=True,
+        ):
+            authoritative_documents.append(document)
+
+        authoritative_documents = [
+            document
+            for document in authoritative_documents
+            if document.url
+            and tool_site_scope_classifier(
+                page_url=document.url,
+                title=document.title or "",
+                text=document.text,
+                fraternity_name=fraternity_name,
+                school_name=school_name,
+                chapter_name=job.chapter_name,
+            ).decision in {"school_affiliation", "nationals", "chapter_site"}
+        ]
+
+        if authoritative_documents:
+            bundle.authoritative_context_found = True
+            bundle.evidence_url = authoritative_documents[0].url
+            bundle.evidence_source_type = "official_school" if _website_trust_tier(job, authoritative_documents[0].url or "") == "tier1" else "nationals"
+
+        website_matches: list[CandidateMatch] = []
+        email_matches: list[CandidateMatch] = []
+        instagram_matches: list[CandidateMatch] = []
+        for document in authoritative_documents:
+            website_matches.extend(self._extract_website_matches(document, job))
+            email_matches.extend(self._extract_email_matches(document, job))
+            instagram_matches.extend(self._extract_instagram_matches(document, job))
+            relaxed_email, relaxed_instagram = self._extract_relaxed_authoritative_matches(document, job)
+            if relaxed_email is not None:
+                email_matches.append(relaxed_email)
+            if relaxed_instagram is not None:
+                instagram_matches.append(relaxed_instagram)
+
+        bundle.website_match = _best_match(website_matches)
+        bundle.email_match = _best_match(email_matches)
+        bundle.instagram_match = _best_match(instagram_matches)
+        activity_decision = self._get_or_resolve_chapter_activity(job)
+        if (
+            activity_decision.chapter_activity_status == "confirmed_active"
+            and bundle.authoritative_context_found
+            and bundle.website_match is None
+        ):
+            bundle.website_confirmed_absent = True
+            bundle.reason_code = "authoritative_no_website_found"
+            if activity_decision.evidence_url and not bundle.evidence_url:
+                bundle.evidence_url = activity_decision.evidence_url
+                bundle.evidence_source_type = activity_decision.evidence_source_type
+        self._authoritative_bundle_cache[job.chapter_id] = bundle
+        return bundle
+
+    def _extract_relaxed_authoritative_matches(
+        self,
+        document: SearchDocument,
+        job: FieldJob,
+    ) -> tuple[CandidateMatch | None, CandidateMatch | None]:
+        if not document.url or _website_trust_tier(job, document.url) != "tier1":
+            return None, None
+        scope = tool_site_scope_classifier(
+            page_url=document.url,
+            title=document.title or "",
+            text=document.text,
+            fraternity_name=self._fraternity_name_for_job(job),
+            school_name=self._school_name_for_job(job),
+            chapter_name=job.chapter_name,
+        )
+        if scope.decision != "school_affiliation":
+            return None, None
+
+        relaxed_email: CandidateMatch | None = None
+        relaxed_instagram: CandidateMatch | None = None
+        for link in document.links:
+            if relaxed_email is None:
+                email = sanitize_as_email(link)
+                if email and _email_looks_relevant_to_job(email, job, document=document):
+                    relaxed_email = CandidateMatch(
+                        value=email,
+                        confidence=0.9,
+                        source_url=document.url,
+                        source_snippet=document.text[:400],
+                        field_name="contact_email",
+                        source_provider=document.provider,
+                        related_website_url=document.url,
+                        query=document.query,
+                    )
+            if relaxed_instagram is None:
+                instagram = sanitize_as_instagram(link)
+                if instagram and _instagram_looks_relevant_to_job(instagram, job, document=document):
+                    relaxed_instagram = CandidateMatch(
+                        value=instagram,
+                        confidence=0.9,
+                        source_url=document.url,
+                        source_snippet=document.text[:400],
+                        field_name="instagram_url",
+                        source_provider=document.provider,
+                        related_website_url=document.url,
+                        query=document.query,
+                    )
+            if relaxed_email is not None and relaxed_instagram is not None:
+                break
+        return relaxed_email, relaxed_instagram
+
+    def _authoritative_bundle_result(self, job: FieldJob, *, target_field: str) -> FieldJobResult | None:
+        bundle = self._get_or_resolve_authoritative_bundle(job)
+        state_updates: dict[str, str] = {}
+        chapter_updates: dict[str, str] = {}
+
+        for field_key, match in (
+            ("website_url", bundle.website_match),
+            ("contact_email", bundle.email_match),
+            ("instagram_url", bundle.instagram_match),
+        ):
+            if match is None:
+                continue
+            chapter_updates[field_key] = match.value
+            state_updates[field_key] = "found"
+
+        if not chapter_updates and not (target_field == "website_url" and bundle.website_confirmed_absent):
+            return None
+
+        sibling_fields_to_cancel = [
+            _STATE_KEY_TO_FIELD_JOB[field_key]
+            for field_key, value in chapter_updates.items()
+            if field_key != target_field and field_key in _STATE_KEY_TO_FIELD_JOB
+        ]
+        if sibling_fields_to_cancel:
+            self._repository.complete_pending_field_jobs_for_chapter(
+                chapter_id=job.chapter_id,
+                reason_code="resolved_from_authoritative_source",
+                status="resolved_from_authoritative_source",
+                chapter_updates={
+                    field_key: chapter_updates[field_key]
+                    for field_key in chapter_updates
+                    if field_key != target_field
+                },
+                field_states={field_key: state_updates[field_key] for field_key in chapter_updates if field_key != target_field},
+                field_names=sibling_fields_to_cancel,
+            )
+
+        if target_field == "website_url" and bundle.website_confirmed_absent and "website_url" not in chapter_updates:
+            state_updates["website_url"] = "confirmed_absent"
+            return FieldJobResult(
+                chapter_updates=chapter_updates,
+                completed_payload={
+                    "status": "confirmed_absent",
+                    "field": "website_url",
+                    "reasonCode": bundle.reason_code or "authoritative_no_website_found",
+                    "evidenceUrl": bundle.evidence_url,
+                    "decision_trace": self._build_decision_trace_summary(),
+                },
+                field_state_updates=state_updates,
+            )
+
+        if target_field not in chapter_updates:
+            return None
+
+        return FieldJobResult(
+            chapter_updates=chapter_updates,
+            completed_payload={
+                "status": "updated",
+                "field": target_field,
+                "sourceUrl": (bundle.website_match or bundle.email_match or bundle.instagram_match).source_url if (bundle.website_match or bundle.email_match or bundle.instagram_match) is not None else bundle.evidence_url,
+                "decision_trace": self._build_decision_trace_summary(),
+            },
+            field_state_updates=state_updates,
+        )
+
     def _candidate_result(self, job: FieldJob, match: CandidateMatch, target_field: str) -> FieldJobResult:
         expected_kind = {
             "website_url": CandidateKind.WEBSITE,
@@ -751,6 +1665,41 @@ class FieldJobEngine:
             )
             raise self._no_candidate_error(job, f"Candidate kind mismatch for {target_field}; discovered {sanitized.kind.value}")
         match.value = sanitized.value
+
+        should_verify_website = (
+            target_field == "website_url"
+            and (
+                match.source_provider in {"search_result", "search_page"}
+                or _website_candidate_looks_low_signal(match.value)
+                or _candidate_is_source_domain(match.value, job)
+            )
+        )
+        if should_verify_website:
+            verification = _verify_official_website_candidate(
+                job,
+                match.value,
+                SearchDocument(
+                    text=match.source_snippet,
+                    url=match.source_url,
+                    title="",
+                    provider=match.source_provider,
+                    query=match.query,
+                ),
+            )
+            if verification.decision == "reject":
+                self._trace(
+                    "candidate_rejected",
+                    target=target_field,
+                    reason="official_domain_verifier_rejected",
+                    verifier_reason=",".join(verification.reason_codes),
+                )
+                raise self._no_candidate_error(job, f"Candidate for {target_field} failed official-domain verification")
+            self._trace(
+                "official_domain_verified",
+                target=target_field,
+                decision=verification.decision,
+                confidence=round(verification.confidence, 4),
+            )
 
         base_source_slug = job.source_slug or job.payload.get("sourceSlug") or "search-enrichment"
         provenance_records = [
@@ -805,6 +1754,33 @@ class FieldJobEngine:
         if target_field != "website_url" and match.related_website_url and _is_safe_related_website_url(job, match.related_website_url):
             sanitized_related_website = sanitize_as_website(match.related_website_url, base_url=match.source_url or job.source_base_url)
             current_website = _current_website_url(job)
+            if sanitized_related_website and (not current_website or current_website == sanitized_related_website):
+                if not current_website and match.source_provider in {"search_result", "search_page"}:
+                    related_verification = _verify_official_website_candidate(
+                        job,
+                        sanitized_related_website,
+                        SearchDocument(
+                            text=match.source_snippet,
+                            url=match.source_url,
+                            title="",
+                            provider=match.source_provider,
+                            query=match.query,
+                        ),
+                    )
+                    if related_verification.decision == "reject":
+                        self._trace(
+                            "related_website_rejected",
+                            target=target_field,
+                            reason="official_domain_verifier_rejected",
+                        )
+                        sanitized_related_website = None
+                    else:
+                        self._trace(
+                            "related_website_verified",
+                            target=target_field,
+                            decision=related_verification.decision,
+                            confidence=round(related_verification.confidence, 4),
+                        )
             if sanitized_related_website and (not current_website or current_website == sanitized_related_website):
                 chapter_updates["website_url"] = sanitized_related_website
                 field_state_updates["website_url"] = "found" if match.confidence >= found_threshold else "low_confidence"
@@ -1046,12 +2022,19 @@ class FieldJobEngine:
         return matches
 
     def _extract_email_matches_from_trusted_school_pages(self, job: FieldJob) -> list[CandidateMatch]:
+        if self._search_degraded_mode:
+            self._search_skipped_due_to_degraded_mode = True
+            self._trace("external_search_skipped", target="trusted_school_email", reason="preflight_degraded")
+            return []
         matches: list[CandidateMatch] = []
         seen_urls: set[str] = set()
         fetched_pages = 0
         query_limit = min(2, max(1, self._email_max_queries))
         for query in self._build_search_queries(job, target="website_school")[:query_limit]:
-            for result in self._run_search(query):
+            query_results = self._run_search(query)
+            if self._maybe_abort_search_sequence(job, target="trusted_school_email", query_results=query_results):
+                break
+            for result in query_results:
                 if result.url in seen_urls:
                     continue
                 seen_urls.add(result.url)
@@ -1176,7 +2159,7 @@ class FieldJobEngine:
                 "reason": "official_school_affiliation_page_does_not_list_chapter",
                 "decision_trace": self._build_decision_trace_summary(),
             },
-            field_state_updates={"instagram_url": "missing"},
+            field_state_updates={"instagram_url": "inactive"},
             provenance_records=[
                 ProvenanceRecord(
                     source_slug=job.source_slug or str(job.payload.get("sourceSlug") or ""),
@@ -1295,16 +2278,22 @@ class FieldJobEngine:
         for suffix in ("chapter-directory/", "chapters/", "directory/", "find-a-chapter/", "locations/"):
             seed_urls.append(urljoin(base_url, suffix))
 
-        if self._greedy_collect_mode == _GREEDY_COLLECT_BFS:
+        if self._greedy_collect_mode == _GREEDY_COLLECT_BFS and not self._search_degraded_mode:
             fraternity = _display_name(job.fraternity_slug)
             for query in [
                 f'site:{source_host} "{fraternity}" "chapter directory"',
                 f'site:{source_host} "{fraternity}" chapters',
             ]:
-                for result in self._run_search(query)[:3]:
+                query_results = self._run_search(query)
+                if self._maybe_abort_search_sequence(job, target="nationals_directory_seed", query_results=query_results):
+                    break
+                for result in query_results[:3]:
                     result_host = (urlparse(result.url).netloc or "").lower()
                     if result_host == source_host or result_host.endswith(f".{source_host}"):
                         seed_urls.append(result.url)
+        elif self._greedy_collect_mode == _GREEDY_COLLECT_BFS:
+            self._search_skipped_due_to_degraded_mode = True
+            self._trace("external_search_skipped", target="nationals_directory_seed", reason="preflight_degraded")
 
         queue: list[tuple[str, int]] = []
         seen_urls: set[str] = set()
@@ -1713,11 +2702,21 @@ class FieldJobEngine:
                 if website_document is not None:
                     documents.append(website_document)
 
+        if self._search_degraded_mode:
+            self._search_skipped_due_to_degraded_mode = True
+            self._trace("external_search_skipped", target=target, reason="preflight_degraded")
+            return documents
+        if self._provider_search_hard_blocked():
+            self._trace("external_search_skipped", target=target, reason="provider_unavailable")
+            return documents
+
         seen_urls: set[str] = set()
         fetched_pages = 0
         queries = self._build_search_queries(job, target)
         for query in queries:
             query_results = self._run_search(query)
+            if self._maybe_abort_search_sequence(job, target=target, query_results=query_results):
+                break
 
             for result in query_results:
                 if not _search_result_is_useful(job, result, target):
@@ -1763,6 +2762,39 @@ class FieldJobEngine:
             )
         return documents
 
+    def _maybe_abort_search_sequence(self, job: FieldJob, *, target: str, query_results: list[SearchResult]) -> bool:
+        if not self._should_abort_search_fanout(query_results):
+            return False
+        self._search_fanout_aborted = True
+        reason = self._last_search_failure_kind or "provider_unavailable"
+        self._trace(
+            "search_query_fanout_aborted",
+            attempted_queries=self._search_queries_attempted,
+            reason=reason,
+            target=target,
+        )
+        log_event(
+            self._logger,
+            "search_query_fanout_aborted",
+            chapter_slug=job.chapter_slug,
+            field_name=job.field_name,
+            attempted_queries=self._search_queries_attempted,
+            reason=reason,
+            target=target,
+        )
+        return True
+
+    def _provider_search_hard_blocked(self) -> bool:
+        if not self._search_errors_encountered:
+            return False
+        if self._search_queries_succeeded > 0:
+            return False
+        if self._last_search_failure_kind not in {"unavailable", "request_exception"}:
+            return False
+        if not self._search_fanout_aborted:
+            return False
+        return self._search_queries_failed >= max(1, self._search_queries_attempted)
+
     def _build_search_queries(self, job: FieldJob, target: str) -> list[str]:
         fraternity = _display_name(job.fraternity_slug)
         quoted_fraternity = f'"{fraternity}"' if fraternity else ""
@@ -1802,6 +2834,52 @@ class FieldJobEngine:
                     [f'"{university}"' if university else "", "student organizations", "site:.edu"],
                     [f'"{university}"' if university else "", "greek life", "site:.edu"],
                     [f'"{university}"' if university else "", "fraternities", "site:.edu"],
+                ]
+            )
+        elif target == "school_chapter_list":
+            for domain in campus_domains:
+                query_parts.extend(
+                    [
+                        [f'"{university}"' if university else "", "chapters at", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "fraternities", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "greek life", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "fraternity and sorority life", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "fraternity chapters", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "recognized chapters", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "chapter scorecards", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "community scorecard", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "councils and chapters", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "student organizations", "fraternities", f"site:{domain}"],
+                    ]
+                )
+            query_parts.extend(
+                [
+                    [f'"{university}"' if university else "", "chapters at", "site:.edu"],
+                    [f'"{university}"' if university else "", "fraternities", "site:.edu"],
+                    [f'"{university}"' if university else "", "greek life", "site:.edu"],
+                    [f'"{university}"' if university else "", "fraternity and sorority life", "site:.edu"],
+                    [f'"{university}"' if university else "", "fraternity chapters", "site:.edu"],
+                    [f'"{university}"' if university else "", "recognized chapters", "site:.edu"],
+                    [f'"{university}"' if university else "", "chapter scorecards", "site:.edu"],
+                    [f'"{university}"' if university else "", "community scorecard", "site:.edu"],
+                    [f'"{university}"' if university else "", "councils and chapters", "site:.edu"],
+                    [f'"{university}"' if university else "", "student organizations", "fraternities", "site:.edu"],
+                ]
+            )
+        elif target == "campus_policy":
+            for domain in campus_domains:
+                query_parts.extend(
+                    [
+                        [f'"{university}"' if university else "", "fraternities banned", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "greek life", f"site:{domain}"],
+                        [f'"{university}"' if university else "", "fraternity sorority life", f"site:{domain}"],
+                    ]
+                )
+            query_parts.extend(
+                [
+                    [f'"{university}"' if university else "", "fraternities banned", "site:.edu"],
+                    [f'"{university}"' if university else "", "greek life", "site:.edu"],
+                    [f'"{university}"' if university else "", "fraternity sorority life", "site:.edu"],
                 ]
             )
         elif target == "website_fallback":
@@ -2055,6 +3133,10 @@ class FieldJobEngine:
             return False
         return True
 
+    @property
+    def require_confident_website_for_email(self) -> bool:
+        return self._require_confident_website_for_email
+
     def _write_threshold(self, job: FieldJob, target_field: str, match: CandidateMatch) -> float:
         if target_field == "website_url":
             candidate_tier = _website_trust_tier(job, match.value)
@@ -2092,6 +3174,17 @@ class FieldJobEngine:
         return 0.85
 
     def _no_candidate_error(self, job: FieldJob, message: str) -> RetryableJobError:
+        if self._search_skipped_due_to_degraded_mode:
+            return RetryableJobError(
+                f"{message}; search preflight degraded",
+                backoff_seconds=max(
+                    self._transient_long_cooldown_seconds,
+                    self._dependency_wait_seconds,
+                    self._base_backoff_seconds,
+                ),
+                preserve_attempt=True,
+                reason_code="provider_degraded",
+            )
         if self._search_errors_encountered:
             all_queries_failed = self._search_queries_attempted > 0 and self._search_queries_failed >= self._search_queries_attempted
             if all_queries_failed:
@@ -2159,7 +3252,7 @@ class FieldJobEngine:
 
     def _build_requeue_payload_patch(self, job: FieldJob, exc: "RetryableJobError", backoff_seconds: int) -> dict[str, object]:
         patch: dict[str, object] = {}
-        queue_state = "deferred" if exc.reason_code in {"transient_network", "dependency_wait", "provider_low_signal"} else "actionable"
+        queue_state = "deferred" if exc.reason_code in {"transient_network", "dependency_wait", "provider_low_signal", "provider_degraded"} else "actionable"
         patch["contactResolution"] = {
             "queueState": queue_state,
             "reasonCode": exc.reason_code,
@@ -2175,11 +3268,30 @@ class FieldJobEngine:
             patch["provider_attempts"] = self._last_provider_attempts[-8:]
         if exc.reason_code in {"terminal_no_candidate", "provider_low_signal"}:
             patch["terminal_no_signal_count"] = self._payload_int(job.payload.get("terminal_no_signal_count")) + 1
+        if exc.reason_code == "provider_degraded":
+            patch["provider_degraded_at"] = "preflight"
         return patch
 
     def _should_abort_search_fanout(self, query_results: list[SearchResult]) -> bool:
-        # Fanout abort is disabled so field jobs can exhaust bounded query budgets
-        # before classifying provider outages.
+        if query_results:
+            return False
+        if self._search_queries_succeeded > 0:
+            return False
+        if self._last_search_failure_kind not in {"unavailable", "request_exception"}:
+            return False
+        provider_attempts = self._last_query_provider_attempts or []
+        if not provider_attempts:
+            return False
+        all_provider_attempts_unavailable = all(
+            str(attempt.get("status") or "").strip().lower() in {"unavailable", "request_error"}
+            for attempt in provider_attempts
+        )
+        if not all_provider_attempts_unavailable:
+            return False
+        if self._search_queries_attempted >= 3 and self._search_queries_failed >= self._search_queries_attempted:
+            return True
+        if self._search_queries_attempted >= 2 and all(bool(attempt.get("circuit_open")) for attempt in provider_attempts):
+            return True
         return False
 
     def _payload_int(self, raw_value: object) -> int:
@@ -2295,21 +3407,50 @@ class FieldJobEngine:
         return False
 
     def _instagram_search_candidate_passes_gate(self, instagram_url: str, document: SearchDocument, job: FieldJob) -> bool:
-        if document.provider not in {"search_result", "search_page"}:
-            return True
         combined = _instagram_candidate_text(document, instagram_url)
         handle_score = _instagram_handle_match_score(instagram_url, job)
         overlap_score = _instagram_context_overlap_score(job, instagram_url, document)
         school_match = _school_matches(job, combined)
         fraternity_match = _fraternity_matches(job, combined)
         chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
+        source_tier = _website_trust_tier(job, document.url or "")
+        handle_has_fraternity = _instagram_handle_has_fraternity_token(instagram_url, job)
+        local_identity = _instagram_handle_has_local_identity(instagram_url, job)
+        if document.provider == "source_page":
+            if _instagram_looks_institutional_or_directory_account(instagram_url, document) or (
+                _instagram_handle_looks_like_school_brand(instagram_url, job) and not handle_has_fraternity
+            ):
+                self._record_candidate_rejection("instagram", "institutional_account")
+                return False
+            if not handle_has_fraternity:
+                self._record_candidate_rejection("instagram", "missing_handle_fraternity_token")
+                return False
+            if not local_identity and not chapter_match and _chapter_designation_signal(job, combined) <= 0:
+                self._record_candidate_rejection("instagram", "missing_local_identity")
+                return False
+            return fraternity_match and (school_match or chapter_match or local_identity)
+        if document.provider not in {"search_result", "search_page"}:
+            return True
+        if source_tier == "tier1":
+            if _instagram_looks_institutional_or_directory_account(instagram_url, document) or (
+                _instagram_handle_looks_like_school_brand(instagram_url, job) and not handle_has_fraternity
+            ):
+                self._record_candidate_rejection("instagram", "institutional_account")
+                return False
+            if not handle_has_fraternity:
+                self._record_candidate_rejection("instagram", "missing_handle_fraternity_token")
+                return False
+            if not fraternity_match and not chapter_match and _chapter_designation_signal(job, combined) <= 0:
+                self._record_candidate_rejection("instagram", "missing_fraternity_anchor")
+                return False
+            return school_match and (fraternity_match or chapter_match or handle_score >= 2)
         if _instagram_has_conflicting_org_signal(job, combined) and handle_score < 5:
             self._record_candidate_rejection("instagram", "conflicting_org_signal")
             return False
         if _chapter_designation_signal(job, combined) < 0:
             self._record_candidate_rejection("instagram", "chapter_designation_mismatch")
             return False
-        if not _instagram_handle_has_fraternity_token(instagram_url, job) and _chapter_designation_signal(job, combined) <= 0:
+        if not handle_has_fraternity and _chapter_designation_signal(job, combined) <= 0:
             self._record_candidate_rejection("instagram", "missing_handle_fraternity_token")
             return False
         if handle_score >= 4 and (school_match or fraternity_match):
@@ -2440,6 +3581,20 @@ class FieldJobEngine:
                 continue
             document_host = (urlparse(document.url or "").netloc or "").lower()
             candidate_host = (urlparse(url).netloc or "").lower()
+            official_verification = None
+            if document.provider in {"search_result", "search_page"}:
+                official_verification = _verify_official_website_candidate(job, url, document)
+            if (
+                document.provider == "search_page"
+                and _website_trust_tier(job, document.url or "") == "tier1"
+                and candidate_host
+                and document_host
+                and candidate_host != document_host
+                and candidate_host.endswith(".edu")
+                and not any(candidate_host == domain or candidate_host.endswith(f".{domain}") for domain in _campus_domains(job))
+            ):
+                self._record_candidate_rejection("website", "cross_school_edu_link")
+                continue
             if (
                 document.provider == "search_page"
                 and _website_trust_tier(job, document.url or "") == "tier1"
@@ -2458,10 +3613,26 @@ class FieldJobEngine:
                 if not _ambiguous_school_tier1_candidate_allowed(job, url, document):
                     self._record_candidate_rejection("website", "ambiguous_school_tier1_generic")
                     continue
-                if not _tier1_website_candidate_has_specificity(job, url, document):
+                if (
+                    not _tier1_website_candidate_has_specificity(job, url, document)
+                    and not (
+                        official_verification is not None
+                        and official_verification.decision in {"official_affiliation_page", "official_chapter_domain"}
+                    )
+                ):
                     self._record_candidate_rejection("website", "low_specificity_tier1")
                     continue
+                if official_verification.decision == "reject":
+                    self._record_candidate_rejection(
+                        "website",
+                        "official_domain_rejected_" + (official_verification.reason_codes[0] if official_verification.reason_codes else "unknown"),
+                    )
+                    continue
             confidence = self._score_website_candidate(url, document, job)
+            if official_verification is not None and official_verification.decision == "official_chapter_domain":
+                confidence = min(0.97, confidence + 0.08)
+            elif official_verification is not None and official_verification.decision == "official_affiliation_page":
+                confidence = min(0.96, confidence + 0.05)
             if _trusted_directory_external_candidate(job, url, document):
                 confidence = min(0.95, confidence + 0.08)
             if confidence < 0.65:
@@ -2508,6 +3679,8 @@ def _instagram_profile_looks_missing(document: SearchDocument) -> bool:
 
 def _is_generic_greek_letter_chapter_name(value: str | None) -> bool:
     tokens = _normalized_match_text(value).split()
+    while tokens and tokens[-1] in {"chapter", "colony"}:
+        tokens = tokens[:-1]
     return bool(tokens) and len(tokens) <= 4 and all(token in _GREEK_LETTER_TOKENS for token in tokens)
 
 
@@ -2821,6 +3994,26 @@ def _school_has_conflicting_signal(job: FieldJob, text: str) -> bool:
     if not school or not text:
         return False
     if school.startswith("university of "):
+        prefix_pattern = re.compile(rf"\b([a-z0-9]+)\s+{re.escape(school)}\b")
+        match = prefix_pattern.search(text)
+        allowed_prefixes = {
+            "the",
+            "a",
+            "an",
+            "at",
+            "of",
+            "for",
+            "chapter",
+            "fraternity",
+            "sorority",
+            "greek",
+            "life",
+            *(_fraternity_tokens(job.fraternity_slug) or []),
+            *(_fraternity_tokens(_display_name(job.fraternity_slug)) or []),
+        }
+        if match and match.group(1) not in allowed_prefixes:
+            return True
+    if school.startswith("university of "):
         core = school.removeprefix("university of ").strip()
         if core and (f"{core} state" in text or f"{core} state university" in text):
             return True
@@ -2842,6 +4035,8 @@ def _school_name_is_ambiguous(job: FieldJob) -> bool:
 
 def _school_matches(job: FieldJob, text: str) -> bool:
     university = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+    if _school_has_conflicting_signal(job, text):
+        return False
     phrase = _normalized_match_text(university)
     if phrase and phrase in text:
         return True
@@ -2990,13 +4185,15 @@ def _search_result_is_useful(job: FieldJob, result: SearchResult, target: str) -
 
     instagram_url = _normalize_instagram_candidate(result.url)
     if instagram_url:
+        if _school_has_conflicting_signal(job, combined):
+            return False
         handle_score = _instagram_handle_match_score(instagram_url, job)
-        if handle_score >= 2:
+        if handle_score >= 4:
             return True
         if _search_result_is_relevant(job, result):
             return True
         combined = _normalized_match_text(f"{result.title} {result.snippet} {result.url}")
-        if handle_score >= 1 and (_fraternity_matches(job, combined) or _school_matches(job, combined)):
+        if handle_score >= 3 and (_school_matches(job, combined) or _chapter_matches(job, combined)):
             return True
         return False
 
@@ -3097,6 +4294,10 @@ def _website_document_looks_low_signal(document: SearchDocument) -> bool:
 def _website_candidate_looks_low_signal(url: str, document: SearchDocument | None = None) -> bool:
     parsed = urlparse(url)
     path_text = _normalized_match_text(f"{parsed.netloc} {parsed.path} {parsed.query}")
+    if ("google." in (parsed.netloc or "").lower() and ("/maps/" in (parsed.path or "").lower() or "/maps/d/" in (parsed.path or "").lower())) or "forcekml" in path_text or (parsed.path or "").lower().endswith(".kml"):
+        return True
+    if any(marker in path_text for marker in ("archive", "archives", "digital api collection", " download")):
+        return True
     if any(marker in path_text for marker in _LOW_SIGNAL_WEBSITE_PATH_MARKERS):
         return True
     if document is None:
@@ -3116,6 +4317,20 @@ def _website_document_has_official_chapter_context(job: FieldJob, document: Sear
     if not (_fraternity_matches(job, combined) or _chapter_matches(job, combined)):
         return False
     return any(marker in combined for marker in _OFFICIAL_AFFILIATION_MARKERS)
+
+
+def _verify_official_website_candidate(job: FieldJob, candidate_url: str, document: SearchDocument) -> PrecisionDecision:
+    return tool_official_domain_verifier(
+        candidate_url=candidate_url,
+        fraternity_name=_display_name(job.fraternity_slug),
+        fraternity_slug=job.fraternity_slug or "",
+        chapter_name=job.chapter_name,
+        university_name=job.university_name or str(job.payload.get("candidateSchoolName") or ""),
+        source_url=job.source_base_url,
+        document_url=document.url,
+        document_title=document.title or "",
+        document_text=document.text,
+    )
 
 
 def _search_page_link_has_website_context(job: FieldJob, document: SearchDocument, candidate_url: str) -> bool:
@@ -3188,12 +4403,19 @@ def _instagram_handle_match_score(instagram_url: str, job: FieldJob) -> int:
     score = 0
     fraternity_compact = _compact_text(_display_name(job.fraternity_slug))
     fraternity_initials = _initialism(_display_name(job.fraternity_slug))
+    fraternity_aliases = [
+        _compact_text(alias)
+        for alias in _fraternity_query_aliases(_display_name(job.fraternity_slug), job.fraternity_slug)
+        if alias
+    ]
     school_tokens = _significant_tokens(job.university_name or str(job.payload.get("candidateSchoolName") or ""))
     school_initials = _school_initials(job.university_name or str(job.payload.get("candidateSchoolName") or ""))
     chapter_compact = _compact_text(job.chapter_name)
     chapter_initials = _initialism(job.chapter_name)
 
     if fraternity_compact and fraternity_compact in handle:
+        score += 2
+    elif any(alias and len(alias) >= 3 and alias in handle for alias in fraternity_aliases):
         score += 2
     elif fraternity_initials and len(fraternity_initials) >= 2 and fraternity_initials in handle:
         score += 1
@@ -3216,9 +4438,57 @@ def _instagram_handle_has_fraternity_token(instagram_url: str, job: FieldJob) ->
     handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
     fraternity_compact = _compact_text(_display_name(job.fraternity_slug))
     fraternity_initials = _initialism(_display_name(job.fraternity_slug))
+    fraternity_aliases = [
+        _compact_text(alias)
+        for alias in _fraternity_query_aliases(_display_name(job.fraternity_slug), job.fraternity_slug)
+        if alias
+    ]
     if fraternity_compact and fraternity_compact in handle:
         return True
+    if any(alias and len(alias) >= 3 and alias in handle for alias in fraternity_aliases):
+        return True
     return bool(fraternity_initials and len(fraternity_initials) >= 2 and fraternity_initials in handle)
+
+
+def _instagram_handle_has_local_identity(instagram_url: str, job: FieldJob) -> bool:
+    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    if not handle:
+        return False
+
+    school = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+    school_initials = _school_initials(school)
+    if school_initials and len(school_initials) >= 3 and school_initials.lower() in handle:
+        return True
+
+    school_tokens = _significant_tokens(school)
+    if any(token in handle for token in school_tokens if len(token) >= 5):
+        return True
+
+    if _has_nongeneric_chapter_signal(job):
+        chapter_compact = _compact_text(job.chapter_name)
+        chapter_initials = _initialism(job.chapter_name)
+        if chapter_compact and len(chapter_compact) >= 4 and chapter_compact in handle:
+            return True
+        if chapter_initials and len(chapter_initials) >= 2 and chapter_initials.lower() in handle:
+            return True
+
+    return False
+
+
+def _instagram_handle_looks_like_school_brand(instagram_url: str, job: FieldJob) -> bool:
+    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    if not handle:
+        return False
+
+    school = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+    school_compact = _compact_text(school)
+    school_initials = _school_initials(school)
+    if school_compact:
+        if handle == school_compact or handle.startswith(school_compact):
+            return True
+        if len(handle) >= 5 and school_compact.startswith(handle):
+            return True
+    return bool(school_initials and len(school_initials) >= 3 and handle == school_initials.lower())
 
 
 def _instagram_candidate_text(document: SearchDocument, instagram_url: str) -> str:
@@ -3361,9 +4631,34 @@ def _looks_like_official_school_affiliation_page(document: SearchDocument) -> bo
 
 
 def _instagram_document_is_relevant(job: FieldJob, document: SearchDocument) -> bool:
-    if document.provider in {"provenance", "chapter_website", "nationals_directory"}:
-        return True
     combined = _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:1200], document.url or ""] if part))
+    if _school_has_conflicting_signal(job, combined):
+        return False
+    if document.provider == "chapter_website":
+        if any(sanitize_as_instagram(link) for link in document.links):
+            return True
+        if _INSTAGRAM_RE.search(document.text) or _INSTAGRAM_HANDLE_HINT_RE.search(document.text) or _INSTAGRAM_NEARBY_HANDLE_RE.search(document.text):
+            return True
+        chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
+        return _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match)
+    if document.provider in {"provenance", "nationals_directory"}:
+        if any(sanitize_as_instagram(link) for link in document.links):
+            return True
+        if _INSTAGRAM_RE.search(document.text) or _INSTAGRAM_HANDLE_HINT_RE.search(document.text) or _INSTAGRAM_NEARBY_HANDLE_RE.search(document.text):
+            return True
+        chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
+        if _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match):
+            return True
+        for link in document.links or [document.url or ""]:
+            normalized = _normalize_instagram_candidate(link)
+            if not normalized:
+                continue
+            handle_score = _instagram_handle_match_score(normalized, job)
+            if handle_score >= 4:
+                return True
+            if handle_score >= 3 and (_school_matches(job, combined) or chapter_match):
+                return True
+        return False
     chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
     if _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match):
         return True
@@ -3388,11 +4683,51 @@ def _instagram_looks_relevant_to_job(instagram_url: str, job: FieldJob, *, docum
     if document is None:
         return False
     combined = _instagram_candidate_text(document, instagram_url)
+    if _school_has_conflicting_signal(job, combined):
+        return False
     if _instagram_has_conflicting_org_signal(job, combined) and handle_score < 5:
         return False
     chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
-    if document.provider in {"provenance", "chapter_website", "nationals_directory"} and (chapter_match or handle_score >= 1):
-        return True
+    local_identity = _instagram_handle_has_local_identity(instagram_url, job)
+    if document.provider == "chapter_website":
+        if _instagram_looks_institutional_or_directory_account(instagram_url, document):
+            return False
+        if local_identity:
+            return True
+        return _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match)
+    if document.provider == "source_page":
+        if _instagram_looks_institutional_or_directory_account(instagram_url, document):
+            return False
+        if _instagram_handle_looks_like_school_brand(instagram_url, job) and not _instagram_handle_has_fraternity_token(instagram_url, job):
+            return False
+        if not _instagram_handle_has_fraternity_token(instagram_url, job):
+            return False
+        if chapter_match:
+            return True
+        return local_identity and _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match)
+    if document.provider in {"provenance", "nationals_directory"}:
+        if chapter_match:
+            return True
+        if handle_score >= 4:
+            return True
+        if local_identity and _instagram_handle_has_fraternity_token(instagram_url, job):
+            return True
+        if handle_score >= 3 and _school_matches(job, combined):
+            return True
+        return False
+    if _website_trust_tier(job, document.url or "") == "tier1":
+        if _instagram_looks_institutional_or_directory_account(instagram_url, document):
+            return False
+        if _instagram_handle_looks_like_school_brand(instagram_url, job) and not _instagram_handle_has_fraternity_token(instagram_url, job):
+            return False
+        if not _instagram_handle_has_fraternity_token(instagram_url, job):
+            return False
+        return _school_matches(job, combined) and (
+            _fraternity_matches(job, combined)
+            or chapter_match
+            or _chapter_designation_signal(job, combined) > 0
+            or local_identity
+        )
     return _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match)
 
 
@@ -4063,10 +5398,29 @@ class RetryableJobError(Exception):
 
 
 def _website_is_confident(job: FieldJob) -> bool:
-    if not _current_website_url(job):
+    website_url = _current_website_url(job)
+    if not website_url:
         return False
-    state = (job.field_states or {}).get("website_url")
-    return state not in {"low_confidence", "missing"}
+    if not _field_value_is_confident(job, "website_url"):
+        return False
+    normalized_url = _normalize_url(website_url)
+    if normalized_url.endswith(_DOCUMENT_URL_EXTENSIONS):
+        return False
+    path_text = _normalized_match_text(website_url)
+    if any(marker in path_text for marker in ("archive", "archives", "download", "digital")):
+        return False
+    if _candidate_is_source_domain(website_url, job):
+        return False
+    if _website_candidate_looks_low_signal(website_url):
+        return False
+    return True
+
+
+def _field_value_is_confident(job: FieldJob, field_name: str) -> bool:
+    state = str((job.field_states or {}).get(field_name) or "").strip().lower()
+    if state in {"low_confidence", "missing", "inactive", "confirmed_absent", "invalid_entity"}:
+        return False
+    return True
 
 
 

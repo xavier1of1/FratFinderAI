@@ -1,0 +1,2 @@
+{"type": "run_started", "timestamp": "2026-04-09T03:44:49+00:00", "run_id": "stress-debug-wave3", "args": {"run_id": "stress-debug-wave3", "workers": 2, "max_workers": 4, "limit": 20, "batches": 1, "priority": 952, "graph_durability": "sync", "skip_enqueue": false, "run_preflight": false, "report_path": null}}
+{"type": "enqueue", "timestamp": "2026-04-09T03:44:50+00:00", "run_id": "stress-debug-wave3", "cohort_chapters": 2990, "requested_jobs": 8853, "affected_jobs": 8853, "missing_source_chapters": 0}

@@ -133,6 +133,7 @@ class RequestSupervisorGraphRuntime:
         graph.add_node("recover_source", self._instrument("recover_source", self._recover_source, phase="recovery"))
         graph.add_node("start_crawl", self._instrument("start_crawl", self._start_crawl, phase="crawl"))
         graph.add_node("sync_crawl_progress", self._instrument("sync_crawl_progress", self._sync_crawl_progress, phase="crawl"))
+        graph.add_node("purge_inactive_schools", self._instrument("purge_inactive_schools", self._purge_inactive_schools, phase="validation"))
         graph.add_node("enter_enrichment", self._instrument("enter_enrichment", self._enter_enrichment, phase="enrichment"))
         graph.add_node("run_enrichment_cycle", self._instrument("run_enrichment_cycle", self._run_enrichment_cycle, phase="enrichment"))
         graph.add_node("sync_enrichment_progress", self._instrument("sync_enrichment_progress", self._sync_enrichment_progress, phase="enrichment"))
@@ -149,8 +150,9 @@ class RequestSupervisorGraphRuntime:
         graph.add_conditional_edges(
             "sync_crawl_progress",
             self._after_crawl_sync,
-            {"recover": "recover_source", "retry": "start_crawl", "continue": "enter_enrichment", "finalize": "finalize"},
+            {"recover": "recover_source", "retry": "start_crawl", "continue": "purge_inactive_schools", "finalize": "finalize"},
         )
+        graph.add_edge("purge_inactive_schools", "enter_enrichment")
         graph.add_conditional_edges(
             "enter_enrichment",
             self._after_enter_enrichment,
@@ -606,6 +608,113 @@ class RequestSupervisorGraphRuntime:
             "terminal_reason": None,
         }
 
+    def _purge_inactive_schools(self, state: RequestGraphState) -> dict[str, Any]:
+        request = self._request_repository.get_request(state["request_id"])
+        if request is None:
+            return {
+                "error": f"Request {state['request_id']} disappeared during inactive-school purge",
+                "graph_status": "failed",
+                "terminal_reason": "request_missing",
+            }
+
+        progress = _clone_progress(state.get("progress") or request.progress)
+        progress = _update_progress_graph(
+            progress,
+            active_node="purge_inactive_schools",
+            graph_run_id=state.get("graph_run_id"),
+            worker_id=self._worker_id,
+            runtime_mode=self._runtime_mode,
+        )
+        crawl_run_payload = state.get("crawl_run")
+        crawl_run_id = int(crawl_run_payload.get("id")) if isinstance(crawl_run_payload, dict) and crawl_run_payload.get("id") is not None else int((progress.get("crawlRun") or {}).get("id")) if ((progress.get("crawlRun") or {}).get("id")) is not None else None
+        if crawl_run_id is None:
+            self._request_repository.update_request(request.id, stage="enrichment", progress=progress)
+            return {"request": self._request_repository.get_request(request.id), "progress": progress}
+
+        purged_inactive = 0
+        purged_banned_school = 0
+        for chapter in self._crawler_repository.list_chapters_for_crawl_run(crawl_run_id):
+            school_name = str(chapter.get("university_name") or "").strip()
+            fraternity_slug = str(chapter.get("fraternity_slug") or "").strip()
+            if not school_name or not fraternity_slug:
+                continue
+
+            policy = self._crawler_repository.get_school_policy(school_name)
+            activity = self._crawler_repository.get_chapter_activity(fraternity_slug=fraternity_slug, school_name=school_name)
+            policy_status = str(getattr(policy, "greek_life_status", "unknown") or "unknown")
+            activity_status = str(getattr(activity, "chapter_activity_status", "unknown") or "unknown")
+            if policy_status != "banned" and activity_status != "confirmed_inactive":
+                continue
+
+            reason_code = str(
+                getattr(activity, "reason_code", None)
+                or getattr(policy, "reason_code", None)
+                or ("school_policy_banned" if policy_status == "banned" else "chapter_inactive")
+            )
+            evidence_url = getattr(activity, "evidence_url", None) or getattr(policy, "evidence_url", None)
+            evidence_source_type = getattr(activity, "evidence_source_type", None) or getattr(policy, "evidence_source_type", None)
+            source_snippet = str(
+                (getattr(activity, "metadata", {}) or {}).get("sourceSnippet")
+                or (getattr(policy, "metadata", {}) or {}).get("sourceSnippet")
+                or reason_code
+            )[:400]
+            self._crawler_repository.apply_chapter_inactive_status(
+                chapter_id=str(chapter["chapter_id"]),
+                chapter_slug=str(chapter["chapter_slug"]),
+                fraternity_slug=fraternity_slug,
+                source_slug=request.source_slug,
+                crawl_run_id=crawl_run_id,
+                reason_code=reason_code,
+                evidence_url=evidence_url,
+                evidence_source_type=evidence_source_type,
+                source_snippet=source_snippet,
+                provider="request_graph_purge",
+                metadata={"requestId": request.id, "stage": "purge_inactive_schools"},
+            )
+            self._crawler_repository.complete_pending_field_jobs_for_chapter(
+                chapter_id=str(chapter["chapter_id"]),
+                reason_code=reason_code,
+                status="inactive_by_school_validation",
+                field_states={
+                    "website_url": "inactive",
+                    "contact_email": "inactive",
+                    "instagram_url": "inactive",
+                },
+            )
+            purged_inactive += 1
+            if policy_status == "banned":
+                purged_banned_school += 1
+
+        previous_enrichment = dict((((progress.get("analytics") or {}).get("enrichment") or {})))
+        previous_queue_triage = dict(previous_enrichment.get("queueTriage") or {})
+        if purged_inactive:
+            self._request_repository.append_request_event(
+                request.id,
+                "inactive_school_purged",
+                "Known inactive chapters were removed before enrichment",
+                {
+                    "crawlRunId": crawl_run_id,
+                    "purgedInactiveChapters": purged_inactive,
+                    "purgedBannedSchoolChapters": purged_banned_school,
+                },
+            )
+        progress = _update_progress_analytics(
+            progress,
+            enrichment={
+                **previous_enrichment,
+                "queueTriage": {
+                    **previous_queue_triage,
+                    "purgedInactiveChapters": int(previous_queue_triage.get("purgedInactiveChapters", 0) or 0) + purged_inactive,
+                    "purgedBannedSchoolChapters": int(previous_queue_triage.get("purgedBannedSchoolChapters", 0) or 0) + purged_banned_school,
+                },
+            },
+        )
+        self._request_repository.update_request(request.id, stage="purge_inactive_schools", progress=progress)
+        return {
+            "request": self._request_repository.get_request(request.id),
+            "progress": progress,
+        }
+
     def _enter_enrichment(self, state: RequestGraphState) -> dict[str, Any]:
         request = self._request_repository.get_request(state["request_id"])
         if request is None:
@@ -618,10 +727,14 @@ class RequestSupervisorGraphRuntime:
         total_queue = _remaining_actionable_queue(progress)
         cycle_state = state.get("cycle_state") or {"cyclesCompleted": 0, "lowProgressCycles": 0, "degradedCycleCount": 0, "processedTotal": 0, "requeuedTotal": 0, "failedTerminalTotal": 0}
         effective_config = _compute_adaptive_enrichment_config(request.config, progress, cycle_state)
+        previous_enrichment = dict((((progress.get("analytics") or {}).get("enrichment") or {})))
+        previous_queue_triage = dict(previous_enrichment.get("queueTriage") or {})
+        previous_chapter_repair = dict(previous_enrichment.get("chapterRepair") or {})
         progress = _update_progress_analytics(
             progress,
             source_quality=state.get("source_quality") or _current_source_quality(request),
             enrichment={
+                **previous_enrichment,
                 "adaptiveMaxEnrichmentCycles": effective_config["maxEnrichmentCycles"],
                 "effectiveFieldJobWorkers": effective_config["fieldJobWorkers"],
                 "effectiveFieldJobLimitPerCycle": effective_config["fieldJobLimitPerCycle"],
@@ -630,24 +743,26 @@ class RequestSupervisorGraphRuntime:
                 "degradedCycleCount": cycle_state["degradedCycleCount"],
                 "queueAtStart": total_queue,
                 "queueRemaining": total_queue,
-                "runtimeFallbackCount": 0,
-                "queueBurnRate": 0,
-                "budgetStrategy": "v3_initial_budget",
+                "runtimeFallbackCount": int(previous_enrichment.get("runtimeFallbackCount", 0) or 0),
+                "queueBurnRate": float(previous_enrichment.get("queueBurnRate", 0) or 0),
+                "budgetStrategy": previous_enrichment.get("budgetStrategy") or "v3_initial_budget",
                 "queueTriage": {
-                    "invalidCancelled": 0,
-                    "deferredLongCooldown": 0,
-                    "repairQueued": 0,
-                    "actionableRetained": 0,
-                    "sourceInvaliditySaturated": False,
+                    "invalidCancelled": int(previous_queue_triage.get("invalidCancelled", 0) or 0),
+                    "deferredLongCooldown": int(previous_queue_triage.get("deferredLongCooldown", 0) or 0),
+                    "repairQueued": int(previous_queue_triage.get("repairQueued", 0) or 0),
+                    "actionableRetained": int(previous_queue_triage.get("actionableRetained", 0) or 0),
+                    "sourceInvaliditySaturated": bool(previous_queue_triage.get("sourceInvaliditySaturated", False)),
+                    "purgedInactiveChapters": int(previous_queue_triage.get("purgedInactiveChapters", 0) or 0),
+                    "purgedBannedSchoolChapters": int(previous_queue_triage.get("purgedBannedSchoolChapters", 0) or 0),
                 },
                 "chapterRepair": {
-                    "queued": 0,
-                    "running": 0,
-                    "promotedToCanonical": 0,
-                    "downgradedToProvisional": 0,
-                    "confirmedInvalid": 0,
-                    "repairExhausted": 0,
-                    "reconciledHistorical": 0,
+                    "queued": int(previous_chapter_repair.get("queued", 0) or 0),
+                    "running": int(previous_chapter_repair.get("running", 0) or 0),
+                    "promotedToCanonical": int(previous_chapter_repair.get("promotedToCanonical", 0) or 0),
+                    "downgradedToProvisional": int(previous_chapter_repair.get("downgradedToProvisional", 0) or 0),
+                    "confirmedInvalid": int(previous_chapter_repair.get("confirmedInvalid", 0) or 0),
+                    "repairExhausted": int(previous_chapter_repair.get("repairExhausted", 0) or 0),
+                    "reconciledHistorical": int(previous_chapter_repair.get("reconciledHistorical", 0) or 0),
                 },
             },
         )
@@ -794,6 +909,8 @@ class RequestSupervisorGraphRuntime:
                     "repairQueued": int(previous_queue_triage.get("repairQueued", 0) or 0) + int(current_queue_triage.get("repairQueued", 0) or 0),
                     "actionableRetained": int(previous_queue_triage.get("actionableRetained", 0) or 0) + int(current_queue_triage.get("actionableRetained", 0) or 0),
                     "sourceInvaliditySaturated": bool(previous_queue_triage.get("sourceInvaliditySaturated", False) or current_queue_triage.get("sourceInvaliditySaturated", False)),
+                    "purgedInactiveChapters": int(previous_queue_triage.get("purgedInactiveChapters", 0) or 0),
+                    "purgedBannedSchoolChapters": int(previous_queue_triage.get("purgedBannedSchoolChapters", 0) or 0),
                 },
                 "chapterRepair": {
                     "queued": int(previous_chapter_repair.get("queued", 0) or 0) + int(current_chapter_repair.get("queued", 0) or 0),
@@ -1231,6 +1348,8 @@ def _build_progress_snapshot(
             "repairQueued": int(queue_triage.get("repairQueued", 0) or 0),
             "actionableRetained": int(queue_triage.get("actionableRetained", 0) or 0),
             "sourceInvaliditySaturated": bool(queue_triage.get("sourceInvaliditySaturated", False)),
+            "purgedInactiveChapters": int(queue_triage.get("purgedInactiveChapters", 0) or 0),
+            "purgedBannedSchoolChapters": int(queue_triage.get("purgedBannedSchoolChapters", 0) or 0),
         },
         "chapterRepair": {
             "queued": int(chapter_repair.get("queued", 0) or 0),

@@ -21,7 +21,16 @@ _BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 _BRAVE_HTML_ENDPOINT = "https://search.brave.com/search"
 _TAVILY_SEARCH_ENDPOINT = "https://api.tavily.com/search"
 _SERPER_SEARCH_ENDPOINT = "https://google.serper.dev/search"
-_LOW_SIGNAL_BING_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com"}
+_LOW_SIGNAL_SEARCH_HOSTS = {
+    "reddit.com",
+    "www.reddit.com",
+    "old.reddit.com",
+    "zhihu.com",
+    "www.zhihu.com",
+    "baidu.com",
+    "www.baidu.com",
+    "zhidao.baidu.com",
+}
 _BRAVE_INTERNAL_HOSTS = {
     "search.brave.com",
     "cdn.search.brave.com",
@@ -218,7 +227,7 @@ class SearchClient:
                 continue
             had_successful_provider_call = True
             last_successful_results = results
-            if provider == "bing_html" and _should_fallback_from_bing(query, results):
+            if provider in {"bing_html", "searxng_json"} and _should_fallback_from_low_signal_results(query, results):
                 self._record_provider_attempt(
                     provider,
                     "low_signal",
@@ -712,7 +721,7 @@ def _decode_bing_redirect_target(value: str) -> str | None:
     return decoded if decoded.startswith(("http://", "https://")) else None
 
 
-def _should_fallback_from_bing(query: str, results: list[SearchResult]) -> bool:
+def _should_fallback_from_low_signal_results(query: str, results: list[SearchResult]) -> bool:
     if not results:
         return True
 
@@ -720,7 +729,7 @@ def _should_fallback_from_bing(query: str, results: list[SearchResult]) -> bool:
     query_tokens = [
         token
         for token in query_text.split()
-        if len(token) >= 4 and token not in _LOW_SIGNAL_QUERY_STOPWORDS
+        if len(token) >= 3 and token not in _LOW_SIGNAL_QUERY_STOPWORDS
     ]
     result_texts = [
         re.sub(r"[^a-z0-9]+", " ", f"{result.title} {result.snippet} {result.url}".lower()).strip()
@@ -740,7 +749,7 @@ def _should_fallback_from_bing(query: str, results: list[SearchResult]) -> bool:
     low_signal_host_count = 0
     for result in results:
         host = (urlparse(result.url).netloc or "").lower()
-        if host in _LOW_SIGNAL_BING_HOSTS:
+        if host in _LOW_SIGNAL_SEARCH_HOSTS:
             low_signal_host_count += 1
     if low_signal_host_count >= max(2, len(results) // 2):
         return True

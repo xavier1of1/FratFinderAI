@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from types import SimpleNamespace
 
-from fratfinder_crawler.models import FraternityCrawlRequestRecord, ProvisionalChapterRecord
+from fratfinder_crawler.models import ChapterActivityRecord, FraternityCrawlRequestRecord, ProvisionalChapterRecord, SchoolPolicyRecord
 from fratfinder_crawler.orchestration.request_graph import RequestSupervisorGraphRuntime
 
 
@@ -189,6 +190,11 @@ class _FakeCrawlerRepository:
         self.upserted_fraternities: list[dict] = []
         self.upserted_sources: list[dict] = []
         self.upserted_chapters: list[dict] = []
+        self.school_policies: dict[str, SchoolPolicyRecord] = {}
+        self.chapter_activities: dict[tuple[str, str], ChapterActivityRecord] = {}
+        self.chapters_for_crawl_run: dict[int, list[dict]] = {}
+        self.inactive_applied: list[dict] = []
+        self.completed_pending: list[dict] = []
 
     def upsert_fraternity(self, slug: str, name: str, nic_affiliated: bool = True) -> tuple[str, str]:
         self.upserted_fraternities.append({"slug": slug, "name": name, "nicAffiliated": nic_affiliated})
@@ -206,6 +212,22 @@ class _FakeCrawlerRepository:
     def upsert_chapter_discovery(self, source, chapter):
         self.upserted_chapters.append({"source": source, "chapter": chapter})
         return "chapter-1"
+
+    def get_school_policy(self, school_name: str | None):
+        return self.school_policies.get((school_name or "").strip().lower())
+
+    def get_chapter_activity(self, *, fraternity_slug: str | None, school_name: str | None):
+        return self.chapter_activities.get(((fraternity_slug or "").strip(), (school_name or "").strip().lower()))
+
+    def list_chapters_for_crawl_run(self, crawl_run_id: int):
+        return list(self.chapters_for_crawl_run.get(crawl_run_id, []))
+
+    def apply_chapter_inactive_status(self, **kwargs):
+        self.inactive_applied.append(dict(kwargs))
+
+    def complete_pending_field_jobs_for_chapter(self, **kwargs):
+        self.completed_pending.append(dict(kwargs))
+        return 1
 
 
 def _build_runtime(
@@ -231,7 +253,7 @@ def _build_runtime(
         run_crawl=run_crawl or (lambda **_: {"runtime_mode": "adaptive_assisted"}),
         process_field_jobs=process_field_jobs or (lambda **_: {"processed": 0, "requeued": 0, "failed_terminal": 0}),
         search_preflight=search_preflight or (lambda: {"healthy": True, "provider_health": {}}),
-        logger=SimpleNamespace(),
+        logger=logging.getLogger("test-request-graph"),
     )
 
 
@@ -260,10 +282,76 @@ def test_request_graph_completes_without_enrichment_queue():
     summary = runtime.run(request.id)
 
     assert summary["status"] == "succeeded"
+
+
+def test_request_graph_purges_cached_inactive_school_before_enrichment():
+    request = _request()
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 1, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_email", "queued": 1, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_instagram", "queued": 1, "running": 0, "done": 0, "failed": 0},
+    ]
+    crawler_repository = _FakeCrawlerRepository()
+    crawler_repository.school_policies["norwich university"] = SchoolPolicyRecord(
+        school_slug="norwich-university",
+        school_name="Norwich University",
+        greek_life_status="banned",
+        confidence=0.97,
+        evidence_url="https://archives.norwich.edu/fraternities-banned",
+        evidence_source_type="official_school",
+        reason_code="strong_ban_phrase",
+        metadata={"sourceSnippet": "There are no fraternities at Norwich."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 601,
+            "status": "succeeded",
+            "pages_processed": 3,
+            "records_seen": 2,
+            "records_upserted": 2,
+            "review_items_created": 0,
+            "field_jobs_created": 3,
+        }
+        crawler_repository.chapters_for_crawl_run[601] = [
+            {
+                "chapter_id": "chapter-1",
+                "chapter_slug": "alpha-norwich-university",
+                "chapter_name": "Alpha Chapter",
+                "university_name": "Norwich University",
+                "fraternity_slug": "alpha-beta",
+            }
+        ]
+        return {"runtime_mode": "adaptive_assisted"}
+
+    runtime = _build_runtime(
+        request_repository,
+        crawler_repository,
+        run_crawl=run_crawl,
+        process_field_jobs=lambda **_: request_repository.field_snapshots.__setitem__(
+            "alpha-main",
+            [
+                {"field": "find_website", "queued": 0, "running": 0, "done": 1, "failed": 0},
+                {"field": "find_email", "queued": 0, "running": 0, "done": 1, "failed": 0},
+                {"field": "find_instagram", "queued": 0, "running": 0, "done": 1, "failed": 0},
+            ],
+        ) or {"processed": 3, "requeued": 0, "failed_terminal": 0},
+    )
+
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert crawler_repository.inactive_applied[0]["chapter_slug"] == "alpha-norwich-university"
+    assert request_repository.request.stage == "completed"
+    assert request_repository.request.progress["queueTriage"]["purgedInactiveChapters"] == 1
     assert summary["terminalReason"] == "completed"
     assert request_repository.request.stage == "completed"
     assert request_repository.request.status == "succeeded"
-    assert request_repository.request.progress["crawlRun"]["recordsSeen"] == 5
+    assert request_repository.request.progress["crawlRun"]["recordsSeen"] == 2
     assert any(event_type == "request_completed" for event_type, _ in request_repository.events)
 
 

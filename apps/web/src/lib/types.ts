@@ -266,6 +266,7 @@ export type FraternityCrawlRequestStage =
   | "discovery"
   | "awaiting_confirmation"
   | "crawl_run"
+  | "purge_inactive_schools"
   | "enrichment"
   | "completed"
   | "failed";
@@ -398,6 +399,8 @@ export interface FraternityCrawlProgress {
     repairQueued?: number;
     actionableRetained?: number;
     sourceInvaliditySaturated?: boolean;
+    purgedInactiveChapters?: number;
+    purgedBannedSchoolChapters?: number;
   };
   chapterRepair?: {
     queued?: number;

@@ -69,7 +69,7 @@ def analyze_page(html: str) -> PageAnalysis:
 
 
 def _count_repeated_blocks(soup: BeautifulSoup) -> int:
-    explicit_blocks = soup.select("[data-chapter-card], .chapter-card, li.chapter-item")
+    explicit_blocks = soup.select("[data-chapter-card], .chapter-card, .chapter-item, a.chapter-link, li.chapter-item")
     if explicit_blocks:
         return len(explicit_blocks)
 

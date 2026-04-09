@@ -74,7 +74,7 @@ def test_discover_source_prefers_official_directory_host():
     result = discover_source("Lambda Chi Alpha", StubSearchClient(query_results))
 
     assert result.fraternity_slug == "lambda-chi-alpha"
-    assert result.selected_url == "https://www.lambdachialpha.org/"
+    assert result.selected_url == "https://www.lambdachialpha.org/chapters/"
     assert result.confidence_tier == "high"
     assert result.candidates[0].score >= result.candidates[-1].score
 
@@ -234,6 +234,55 @@ def test_discover_source_uses_curated_source_hint_when_search_is_noisy():
     assert result.selected_url == "https://phigam.org/about/overview/our-chapters/"
     assert result.selected_confidence >= 0.8
     assert result.confidence_tier == "high"
+
+
+def test_discover_source_prefers_theta_chi_official_host_and_recovers_chapters_page():
+    responses = {
+        '"Theta Chi" national fraternity website': [
+            SearchResult(
+                title="Theta Chi Fraternity | About",
+                url="https://www.thetachi.org/about",
+                snippet="Official Theta Chi fraternity history and brotherhood.",
+                provider="bing_html",
+                rank=1,
+            ),
+            SearchResult(
+                title="Kappa Kappa Psi Chapter Listing",
+                url="https://www.kkpsi.org/about/chapters-districts/chapter-listing-2/",
+                snippet="Official Kappa Kappa Psi chapters and districts listing.",
+                provider="bing_html",
+                rank=2,
+            ),
+        ],
+        '"Theta Chi" chapter directory': [],
+        '"Theta Chi" chapter list': [],
+        '"Theta Chi" chapters': [],
+        '"Theta Chi" official fraternity': [],
+        '"Theta Chi" find a chapter': [],
+        '"Theta Chi" active chapters': [],
+        '"Theta Chi" chapter roll': [],
+    }
+
+    html_by_url = {
+        "https://www.thetachi.org/about": """
+        <html><body>
+          <nav>
+            <a href="/staff-directory">Staff Directory</a>
+            <a href="/chapters">Chapters</a>
+          </nav>
+        </body></html>
+        """
+    }
+
+    result = discover_source(
+        "Theta Chi",
+        StubSearchClient(responses),
+        html_fetcher=lambda url: html_by_url.get(url),
+    )
+
+    assert result.selected_url == "https://www.thetachi.org/chapters"
+    assert result.selected_candidate_rationale == "recovered_same_host_directory_link"
+    assert not any(candidate.url == "https://www.kkpsi.org/about/chapters-districts/chapter-listing-2/" and candidate.score >= 0.6 for candidate in result.candidates)
 
 
 def test_discover_source_uses_verified_registry_before_search():
@@ -607,4 +656,148 @@ def test_discover_source_prefers_curated_ato_map_over_generic_root():
     assert result.source_provenance == "search"
     assert result.fallback_reason == "verified_source_invalid"
     assert any(step.get("step") == "selected_curated_hint" for step in result.resolution_trace)
+
+
+def test_discover_source_prefers_generic_chapter_list_over_about_page_without_hint():
+    responses = {
+        '"Theta Chi" national fraternity website': [
+            SearchResult(
+                title="About | Theta Chi",
+                url="https://www.thetachi.org/about",
+                snippet="Learn about Theta Chi fraternity and its history.",
+                provider="brave_html",
+                rank=1,
+            )
+        ],
+        '"Theta Chi" fraternity national website': [],
+        '"Theta Chi" chapter directory': [],
+        '"Theta Chi" chapter list': [
+            SearchResult(
+                title="Chapters | Theta Chi",
+                url="https://www.thetachi.org/chapters",
+                snippet="Browse active chapters and chapter pages across the fraternity.",
+                provider="brave_html",
+                rank=1,
+            )
+        ],
+        '"Theta Chi" chapters': [],
+        '"Theta Chi" official fraternity': [],
+        '"Theta Chi" find a chapter': [],
+        '"Theta Chi" active chapters': [],
+        '"Theta Chi" chapter roll': [],
+        '"TC" national fraternity website': [],
+        '"TC" fraternity national website': [],
+        '"TC" chapter directory': [],
+        '"TC" chapter list': [],
+        '"TC" chapters': [],
+        '"TC" official fraternity': [],
+        '"TC" find a chapter': [],
+        '"TC" active chapters': [],
+        '"TC" chapter roll': [],
+    }
+
+    result = discover_source("Theta Chi", StubSearchClient(responses))
+
+    assert result.selected_url == "https://www.thetachi.org/chapters"
+    assert result.source_provenance == "search"
+    assert result.selected_candidate_rationale == "selected_search_candidate"
+
+
+def test_discover_source_recovers_same_host_chapter_link_from_generic_about_page():
+    responses = {
+        '"Theta Chi" national fraternity website': [
+            SearchResult(
+                title="About | Theta Chi",
+                url="https://www.thetachi.org/about",
+                snippet="Learn about Theta Chi fraternity and its history.",
+                provider="brave_html",
+                rank=1,
+            )
+        ],
+        '"Theta Chi" fraternity national website': [],
+        '"Theta Chi" chapter directory': [],
+        '"Theta Chi" chapter list': [],
+        '"Theta Chi" chapters': [],
+        '"Theta Chi" official fraternity': [],
+        '"Theta Chi" find a chapter': [],
+        '"Theta Chi" active chapters': [],
+        '"Theta Chi" chapter roll': [],
+        '"TC" national fraternity website': [],
+        '"TC" fraternity national website': [],
+        '"TC" chapter directory': [],
+        '"TC" chapter list': [],
+        '"TC" chapters': [],
+        '"TC" official fraternity': [],
+        '"TC" find a chapter': [],
+        '"TC" active chapters': [],
+        '"TC" chapter roll': [],
+    }
+
+    def fetcher(_: str) -> str:
+        return """
+        <html>
+          <body>
+            <nav>
+              <a href="/about">About</a>
+              <a href="/chapters">Chapters</a>
+              <a href="/contact">Contact</a>
+            </nav>
+          </body>
+        </html>
+        """
+
+    result = discover_source("Theta Chi", StubSearchClient(responses), html_fetcher=fetcher)
+
+    assert result.selected_url == "https://www.thetachi.org/chapters"
+    assert result.selected_candidate_rationale == "recovered_same_host_directory_link"
+    assert any(step.get("step") == "recovered_same_host_directory_link" for step in result.resolution_trace)
+
+
+def test_discover_source_same_host_recovery_prefers_chapters_over_staff_directory():
+    responses = {
+        '"Theta Chi" national fraternity website': [
+            SearchResult(
+                title="Theta Chi",
+                url="https://www.thetachi.org/",
+                snippet="Theta Chi fraternity official website.",
+                provider="brave_html",
+                rank=1,
+            )
+        ],
+        '"Theta Chi" fraternity national website': [],
+        '"Theta Chi" chapter directory': [],
+        '"Theta Chi" chapter list': [],
+        '"Theta Chi" chapters': [],
+        '"Theta Chi" official fraternity': [],
+        '"Theta Chi" find a chapter': [],
+        '"Theta Chi" active chapters': [],
+        '"Theta Chi" chapter roll': [],
+        '"TC" national fraternity website': [],
+        '"TC" fraternity national website': [],
+        '"TC" chapter directory': [],
+        '"TC" chapter list': [],
+        '"TC" chapters': [],
+        '"TC" official fraternity': [],
+        '"TC" find a chapter': [],
+        '"TC" active chapters': [],
+        '"TC" chapter roll': [],
+    }
+
+    def fetcher(_: str) -> str:
+        return """
+        <html>
+          <body>
+            <nav>
+              <a href="/staff-directory">Staff Directory</a>
+              <a href="/chapters">Chapters</a>
+              <a href="/expansion">Start a Chapter</a>
+            </nav>
+          </body>
+        </html>
+        """
+
+    result = discover_source("Theta Chi", StubSearchClient(responses), html_fetcher=fetcher)
+
+    assert result.selected_url == "https://www.thetachi.org/chapters"
+    assert result.selected_candidate_rationale == "recovered_same_host_directory_link"
 

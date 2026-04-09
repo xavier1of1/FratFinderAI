@@ -106,7 +106,7 @@ export async function listChapters(params: {
         LIMIT 1
       ) latest_source ON TRUE
       WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.university_name ILIKE '%' || $1 || '%')
-      ORDER BY c.updated_at DESC
+      ORDER BY c.updated_at DESC, c.id DESC
       LIMIT $2 OFFSET $3
     `,
     [search, limit, offset]
@@ -361,6 +361,9 @@ export async function enqueueChapterReruns(params: {
           last_error,
           terminal_failure,
           priority,
+          queue_state,
+          blocked_reason,
+          terminal_outcome,
           completed_payload,
           claimed_by,
           claim_token,
@@ -379,6 +382,9 @@ export async function enqueueChapterReruns(params: {
           NULL,
           false,
           $3,
+          'actionable',
+          NULL,
+          NULL,
           '{}'::jsonb,
           NULL,
           NULL,
@@ -398,6 +404,9 @@ export async function enqueueChapterReruns(params: {
           last_error = NULL,
           terminal_failure = false,
           priority = GREATEST(field_jobs.priority, EXCLUDED.priority),
+          queue_state = 'actionable',
+          blocked_reason = NULL,
+          terminal_outcome = NULL,
           completed_payload = '{}'::jsonb,
           claimed_by = NULL,
           claim_token = NULL

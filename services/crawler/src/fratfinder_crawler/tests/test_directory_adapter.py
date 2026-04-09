@@ -149,3 +149,40 @@ def test_directory_adapter_extracts_repeated_list_chapter_entries():
     assert records[0].university_name == "Auburn University"
     assert len(stubs) == 5
     assert stubs[0].provenance == "directory_v1:repeated_list"
+
+
+def test_directory_adapter_extracts_mixed_structured_chapter_cards():
+    fixture = """
+    <section class="chapters-grid">
+      <div class="col-xs-12 col-sm-6 col-md-4 col-lg-3 chapter norwich-university alpha">
+        <div class="chapter-item">
+          <div class="chapter-logo"></div>
+          <h2>Alpha</h2>
+          <h3>Norwich University</h3>
+        </div>
+      </div>
+      <div class="col-xs-12 col-sm-6 col-md-4 col-lg-3 chapter university-of-rhode-island eta">
+        <a class="chapter-link" href="/eta">
+          <div class="chapter-logo"></div>
+          <h2>Eta</h2>
+          <h3>University of Rhode Island</h3>
+        </a>
+      </div>
+    </section>
+    """
+
+    records = DirectoryV1Adapter().parse(fixture, "https://www.thetachi.org/chapters")
+    stubs = DirectoryV1Adapter().parse_stubs(fixture, "https://www.thetachi.org/chapters")
+
+    assert len(records) == 2
+    assert {record.name for record in records} == {"Alpha", "Eta"}
+    eta_record = next(record for record in records if record.name == "Eta")
+    assert eta_record.university_name == "University of Rhode Island"
+    assert eta_record.website_url == "https://www.thetachi.org/eta"
+
+    assert len(stubs) == 2
+    alpha_stub = next(stub for stub in stubs if stub.chapter_name == "Alpha")
+    eta_stub = next(stub for stub in stubs if stub.chapter_name == "Eta")
+    assert alpha_stub.university_name == "Norwich University"
+    assert alpha_stub.detail_url == "https://www.thetachi.org/chapters"
+    assert eta_stub.outbound_chapter_url_candidate == "https://www.thetachi.org/eta"

@@ -21,7 +21,7 @@ from fratfinder_crawler.llm.classifier import classify_source_with_llm
 from fratfinder_crawler.llm.client import LLMUnavailableError
 from fratfinder_crawler.llm.extractor import ExtractionValidationError, extract_records_with_metadata
 from fratfinder_crawler.logging_utils import log_event
-from fratfinder_crawler.models import AmbiguousRecordError, CrawlMetrics, ExtractedChapter, ReviewItemCandidate
+from fratfinder_crawler.models import AmbiguousRecordError, CrawlMetrics, ExtractedChapter, ReviewItemCandidate, SourceClassification
 from fratfinder_crawler.normalization import normalize_record
 from fratfinder_crawler.orchestration.state import CrawlGraphState
 from fratfinder_crawler.orchestration.navigation import (
@@ -30,6 +30,7 @@ from fratfinder_crawler.orchestration.navigation import (
     extract_contacts_from_chapter_site,
     follow_chapter_detail_or_outbound,
 )
+from fratfinder_crawler.precision_tools import tool_directory_layout_profiler
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ class CrawlOrchestrator:
 
         graph.add_node("fetch_page", self._with_error_boundary(self._fetch_page))
         graph.add_node("analyze_page_structure", self._with_error_boundary(self._analyze_page_structure))
+        graph.add_node("profile_directory_layout", self._with_error_boundary(self._profile_directory_layout))
         graph.add_node("classify_source_type", self._with_error_boundary(self._classify_source_type))
         graph.add_node("detect_embedded_data", self._with_error_boundary(self._detect_embedded_data))
         graph.add_node("detect_chapter_index_mode", self._with_error_boundary(self._detect_chapter_index_mode))
@@ -105,7 +107,8 @@ class CrawlOrchestrator:
         graph.set_entry_point("fetch_page")
 
         graph.add_conditional_edges("fetch_page", self._has_error, {"ok": "analyze_page_structure", "error": "finalize"})
-        graph.add_conditional_edges("analyze_page_structure", self._has_error, {"ok": "classify_source_type", "error": "finalize"})
+        graph.add_conditional_edges("analyze_page_structure", self._has_error, {"ok": "profile_directory_layout", "error": "finalize"})
+        graph.add_conditional_edges("profile_directory_layout", self._has_error, {"ok": "classify_source_type", "error": "finalize"})
         graph.add_conditional_edges("classify_source_type", self._has_error, {"ok": "detect_embedded_data", "error": "finalize"})
         graph.add_conditional_edges("detect_embedded_data", self._has_error, {"ok": "detect_chapter_index_mode", "error": "finalize"})
         graph.add_conditional_edges("detect_chapter_index_mode", self._has_error, {"ok": "extract_chapter_stubs", "error": "finalize"})
@@ -149,12 +152,32 @@ class CrawlOrchestrator:
         )
         return {"page_analysis": analysis}
 
+    def _profile_directory_layout(self, state: CrawlGraphState) -> dict:
+        profile = tool_directory_layout_profiler(
+            html=state["html"],
+            page_url=state["source"].list_url,
+        )
+        log_event(
+            LOGGER,
+            "directory_layout_profiled",
+            run_id=state["run_id"],
+            source_slug=state["source"].source_slug,
+            decision=profile.decision,
+            confidence=profile.confidence,
+            layout_family=str(profile.metadata.get("layoutFamily") or "unclassified"),
+            recommended_strategy=str(profile.metadata.get("recommendedStrategy") or "review"),
+        )
+        return {"directory_layout_profile": profile.as_dict()}
+
     def _classify_source_type(self, state: CrawlGraphState) -> dict:
         settings = get_settings()
         heuristic_classification = classify_source(state["page_analysis"], llm_enabled=False)
-        classification = heuristic_classification
+        classification = self._apply_directory_layout_profile(
+            heuristic_classification,
+            state.get("directory_layout_profile"),
+        )
         llm_calls_used = state.get("llm_calls_used", 0)
-        decision_reason = "heuristic"
+        decision_reason = "directory_layout_profile" if classification != heuristic_classification else "heuristic"
 
         if heuristic_classification.confidence < 0.5 and settings.crawler_llm_enabled:
             embedded_preview = detect_embedded_data(state["html"], state["source"].list_url)
@@ -200,6 +223,31 @@ class CrawlOrchestrator:
             llm_calls_used=llm_calls_used,
         )
         return {"classification": classification, "llm_calls_used": llm_calls_used}
+
+    def _apply_directory_layout_profile(
+        self,
+        classification: SourceClassification,
+        profile: dict[str, Any] | None,
+    ) -> SourceClassification:
+        if not profile or str(profile.get("decision")) != "directory_layout_profiled":
+            return classification
+        metadata = profile.get("metadata") or {}
+        layout_family = str(metadata.get("layoutFamily") or "unclassified")
+        if layout_family == "unclassified":
+            return classification
+        recommended_strategy = str(metadata.get("recommendedStrategy") or classification.recommended_strategy or "repeated_block")
+        possible_data_locations = list(metadata.get("possibleDataLocations") or classification.possible_data_locations or [])
+        profile_confidence = float(profile.get("confidence") or 0.0)
+        if classification.page_type == "static_directory" and classification.confidence >= profile_confidence:
+            return classification
+        return SourceClassification(
+            page_type="static_directory",
+            confidence=max(classification.confidence, min(profile_confidence, 0.95)),
+            recommended_strategy=recommended_strategy,
+            needs_follow_links=False,
+            possible_data_locations=possible_data_locations,
+            classified_by="heuristic",
+        )
 
     def _detect_embedded_data(self, state: CrawlGraphState) -> dict:
         embedded_data = detect_embedded_data(state["html"], state["source"].list_url)

@@ -114,9 +114,15 @@ def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
 
 
 class _QueueTriageRepository:
-    def __init__(self, jobs: list[FieldJob], snippets_by_chapter: dict[str, list[str]] | None = None):
+    def __init__(
+        self,
+        jobs: list[FieldJob],
+        snippets_by_chapter: dict[str, list[str]] | None = None,
+        pending_field_jobs: set[tuple[str, str]] | None = None,
+    ):
         self.jobs = jobs
         self.snippets_by_chapter = snippets_by_chapter or {}
+        self.pending_field_jobs = pending_field_jobs or set()
         self.patched: list[dict[str, object]] = []
         self.repairs: list[dict[str, object]] = []
         self.repair_jobs: list[dict[str, object]] = []
@@ -133,6 +139,9 @@ class _QueueTriageRepository:
 
     def fetch_provenance_snippets(self, chapter_id: str) -> list[str]:
         return list(self.snippets_by_chapter.get(chapter_id, []))
+
+    def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
+        return (chapter_id, field_name) in self.pending_field_jobs
 
     def update_chapter_identity_repair(self, **kwargs: object) -> bool:
         self.repairs.append(dict(kwargs))
@@ -163,13 +172,14 @@ def _field_job(
     payload: dict[str, object] | None = None,
     source_slug: str | None = "alpha-main",
 ) -> FieldJob:
+    raw_payload = dict(payload or {"sourceSlug": source_slug})
     return FieldJob(
         id=f"{chapter_id}-{field_name}",
         chapter_id=chapter_id,
         chapter_slug=chapter_slug,
         chapter_name=chapter_name,
         field_name=field_name,
-        payload=payload or {"sourceSlug": source_slug},
+        payload=raw_payload,
         attempts=0,
         max_attempts=3,
         claim_token="",
@@ -184,6 +194,7 @@ def _field_job(
         crawl_run_id=11,
         field_states={},
         priority=0,
+        queue_state=str(raw_payload.get("queue_state") or "actionable"),
     )
 
 
@@ -230,6 +241,109 @@ def test_reconcile_field_job_queue_repairs_candidate_school_into_actionable():
     assert repo.patched[0]["payload_patch"]["chapterRepair"]["state"] == "queued"
 
 
+def test_reconcile_field_job_queue_defers_email_until_website_is_ready():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_require_confident_website_for_email=True,
+        crawler_search_dependency_wait_seconds=420,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_email",
+                university_name="Example University",
+            )
+        ],
+        pending_field_jobs={("chapter-1", "find_website")},
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+    )
+
+    assert triage["dependencyDeferred"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["status"] == "queued"
+    assert repo.patched[0]["scheduled_delay_seconds"] == 420
+    assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "defer_email_until_website"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "dependency_wait"
+
+
+def test_reconcile_field_job_queue_defers_email_when_website_is_missing_without_pending_job():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_require_confident_website_for_email=True,
+        crawler_search_dependency_wait_seconds=420,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_email",
+                university_name="Example University",
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+    )
+
+    assert triage["dependencyDeferred"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["status"] == "queued"
+    assert repo.patched[0]["scheduled_delay_seconds"] == 1800
+    assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "defer_email_without_website"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "website_required"
+
+
+def test_reconcile_field_job_queue_preserves_deferred_canonical_jobs():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_website",
+                university_name="Example University",
+                payload={
+                    "sourceSlug": "alpha-main",
+                    "queue_state": "deferred",
+                    "contactResolution": {"queueState": "deferred", "reasonCode": "provider_degraded"},
+                },
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+    )
+
+    assert triage["actionableRetained"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "keep_deferred"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "deferred"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "provider_degraded"
+    assert repo.patched[0]["scheduled_delay_seconds"] is None
+
+
 def test_process_chapter_repair_queue_promotes_canonical_and_unblocks_jobs():
     settings = SimpleNamespace(crawler_field_job_runtime_mode="langgraph_primary", crawler_field_job_graph_durability="sync", crawler_field_job_worker_id="repair-worker")
     service = CrawlService(settings)
@@ -268,3 +382,55 @@ def test_process_chapter_repair_queue_promotes_canonical_and_unblocks_jobs():
     assert repo.repairs[0]["university_name"] == "Example University"
     assert repo.completed_repair_jobs[0]["repair_state"] == "promoted_to_canonical_valid"
     assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
+
+
+def test_process_chapter_repair_queue_keeps_email_deferred_without_confident_website():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_field_job_worker_id="repair-worker",
+        crawler_search_require_confident_website_for_email=True,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_email",
+                university_name=None,
+                payload={"candidateSchoolName": "Example University", "sourceSlug": "alpha-main"},
+            )
+        ]
+    )
+    repo.claimable_repair_jobs.append(
+        SimpleNamespace(
+            id="repair-1",
+            chapter_id="chapter-1",
+            chapter_slug="chapter-1",
+            chapter_name="Alpha Test",
+            source_slug="alpha-main",
+            payload={"candidateSchoolName": "Example University", "sourceSlug": "alpha-main"},
+            attempts=1,
+            max_attempts=3,
+            priority=0,
+            claim_token="claim-1",
+            repair_state="running",
+            university_name=None,
+            website_url=None,
+            instagram_url=None,
+            contact_email=None,
+        )
+    )
+
+    summary = service._process_chapter_repair_queue(
+        repo,
+        source_slug="alpha-main",
+        limit=2,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-delta-gamma-main"),
+    )
+
+    assert summary["promotedToCanonical"] == 1
+    assert repo.completed_repair_jobs[0]["repair_state"] == "promoted_to_canonical_valid"
+    assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "defer_email_without_website"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "deferred"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "website_required"
+    assert repo.patched[0]["scheduled_delay_seconds"] == 1800

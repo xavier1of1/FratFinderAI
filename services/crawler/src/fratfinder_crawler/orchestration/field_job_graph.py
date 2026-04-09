@@ -256,7 +256,7 @@ class FieldJobGraphRuntime:
             self._worker_id,
             source_slug=self._source_slug,
             field_name=self._field_name,
-            require_confident_website_for_email=False,
+            require_confident_website_for_email=self._engine.require_confident_website_for_email,
         )
         if job is None:
             return {"terminal_reason": "no_job", "action": "none"}

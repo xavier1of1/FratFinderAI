@@ -1,3 +1,49 @@
+## [Unreleased]
+
+### Added
+- Added `infra/supabase/migrations/0027_school_policy_and_chapter_activity.sql` to introduce durable `school_greek_life_registry` and `fraternity_school_activity_cache` tables for campus policy and school-specific chapter activity validation.
+- Added a `purge_inactive_schools` request-graph stage plus crawler/UI state to expose school-policy and chapter-activity validation before contact enrichment is admitted.
+- Added precision helpers for campus policy, school chapter-list validation, site-scope classification, directory block matching, and Greek-string detection to support authoritative school/nationals-first validation.
+
+### Changed
+- Campus policy validation now runs from official school evidence only and reuses stored `unknown` results only when they came from a real official-school page, preventing stale or inconsistent legacy `unknown` rows from blocking fresh validation.
+- School-list validation now understands LSU-style tabbed scorecard layouts and follows strong same-host school links like `Community Scorecard` before making an inactive decision.
+- School matching is now stricter for `University of ...` names so wrong-school results like `Indiana University of Pennsylvania` do not count as `University of Pennsylvania`, while legitimate titles like `Theta Chi | University of Rhode Island` still match.
+- Authoritative-source resolution now persists sibling chapter field values when those sibling jobs are auto-completed from the same evidence, preventing `found` field states from being recorded without the actual contact value.
+- Instagram extraction now stays permissive for real chapter-website and nationals/provenance evidence with local chapter/school identity, while continuing to reject wrong-school, HQ-only, institutional, and garbage-handle matches.
+- Official-school search pages now reject school-branded Instagram handles unless the handle itself carries chapter/fraternity identity, preventing campus-wide school accounts from being written as chapter Instagram contacts.
+- Candidate sanitization now rejects bad Instagram path artifacts like `index.html`, and website verification now rejects map-export and archival URLs before they can be written as chapter websites.
+- Stress-run queue reconciliation now defers canonical email jobs whenever a confident website prerequisite is missing, even if no sibling website job is still pending, so email enrichment no longer sits falsely `actionable` after website discovery exhausts.
+- Chapter-repair promotion now preserves the same confident-website prerequisite for email jobs instead of automatically reactivating them after repair, preventing repaired chapters from reintroducing actionable-email queue leaks.
+- Stress-mode field-job processing now preserves deferred canonical jobs, honors provider hard-blocks mid-job, and reuses prerequisite defer states instead of reactivating them under later reconciliation passes.
+
+### Fixed
+- Fixed a queue-oscillation bug in historical triage where already deferred canonical jobs were being reset back to `actionable`, causing provider- and dependency-backed jobs to thrash instead of cooling down.
+- Fixed the field-job claim/runtime path so the `require_confident_website_for_email` policy is respected consistently by both the main engine claim loop and the LangGraph runtime.
+- Fixed the stress-harness queue tail so repaired or exhausted chapters no longer leave stranded actionable email jobs when website discovery is still missing.
+- Fixed the false inactive decision for Phi Gamma Delta at Louisiana State University by treating LSU’s Greek Life scorecard as an active fraternity roster instead of a generic community page.
+- Fixed low-yield rerun regressions that had previously written wrong-school Drexel/IUP data, archival WSU URLs, and other non-chapter artifacts into Theta Chi chapter records.
+- Fixed the live rerun cleanup path so legacy bad sample rows can be safely reset and reprocessed without carrying forward stale `unknown` school-policy decisions.
+
+### Validated
+- Validated school-policy and chapter-activity changes with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py -q`
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_precision_tools.py services/crawler/src/fratfinder_crawler/tests/test_request_graph_runtime.py -q`
+  - `pnpm --filter @fratfinder/web typecheck`
+- Ran focused live reruns for:
+  - `alpha-norwich-university`
+  - `kappa-university-of-pennsylvania`
+  - `alpha-omicron-washington-state-university`
+  - `beta-rho-chapter-louisiana-state-university`
+  The reruns no longer rewrote wrong-school, archival, or garbage contact values, and LSU remained `active` instead of being marked inactive.
+- Validated the large `stress-20260409-full` field-job cohort with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py -q`
+  - `docs/reports/stress/stress-20260409-post-preserve-deferred.out`
+  - `docs/reports/stress/stress-20260409-final-tail-drain.out`
+  - `docs/reports/stress/stress-20260409-post-email-prereq-fix.out`
+  - `docs/reports/stress/stress-20260409-final-clean-pass.out`
+  The stress cohort now drains to `0` actionable jobs, with the remaining queued work intentionally deferred behind provider health, chapter repair, or website prerequisites.
+
 ## [3.0.1] - 2026-04-06
 
 ### Added
@@ -21,6 +67,7 @@
 - Added `docs/Diagrams/CURRENT_IMPLEMENTED_QUEUE_ARCHITECTURE.md` as the implementation-accurate queue-system architecture view.
 
 ### Changed
+- Generic source discovery now searches `chapter list`, `chapters`, and `active chapters` variants and penalizes generic informational paths like `/about`, improving official chapter-directory selection without adding fraternity-specific hints.
 - Theta Xi source discovery now rejects stale hosted member-portal sources with no success history and prefers the official ThetaXi.org chapter directory hint instead of retrying the dead-end OmegaFi source.
 - `directory_v1` now extracts repeated `University – Chapter` list entries, which fixes Theta Xi-style national chapter pages that are plain repeated HTML lists instead of cards or tables.
 - The web source optimizer now requires fraternity-context matches before upgrading to a different generic chapter-listing candidate, preventing unrelated recovery jumps like the invalid Kappa Kappa Psi fallback observed during Theta Xi validation.

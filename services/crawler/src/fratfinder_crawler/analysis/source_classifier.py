@@ -40,7 +40,7 @@ def classify_source(page_analysis: PageAnalysis, llm_enabled: bool = False) -> S
             confidence=0.85 if page_analysis.repeated_block_count >= 2 else 0.7,
             recommended_strategy="repeated_block",
             needs_follow_links=False,
-            possible_data_locations=["[data-chapter-card]", ".chapter-card", "li.chapter-item"],
+            possible_data_locations=["[data-chapter-card]", ".chapter-card", ".chapter-item", "a.chapter-link", "li.chapter-item"],
             classified_by="heuristic",
         )
 

@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
 
@@ -23,7 +23,7 @@ import type {
 } from "@/lib/types";
 
 const DEFAULT_FIELD_JOB_RUNTIME_MODE = (() => {
-  const value = String(process.env.FIELD_JOB_RUNTIME_MODE ?? process.env["Agent:FIELD_JOB_RUNTIME_MODE"] ?? "langgraph_primary").trim();
+  const value = String(process.env.CRAWLER_V3_FIELD_JOB_RUNTIME_MODE ?? process.env.FIELD_JOB_RUNTIME_MODE ?? "langgraph_primary").trim();
   if (value === "legacy" || value === "langgraph_shadow" || value === "langgraph_primary") {
     return value;
   }
@@ -31,11 +31,11 @@ const DEFAULT_FIELD_JOB_RUNTIME_MODE = (() => {
 })();
 
 const DEFAULT_FIELD_JOB_GRAPH_DURABILITY = (() => {
-  const value = String(process.env.FIELD_JOB_GRAPH_DURABILITY ?? process.env["Agent:FIELD_JOB_GRAPH_DURABILITY"] ?? "async").trim();
+  const value = String(process.env.CRAWLER_V3_FIELD_JOB_GRAPH_DURABILITY ?? process.env.FIELD_JOB_GRAPH_DURABILITY ?? "sync").trim();
   if (value === "exit" || value === "async" || value === "sync") {
     return value;
   }
-  return "async";
+  return "sync";
 })();
 
 const V3_REQUEST_WORKER_ENABLED = String(process.env.CRAWLER_V3_ENABLED ?? "false").trim().toLowerCase() === "true";
@@ -102,10 +102,10 @@ async function runPythonCommand(args: string[], timeoutMs: number): Promise<Comm
         return;
       }
       if (process.platform === "win32" && child.pid) {
-        spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
           windowsHide: true,
           stdio: "ignore"
-        }).unref();
+        });
         return;
       }
       child.kill("SIGKILL");
@@ -235,52 +235,31 @@ function computeAdaptiveEnrichmentConfig(
     degradedCycleCount: number;
   }
 ): FraternityCrawlRequest["config"] {
-  const discovered = Number(progress.crawlRun?.recordsSeen ?? 0);
-  const queueSize = totalFieldJobs(progress.totals);
   const baseWorkers = Math.max(1, Number(baseConfig.fieldJobWorkers ?? 1));
   const baseLimit = Math.max(1, Number(baseConfig.fieldJobLimitPerCycle ?? 1));
-  const queuePressure = Math.max(queueSize, discovered);
+  const baseMaxCycles = Math.max(1, Number(baseConfig.maxEnrichmentCycles ?? 1));
 
   let effectiveWorkers = baseWorkers;
   let effectiveLimit = baseLimit;
-  let adaptiveMaxCycles = Math.max(1, Number(baseConfig.maxEnrichmentCycles ?? 1));
+  let adaptiveMaxCycles = baseMaxCycles;
   let budgetStrategy = "base";
-
-  if (queuePressure >= 300) {
-    effectiveWorkers = Math.max(effectiveWorkers, 10);
-    effectiveLimit = Math.max(effectiveLimit, 100);
-    adaptiveMaxCycles = Math.max(adaptiveMaxCycles, 72);
-    budgetStrategy = "high_volume";
-  } else if (queuePressure >= 150) {
-    effectiveWorkers = Math.max(effectiveWorkers, 8);
-    effectiveLimit = Math.max(effectiveLimit, 80);
-    adaptiveMaxCycles = Math.max(adaptiveMaxCycles, 48);
-    budgetStrategy = "medium_volume";
-  } else if (queuePressure >= 60) {
-    effectiveWorkers = Math.max(effectiveWorkers, 6);
-    effectiveLimit = Math.max(effectiveLimit, 60);
-    adaptiveMaxCycles = Math.max(adaptiveMaxCycles, 32);
-    budgetStrategy = "moderate_volume";
-  }
 
   if (cycleState.lowProgressCycles >= 2) {
     effectiveWorkers = Math.max(1, effectiveWorkers - 1);
-    effectiveLimit = Math.max(20, Math.floor(effectiveLimit * 0.8));
-    adaptiveMaxCycles = Math.min(96, adaptiveMaxCycles + 6);
-    budgetStrategy = `${budgetStrategy}_stabilized`;
+    effectiveLimit = Math.max(1, Math.floor(effectiveLimit * 0.8));
+    budgetStrategy = "stabilized";
   }
 
   if (cycleState.degradedCycleCount >= 2) {
     effectiveWorkers = Math.max(1, Math.min(effectiveWorkers, 4));
-    effectiveLimit = Math.max(20, Math.min(effectiveLimit, 50));
-    adaptiveMaxCycles = Math.min(96, adaptiveMaxCycles + 4);
-    budgetStrategy = `${budgetStrategy}_degraded`;
+    effectiveLimit = Math.max(1, Math.min(effectiveLimit, 50));
+    budgetStrategy = "degraded";
   }
 
   return {
     fieldJobWorkers: effectiveWorkers,
     fieldJobLimitPerCycle: effectiveLimit,
-    maxEnrichmentCycles: Math.min(96, adaptiveMaxCycles),
+    maxEnrichmentCycles: adaptiveMaxCycles,
     pauseMs: baseConfig.pauseMs,
     crawlPolicyVersion: baseConfig.crawlPolicyVersion ?? null
   };

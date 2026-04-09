@@ -18,6 +18,22 @@ describe("evaluateSourceUrl", () => {
     expect(evaluation.isWeak).toBe(false);
     expect(evaluation.score).toBeGreaterThan(0.55);
   });
+
+  it("scores generic about pages lower than chapter directories on the same host", () => {
+    const about = evaluateSourceUrl("https://www.thetachi.org/about");
+    const chapters = evaluateSourceUrl("https://www.thetachi.org/chapters");
+
+    expect(about.score).toBeLessThan(chapters.score);
+    expect(about.reasons.some((reason) => reason.startsWith("generic_info:"))).toBe(true);
+  });
+
+  it("scores shop pages lower than chapter directories", () => {
+    const store = evaluateSourceUrl("https://www.shopthetachi.com/");
+    const chapters = evaluateSourceUrl("https://www.thetachi.org/chapters");
+
+    expect(store.score).toBeLessThan(chapters.score);
+    expect(store.reasons.some((reason) => reason.startsWith("weak:"))).toBe(true);
+  });
 });
 
 describe("optimizeDiscoveredSource", () => {
@@ -84,5 +100,33 @@ describe("optimizeDiscoveredSource", () => {
 
     expect(optimized.selectedUrl).toBe("https://www.thetaxi.org/chapters-and-colonies/");
     expect(optimized.selectedUrl).not.toContain("kkpsi.org");
+  });
+
+  it("upgrades a generic about page to a same-fraternity chapter directory candidate", () => {
+    const discovery: FraternitySourceDiscoveryResult = {
+      fraternityName: "Theta Chi",
+      fraternitySlug: "theta-chi",
+      selectedUrl: "https://www.thetachi.org/about",
+      selectedConfidence: 0.99,
+      confidenceTier: "high",
+      sourceProvenance: "search",
+      fallbackReason: null,
+      resolutionTrace: [],
+      candidates: [
+        {
+          title: "Chapters | Theta Chi",
+          url: "https://www.thetachi.org/chapters",
+          snippet: "Browse active chapters and their chapter pages.",
+          provider: "search",
+          rank: 1,
+          score: 0.88,
+        }
+      ]
+    };
+
+    const optimized = optimizeDiscoveredSource(discovery);
+
+    expect(optimized.selectedUrl).toBe("https://www.thetachi.org/chapters");
+    expect(optimized.fallbackReason).toContain("upgraded_source_selection");
   });
 });

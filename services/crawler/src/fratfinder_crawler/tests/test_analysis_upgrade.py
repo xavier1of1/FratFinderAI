@@ -111,6 +111,56 @@ def test_single_explicit_chapter_card_still_classifies_as_directory():
     assert classification.recommended_strategy == "repeated_block"
 
 
+def test_div_chapter_items_and_anchor_cards_classify_as_directory():
+    html = """
+    <html><body>
+      <section class="chapters-grid">
+        <div class="chapter-item">
+          <h2>Alpha</h2>
+          <h3>Norwich University</h3>
+        </div>
+        <a class="chapter-link" href="/eta">
+          <h2>Eta</h2>
+          <h3>University of Rhode Island</h3>
+        </a>
+      </section>
+    </body></html>
+    """
+
+    analysis = analyze_page(html)
+    classification = classify_source(analysis, llm_enabled=False)
+
+    assert analysis.repeated_block_count >= 2
+    assert analysis.probable_page_role == "directory"
+    assert classification.page_type == "static_directory"
+    assert classification.recommended_strategy == "repeated_block"
+
+
+def test_crawl_orchestrator_uses_directory_layout_profile_for_linked_directory():
+    html = """
+    <html><body>
+      <h1>Chapters</h1>
+      <ul>
+        <li><a href="/alpha">State University - Alpha Chapter</a></li>
+        <li><a href="/beta">Central College - Beta Chapter</a></li>
+        <li><a href="/gamma">Northern Tech - Gamma Chapter</a></li>
+        <li><a href="/delta">Western State - Delta Chapter</a></li>
+        <li><a href="/epsilon">Coastal University - Epsilon Chapter</a></li>
+        <li><a href="/zeta">Valley University - Zeta Chapter</a></li>
+      </ul>
+    </body></html>
+    """
+
+    orchestrator = CrawlOrchestrator(FakeRepository(), FakeHttpClient(html), AdapterRegistry())
+    state = {"source": _source(), "run_id": 1, "html": html, "page_analysis": analyze_page(html)}
+
+    state.update(orchestrator._profile_directory_layout(state))
+    updates = orchestrator._classify_source_type(state)
+
+    assert updates["classification"].page_type == "static_directory"
+    assert updates["classification"].recommended_strategy == "repeated_block"
+
+
 def test_embedded_data_detector_flags_json_ld_chapter_data():
     html = """
     <html>

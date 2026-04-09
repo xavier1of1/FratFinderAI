@@ -1,0 +1,2 @@
+{"type": "run_started", "timestamp": "2026-04-09T03:20:24+00:00", "run_id": "smoke-harness", "args": {"run_id": "smoke-harness", "workers": 8, "max_workers": 12, "limit": 240, "batches": 0, "priority": 950, "graph_durability": "sync", "skip_enqueue": true, "run_preflight": false, "report_path": null}}
+{"type": "run_finished", "timestamp": "2026-04-09T03:20:24+00:00", "run_id": "smoke-harness", "summary": {"counts": {"job_count": 0, "chapter_count": 0, "done_jobs": 0, "failed_jobs": 0, "queued_actionable": 0, "queued_deferred": 0, "running_jobs": 0}, "breakdown": []}}
