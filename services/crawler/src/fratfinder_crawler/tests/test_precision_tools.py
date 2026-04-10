@@ -134,7 +134,131 @@ def test_official_domain_verifier_rejects_wrong_school_affiliation_page():
     )
 
     assert decision.decision == "reject"
+    assert any(reason in decision.reason_codes for reason in {"missing_target_school_context", "generic_school_directory"})
+
+
+def test_official_domain_verifier_rejects_wrong_school_dot_edu_even_with_supporting_context():
+    decision = tool_official_domain_verifier(
+        candidate_url="https://www.rider.edu/about/offices-services/student-involvement/fraternities-sororities/recognized/theta-chi",
+        fraternity_name="Theta Chi",
+        fraternity_slug="theta-chi",
+        chapter_name="Gamma Omega",
+        university_name="Vanderbilt University",
+        source_url="https://www.instagram.com/vandythetachi/",
+        document_url="https://www.instagram.com/vandythetachi/",
+        document_title="Theta Chi Vanderbilt (@vandythetachi)",
+        document_text="Theta Chi Vanderbilt social profile and recruitment updates.",
+    )
+
+    assert decision.decision == "reject"
     assert "missing_target_school_context" in decision.reason_codes
+
+
+def test_official_domain_verifier_accepts_school_chapter_profile_page():
+    decision = tool_official_domain_verifier(
+        candidate_url="https://www.uwyo.edu/fsl/aboutus/chapter-page/sigma-chi.html",
+        fraternity_name="Sigma Chi",
+        fraternity_slug="sigma-chi",
+        chapter_name="Gamma Xi",
+        university_name="University of Wyoming",
+        source_url="https://www.sigmachi.org/chapters/",
+        document_url="https://www.uwyo.edu/fsl/aboutus/chapter-page/sigma-chi.html",
+        document_title="Sigma Chi (Gamma Xi Chapter)",
+        document_text="University of Wyoming Fraternity and Sorority Life chapter profile for Sigma Chi.",
+        document_html='<title>Sigma Chi (Gamma Xi Chapter)</title><div>University of Wyoming</div><div>Fraternity and Sorority Life</div>',
+    )
+
+    assert decision.decision == "official_affiliation_page"
+    assert "chapter_specific_school_page" in decision.reason_codes
+
+
+def test_official_domain_verifier_accepts_school_org_portal_when_html_contains_identity():
+    decision = tool_official_domain_verifier(
+        candidate_url="https://terplink.umd.edu/organization/alpha-gamma-rho",
+        fraternity_name="Alpha Gamma Rho",
+        fraternity_slug="alpha-gamma-rho",
+        chapter_name="Alpha Theta",
+        university_name="University of Maryland-College Park",
+        source_url="https://alphagammarho.org/chapters",
+        document_url="https://terplink.umd.edu/organization/alpha-gamma-rho",
+        document_title=" - TerpLink",
+        document_text="Discover unique opportunities at TerpLink.",
+        document_html='{"organization":{"name":"Alpha Gamma Rho","websitekey":"alpha-gamma-rho","description":"Established in 1928, Alpha Gamma Rho is the premier agricultural fraternity at the University of Maryland.","email":"alphathetaumd@gmail.com"}}',
+    )
+
+    assert decision.decision == "official_affiliation_page"
+    assert "chapter_specific_school_page" in decision.reason_codes
+
+
+def test_official_domain_verifier_rejects_generic_school_directory_page():
+    decision = tool_official_domain_verifier(
+        candidate_url="https://studentaffairs.psu.edu/student-life/fraternity-sorority-life/councils-chapters/ifc",
+        fraternity_name="Alpha Tau Omega",
+        fraternity_slug="alpha-tau-omega",
+        chapter_name="Gamma Omega",
+        university_name="Penn State",
+        source_url="https://ato.org/chapters/",
+        document_url="https://studentaffairs.psu.edu/student-life/fraternity-sorority-life/councils-chapters/ifc",
+        document_title="Interfraternity Council | Penn State Student Affairs",
+        document_text="Interfraternity Council (IFC) is the governing body for fraternity chapters at Penn State.",
+        document_html="<title>Interfraternity Council | Penn State Student Affairs</title>",
+    )
+
+    assert decision.decision == "reject"
+    assert "generic_school_directory" in decision.reason_codes
+
+
+def test_official_domain_verifier_rejects_school_profile_without_target_fraternity_context():
+    decision = tool_official_domain_verifier(
+        candidate_url="https://law.utexas.edu/barristers/chapters-and-members/southern-methodist-university/",
+        fraternity_name="Sigma Chi",
+        fraternity_slug="sigma-chi",
+        chapter_name="Delta Mu",
+        university_name="Southern Methodist University",
+        source_url="https://sigmachi.org/chapters/",
+        document_url="https://law.utexas.edu/barristers/chapters-and-members/southern-methodist-university/",
+        document_title="Southern Methodist University Dedman School of Law | The Order of Barristers | Texas Law",
+        document_text="Southern Methodist University Dedman School of Law chapter page for the Order of Barristers at Texas Law.",
+        document_html="<title>Southern Methodist University Dedman School of Law | The Order of Barristers | Texas Law</title>",
+    )
+
+    assert decision.decision == "reject"
+
+
+def test_official_domain_verifier_rejects_generic_school_org_portal_root():
+    decision = tool_official_domain_verifier(
+        candidate_url="https://indstate.campuslabs.com/engage",
+        fraternity_name="Lambda Chi Alpha",
+        fraternity_slug="lambda-chi-alpha",
+        chapter_name="Iota-Epsilon",
+        university_name="Indiana State University",
+        source_url="https://www.lambdachi.org/chapters/iota-epsilon-indiana-state/",
+        document_url="https://indstate.campuslabs.com/engage",
+        document_title="Treehouse",
+        document_text="Discover unique opportunities at Treehouse! Find and attend events, browse and join organizations, and showcase your involvement.",
+        document_html='<meta name="description" content="Discover unique opportunities at Treehouse! Find and attend events, browse and join organizations, and showcase your involvement.">',
+    )
+
+    assert decision.decision == "reject"
+    assert "generic_school_directory" in decision.reason_codes
+
+
+def test_official_domain_verifier_rejects_missing_school_page():
+    decision = tool_official_domain_verifier(
+        candidate_url="https://sites.udel.edu/agr/",
+        fraternity_name="Alpha Gamma Rho",
+        fraternity_slug="alpha-gamma-rho",
+        chapter_name="Beta Upsilon",
+        university_name="University of Delaware",
+        source_url="https://alphagammarho.org/chapters",
+        document_url="https://sites.udel.edu/agr/",
+        document_title="WordPress Error",
+        document_text="This site is no longer available.",
+        document_html="<title>WordPress Error</title><div>This site is no longer available.</div>",
+    )
+
+    assert decision.decision == "reject"
+    assert "page_missing" in decision.reason_codes
 
 
 def test_campus_greek_life_policy_requires_official_school_source_for_ban():
@@ -393,3 +517,29 @@ def test_site_scope_classifier_marks_school_affiliation_pages():
     )
 
     assert decision.decision == "school_affiliation"
+
+
+def test_site_scope_classifier_keeps_standalone_fraternity_host_out_of_school_affiliation():
+    decision = tool_site_scope_classifier(
+        page_url="https://sdstateagr.com/contact",
+        title="Contact | SD State Agr",
+        text="Alpha Gamma Rho at South Dakota State University contact information and chapter house details.",
+        fraternity_name="Alpha Gamma Rho",
+        school_name="South Dakota State University",
+        chapter_name="Alpha Phi",
+    )
+
+    assert decision.decision == "chapter_site"
+
+
+def test_site_scope_classifier_does_not_treat_two_letter_fraternity_initials_as_identity():
+    decision = tool_site_scope_classifier(
+        page_url="https://www.uc.edu/about/digital-accessibility/contact-support/report-concern.html",
+        title="Report eAccessibility Concern - University of Cincinnati",
+        text="Use the form to report accessibility concerns to the University of Cincinnati digital accessibility team.",
+        fraternity_name="Sigma Chi",
+        school_name="University of Cincinnati",
+        chapter_name="Zeta Psi",
+    )
+
+    assert decision.decision != "chapter_site"

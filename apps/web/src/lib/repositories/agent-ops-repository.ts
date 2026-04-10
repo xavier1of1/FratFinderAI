@@ -1,7 +1,124 @@
 import { getDbPool } from "../db";
 import { normalizeInstagramUrl } from "../social";
-import type { AgentOpsSummary, ChapterEvidence, ChapterSearchRun, OpsAlert, ProvisionalChapter, RequestGraphRun } from "../types";
+import type { AccuracyRecoveryMetrics, AgentOpsSummary, ChapterEvidence, ChapterSearchRun, DecisionEvidence, OpsAlert, ProvisionalChapter, RequestGraphRun } from "../types";
 import { getOpsAlertSummary, listOpsAlerts } from "./ops-alert-repository";
+
+export async function getAccuracyRecoveryMetrics(): Promise<AccuracyRecoveryMetrics> {
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{
+    total_chapters: string | number;
+    complete_rows: string | number;
+    chapter_specific_contact_rows: string | number;
+    nationals_only_contact_rows: string | number;
+    inactive_validated_rows: string | number;
+    confirmed_absent_website_rows: string | number;
+    active_rows_with_chapter_specific_email: string | number;
+    active_rows_with_chapter_specific_instagram: string | number;
+    active_rows_with_any_contact: string | number;
+  }>(
+    `
+      WITH latest_evidence AS (
+        SELECT DISTINCT ON (ce.chapter_id, ce.field_name)
+          ce.chapter_id::text AS chapter_id,
+          ce.field_name,
+          ce.metadata,
+          ce.created_at
+        FROM chapter_evidence ce
+        WHERE ce.field_name IN ('contact_email', 'instagram_url', 'website_url', 'chapter_status')
+        ORDER BY ce.chapter_id, ce.field_name, ce.created_at DESC
+      ),
+      enriched AS (
+        SELECT
+          c.id::text AS chapter_id,
+          c.chapter_status,
+          c.field_states,
+          c.contact_provenance,
+          c.website_url,
+          c.contact_email,
+          c.instagram_url,
+          COALESCE(
+            c.contact_provenance -> 'contact_email' ->> 'contactProvenanceType',
+            le_email.metadata ->> 'contactSpecificity'
+          ) AS email_specificity,
+          COALESCE(
+            c.contact_provenance -> 'instagram_url' ->> 'contactProvenanceType',
+            le_instagram.metadata ->> 'contactSpecificity'
+          ) AS instagram_specificity,
+          COALESCE(
+            c.contact_provenance -> 'chapter_status' ->> 'sourceType',
+            le_status.metadata ->> 'evidenceSourceType'
+          ) AS chapter_status_source_type
+        FROM chapters c
+        LEFT JOIN latest_evidence le_email
+          ON le_email.chapter_id = c.id::text
+         AND le_email.field_name = 'contact_email'
+        LEFT JOIN latest_evidence le_instagram
+          ON le_instagram.chapter_id = c.id::text
+         AND le_instagram.field_name = 'instagram_url'
+        LEFT JOIN latest_evidence le_status
+          ON le_status.chapter_id = c.id::text
+         AND le_status.field_name = 'chapter_status'
+      )
+      SELECT
+        COUNT(*)::int AS total_chapters,
+        COUNT(*) FILTER (
+          WHERE chapter_status = 'active'
+            AND (
+              (contact_email IS NOT NULL AND email_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+              OR
+              (instagram_url IS NOT NULL AND instagram_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+            )
+        )::int AS complete_rows,
+        COUNT(*) FILTER (
+          WHERE chapter_status = 'active'
+            AND (
+              (contact_email IS NOT NULL AND email_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+              OR
+              (instagram_url IS NOT NULL AND instagram_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+            )
+        )::int AS chapter_specific_contact_rows,
+        COUNT(*) FILTER (
+          WHERE (contact_email IS NOT NULL OR instagram_url IS NOT NULL)
+            AND (contact_email IS NULL OR email_specificity = 'national_generic')
+            AND (instagram_url IS NULL OR instagram_specificity = 'national_generic')
+        )::int AS nationals_only_contact_rows,
+        COUNT(*) FILTER (
+          WHERE chapter_status = 'inactive'
+            AND chapter_status_source_type IN ('official_school', 'school_activity_validation', 'school_policy_validation')
+        )::int AS inactive_validated_rows,
+        COUNT(*) FILTER (
+          WHERE COALESCE(field_states ->> 'website_url', '') = 'confirmed_absent'
+        )::int AS confirmed_absent_website_rows,
+        COUNT(*) FILTER (
+          WHERE chapter_status = 'active'
+            AND contact_email IS NOT NULL
+            AND email_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter')
+        )::int AS active_rows_with_chapter_specific_email,
+        COUNT(*) FILTER (
+          WHERE chapter_status = 'active'
+            AND instagram_url IS NOT NULL
+            AND instagram_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter')
+        )::int AS active_rows_with_chapter_specific_instagram,
+        COUNT(*) FILTER (
+          WHERE chapter_status = 'active'
+            AND (website_url IS NOT NULL OR contact_email IS NOT NULL OR instagram_url IS NOT NULL)
+        )::int AS active_rows_with_any_contact
+      FROM enriched
+    `
+  );
+  const row = rows[0];
+  return {
+    totalChapters: Number(row?.total_chapters ?? 0),
+    completeRows: Number(row?.complete_rows ?? 0),
+    chapterSpecificContactRows: Number(row?.chapter_specific_contact_rows ?? 0),
+    nationalsOnlyContactRows: Number(row?.nationals_only_contact_rows ?? 0),
+    inactiveValidatedRows: Number(row?.inactive_validated_rows ?? 0),
+    confirmedAbsentWebsiteRows: Number(row?.confirmed_absent_website_rows ?? 0),
+    activeRowsWithChapterSpecificEmail: Number(row?.active_rows_with_chapter_specific_email ?? 0),
+    activeRowsWithChapterSpecificInstagram: Number(row?.active_rows_with_chapter_specific_instagram ?? 0),
+    activeRowsWithAnyContact: Number(row?.active_rows_with_any_contact ?? 0)
+  };
+}
 
 export async function listRequestGraphRuns(limit = 100): Promise<RequestGraphRun[]> {
   const dbPool = getDbPool();
@@ -112,7 +229,19 @@ export async function listChapterEvidence(limit = 150): Promise<ChapterEvidence[
   return rows.map((row) => ({
     ...row,
     confidence: row.confidence === null ? null : Number(row.confidence),
-    metadata: row.metadata ?? {}
+    metadata: row.metadata ?? {},
+    decisionEvidence: row.metadata
+      ? {
+          decisionStage: typeof row.metadata.decisionStage === "string" ? row.metadata.decisionStage : "",
+          evidenceUrl: typeof row.metadata.supportingPageUrl === "string" ? row.metadata.supportingPageUrl : null,
+          sourceType: typeof row.metadata.evidenceSourceType === "string" ? row.metadata.evidenceSourceType : null,
+          pageScope: typeof row.metadata.pageScope === "string" ? row.metadata.pageScope as DecisionEvidence["pageScope"] : null,
+          contactSpecificity: typeof row.metadata.contactSpecificity === "string" ? row.metadata.contactSpecificity as DecisionEvidence["contactSpecificity"] : null,
+          confidence: typeof row.metadata.supportingConfidence === "number" ? row.metadata.supportingConfidence : null,
+          reasonCode: typeof row.metadata.reasonCode === "string" ? row.metadata.reasonCode : null,
+          metadata: row.metadata
+        }
+      : null
   }));
 }
 
@@ -265,7 +394,7 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
   );
 
   const row = rows[0];
-  const opsAlerts = await getOpsAlertSummary();
+  const [opsAlerts, accuracyRecovery] = await Promise.all([getOpsAlertSummary(), getAccuracyRecoveryMetrics()]);
   return {
     requestQueueQueued: Number(row?.request_queue_queued ?? 0),
     requestQueueRunning: Number(row?.request_queue_running ?? 0),
@@ -304,6 +433,7 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
     chapterValidityRepairable: Number(row?.chapter_validity_repairable ?? 0),
     chapterValidityBlockedInvalid: Number(row?.chapter_validity_blocked_invalid ?? 0),
     chapterValidityBlockedRepairable: Number(row?.chapter_validity_blocked_repairable ?? 0),
+    accuracyRecovery,
     opsAlertsOpen: opsAlerts.openTotal,
     opsAlertsCritical: opsAlerts.openCritical,
     opsAlertsWarning: opsAlerts.openWarning,

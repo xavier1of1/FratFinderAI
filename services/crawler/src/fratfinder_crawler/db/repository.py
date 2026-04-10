@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -10,12 +11,29 @@ from psycopg.types.json import Jsonb
 from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
 from fratfinder_crawler.contracts import ContractValidator
 from fratfinder_crawler.models import (
+    AccuracyRecoveryMetrics,
     ChapterActivityRecord,
     ChapterEvidenceRecord,
     ChapterRepairJob,
+    CONTACT_SPECIFICITY_AMBIGUOUS,
+    CONTACT_SPECIFICITY_CHAPTER,
+    CONTACT_SPECIFICITY_NATIONAL_CHAPTER,
+    CONTACT_SPECIFICITY_NATIONAL_GENERIC,
+    CONTACT_SPECIFICITY_SCHOOL,
+    CONTACT_SPECIFICITY_VALUES,
     CrawlMetrics,
+    DecisionEvidence,
+    DECISION_OUTCOME_ACCEPTED,
+    DECISION_OUTCOME_DEFERRED,
+    DECISION_OUTCOME_REJECTED,
+    DECISION_OUTCOME_REVIEW_REQUIRED,
     EpochMetric,
     ExistingSourceCandidate,
+    FIELD_RESOLUTION_CONFIRMED_ABSENT,
+    FIELD_RESOLUTION_DEFERRED,
+    FIELD_RESOLUTION_INACTIVE,
+    FIELD_RESOLUTION_MISSING,
+    FIELD_RESOLUTION_RESOLVED,
     FrontierItem,
     FieldJob,
     FieldJobDecision,
@@ -26,8 +44,16 @@ from fratfinder_crawler.models import (
     FIELD_JOB_VERIFY_SCHOOL,
     FIELD_JOB_VERIFY_WEBSITE,
     FIELD_JOB_TYPES,
+    NationalProfileRecord,
     NormalizedChapter,
     PageObservation,
+    PAGE_SCOPE_CHAPTER_SITE,
+    PAGE_SCOPE_DIRECTORY,
+    PAGE_SCOPE_NATIONALS_CHAPTER,
+    PAGE_SCOPE_NATIONALS_GENERIC,
+    PAGE_SCOPE_SCHOOL_AFFILIATION,
+    PAGE_SCOPE_UNRELATED,
+    PAGE_SCOPE_VALUES,
     ProvenanceRecord,
     ProvisionalChapterRecord,
     RewardEvent,
@@ -84,10 +110,195 @@ def _normalize_school_slug(value: Any) -> str | None:
     return normalized or None
 
 
+def _normalize_page_scope(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if normalized in PAGE_SCOPE_VALUES:
+        return normalized
+    return PAGE_SCOPE_UNRELATED
+
+
+def _normalize_contact_specificity(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if normalized in CONTACT_SPECIFICITY_VALUES:
+        return normalized
+    return CONTACT_SPECIFICITY_AMBIGUOUS
+
+
+def _field_resolution_state_from_value(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"found", "resolved"}:
+        return FIELD_RESOLUTION_RESOLVED
+    if normalized == "inactive":
+        return FIELD_RESOLUTION_INACTIVE
+    if normalized == "confirmed_absent":
+        return FIELD_RESOLUTION_CONFIRMED_ABSENT
+    if normalized == "deferred":
+        return FIELD_RESOLUTION_DEFERRED
+    return FIELD_RESOLUTION_MISSING
+
+
+def _decision_outcome_from_status(status: Any) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"updated", "verified", "resolved_from_authoritative_source"}:
+        return DECISION_OUTCOME_ACCEPTED
+    if normalized in {"review_required"}:
+        return DECISION_OUTCOME_REVIEW_REQUIRED
+    if normalized in {"provider_degraded", "confirmed_absent"}:
+        return DECISION_OUTCOME_DEFERRED
+    return DECISION_OUTCOME_REJECTED
+
+
+def _host(url: str | None) -> str:
+    return (urlparse(str(url or "")).netloc or "").lower()
+
+
+def _is_root_like(url: str | None) -> bool:
+    parsed = urlparse(str(url or ""))
+    path = (parsed.path or "").strip("/")
+    return path == ""
+
+
+def _build_decision_evidence(
+    completed_payload: dict[str, Any] | None,
+    *,
+    fallback_confidence: float | None = None,
+    fallback_reason_code: str | None = None,
+) -> DecisionEvidence:
+    payload = completed_payload or {}
+    raw = payload.get("resolutionEvidence")
+    if isinstance(raw, dict):
+        return DecisionEvidence(
+            decision_stage=str(raw.get("decisionStage") or payload.get("field") or "field_job_resolution"),
+            evidence_url=str(raw.get("evidenceUrl") or payload.get("source_url") or payload.get("sourceUrl") or "").strip() or None,
+            source_type=str(raw.get("sourceType") or "").strip() or None,
+            page_scope=_normalize_page_scope(raw.get("pageScope")),
+            contact_specificity=_normalize_contact_specificity(raw.get("contactSpecificity")),
+            confidence=float(raw.get("confidence")) if raw.get("confidence") is not None else fallback_confidence,
+            reason_code=str(raw.get("reasonCode") or payload.get("reasonCode") or fallback_reason_code or "").strip() or None,
+            metadata=dict(raw.get("metadata") or {}),
+        )
+    return DecisionEvidence(
+        decision_stage=str(payload.get("field") or "field_job_resolution"),
+        evidence_url=str(payload.get("source_url") or payload.get("sourceUrl") or "").strip() or None,
+        page_scope=PAGE_SCOPE_UNRELATED,
+        contact_specificity=CONTACT_SPECIFICITY_AMBIGUOUS,
+        confidence=fallback_confidence,
+        reason_code=str(payload.get("reasonCode") or fallback_reason_code or "").strip() or None,
+        metadata={},
+    )
+
+
+def _build_contact_provenance_patch(
+    *,
+    chapter_updates: dict[str, str] | None,
+    field_state_updates: dict[str, str] | None,
+    completed_payload: dict[str, Any] | None,
+    provenance_records: list[ProvenanceRecord] | None,
+) -> dict[str, Any]:
+    chapter_updates = chapter_updates or {}
+    field_state_updates = field_state_updates or {}
+    provenance_records = provenance_records or []
+    if not chapter_updates and not field_state_updates:
+        return {}
+
+    decision = _build_decision_evidence(completed_payload, fallback_reason_code=str((completed_payload or {}).get("reasonCode") or "") or None)
+    records_by_field = {record.field_name: record for record in provenance_records}
+    patch: dict[str, Any] = {}
+
+    for field_name, value in chapter_updates.items():
+        record = records_by_field.get(field_name)
+        evidence_url = (
+            decision.evidence_url
+            or (record.source_url if record is not None else None)
+            or str((completed_payload or {}).get("source_url") or (completed_payload or {}).get("sourceUrl") or "").strip()
+            or None
+        )
+        patch[field_name] = {
+            "supportingPageUrl": evidence_url,
+            "supportingPageScope": decision.page_scope,
+            "contactProvenanceType": decision.contact_specificity,
+            "decisionStage": decision.decision_stage,
+            "sourceType": decision.source_type,
+            "reasonCode": decision.reason_code,
+            "confidence": round(float(record.confidence if record is not None else (decision.confidence or 0.0)), 4),
+            "decisionOutcome": _decision_outcome_from_status((completed_payload or {}).get("status")),
+            "fieldResolutionState": _field_resolution_state_from_value(field_state_updates.get(field_name)),
+            "candidateValue": value,
+            "updatedAt": datetime.utcnow().isoformat(),
+        }
+
+    if "chapter_status" in chapter_updates:
+        patch["chapter_status"] = {
+            "supportingPageUrl": decision.evidence_url,
+            "supportingPageScope": decision.page_scope,
+            "contactProvenanceType": decision.contact_specificity,
+            "decisionStage": decision.decision_stage,
+            "sourceType": decision.source_type,
+            "reasonCode": decision.reason_code,
+            "confidence": round(float(decision.confidence or 0.0), 4),
+            "decisionOutcome": _decision_outcome_from_status((completed_payload or {}).get("status")),
+            "fieldResolutionState": _field_resolution_state_from_value(field_state_updates.get("chapter_status")),
+            "candidateValue": chapter_updates["chapter_status"],
+            "updatedAt": datetime.utcnow().isoformat(),
+        }
+
+    return patch
+
+
 class CrawlerRepository:
     def __init__(self, connection: psycopg.Connection):
         self._connection = connection
         self._contracts = ContractValidator()
+
+    def _upsert_national_profile_from_verified_source(
+        self,
+        cursor: psycopg.Cursor,
+        *,
+        fraternity_slug: str,
+        fraternity_name: str,
+        national_url: str,
+        confidence: float,
+        origin: str | None,
+        http_status: int | None,
+        is_active: bool,
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        cursor.execute(
+            """
+            INSERT INTO national_profiles (
+                fraternity_slug,
+                fraternity_name,
+                national_url,
+                national_url_confidence,
+                national_url_provenance_type,
+                metadata
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (fraternity_slug)
+            DO UPDATE SET
+                fraternity_name = EXCLUDED.fraternity_name,
+                national_url = EXCLUDED.national_url,
+                national_url_confidence = EXCLUDED.national_url_confidence,
+                national_url_provenance_type = EXCLUDED.national_url_provenance_type,
+                metadata = COALESCE(national_profiles.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+                updated_at = NOW()
+            """,
+            (
+                fraternity_slug,
+                fraternity_name,
+                national_url,
+                max(0.0, min(float(confidence), 0.99)),
+                str(origin or "verified_source_registry"),
+                Jsonb(
+                    {
+                        "verifiedSourceOrigin": origin,
+                        "httpStatus": http_status,
+                        "isActive": bool(is_active),
+                        "verifiedSourceMetadata": metadata or {},
+                    }
+                ),
+            ),
+        )
 
     def load_sources(self, source_slug: str | None = None) -> list[SourceRecord]:
         base_query = """
@@ -268,6 +479,17 @@ class CrawlerRepository:
                 ),
             )
             row = cursor.fetchone()
+            self._upsert_national_profile_from_verified_source(
+                cursor,
+                fraternity_slug=fraternity_slug,
+                fraternity_name=fraternity_name,
+                national_url=national_url,
+                confidence=confidence,
+                origin=origin,
+                http_status=http_status,
+                is_active=is_active,
+                metadata=metadata,
+            )
         self._connection.commit()
         return VerifiedSourceRecord(
             fraternity_slug=row["fraternity_slug"],
@@ -350,6 +572,238 @@ class CrawlerRepository:
                 )
             )
         return candidates
+
+    def list_national_profiles(self, limit: int = 250) -> list[NationalProfileRecord]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    national_url_confidence,
+                    national_url_provenance_type,
+                    national_url_reason_code,
+                    contact_email,
+                    contact_email_confidence,
+                    contact_email_provenance_type,
+                    contact_email_reason_code,
+                    instagram_url,
+                    instagram_confidence,
+                    instagram_provenance_type,
+                    instagram_reason_code,
+                    phone,
+                    phone_confidence,
+                    phone_provenance_type,
+                    phone_reason_code,
+                    address_text,
+                    address_confidence,
+                    address_provenance_type,
+                    address_reason_code,
+                    metadata,
+                    created_at::text AS created_at,
+                    updated_at::text AS updated_at
+                FROM national_profiles
+                ORDER BY fraternity_name ASC
+                LIMIT %s
+                """,
+                (max(1, limit),),
+            )
+            rows = cursor.fetchall()
+        return [
+            NationalProfileRecord(
+                fraternity_slug=row["fraternity_slug"],
+                fraternity_name=row["fraternity_name"],
+                national_url=row["national_url"],
+                national_url_confidence=float(row["national_url_confidence"] or 0.0),
+                national_url_provenance_type=row["national_url_provenance_type"],
+                national_url_reason_code=row["national_url_reason_code"],
+                contact_email=row["contact_email"],
+                contact_email_confidence=float(row["contact_email_confidence"] or 0.0),
+                contact_email_provenance_type=row["contact_email_provenance_type"],
+                contact_email_reason_code=row["contact_email_reason_code"],
+                instagram_url=row["instagram_url"],
+                instagram_confidence=float(row["instagram_confidence"] or 0.0),
+                instagram_provenance_type=row["instagram_provenance_type"],
+                instagram_reason_code=row["instagram_reason_code"],
+                phone=row["phone"],
+                phone_confidence=float(row["phone_confidence"] or 0.0),
+                phone_provenance_type=row["phone_provenance_type"],
+                phone_reason_code=row["phone_reason_code"],
+                address_text=row["address_text"],
+                address_confidence=float(row["address_confidence"] or 0.0),
+                address_provenance_type=row["address_provenance_type"],
+                address_reason_code=row["address_reason_code"],
+                metadata=row["metadata"] or {},
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def upsert_national_profile(
+        self,
+        *,
+        fraternity_slug: str,
+        fraternity_name: str,
+        national_url: str,
+        national_url_confidence: float = 0.0,
+        national_url_provenance_type: str | None = None,
+        national_url_reason_code: str | None = None,
+        contact_email: str | None = None,
+        contact_email_confidence: float = 0.0,
+        contact_email_provenance_type: str | None = None,
+        contact_email_reason_code: str | None = None,
+        instagram_url: str | None = None,
+        instagram_confidence: float = 0.0,
+        instagram_provenance_type: str | None = None,
+        instagram_reason_code: str | None = None,
+        phone: str | None = None,
+        phone_confidence: float = 0.0,
+        phone_provenance_type: str | None = None,
+        phone_reason_code: str | None = None,
+        address_text: str | None = None,
+        address_confidence: float = 0.0,
+        address_provenance_type: str | None = None,
+        address_reason_code: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> NationalProfileRecord:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO national_profiles (
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    national_url_confidence,
+                    national_url_provenance_type,
+                    national_url_reason_code,
+                    contact_email,
+                    contact_email_confidence,
+                    contact_email_provenance_type,
+                    contact_email_reason_code,
+                    instagram_url,
+                    instagram_confidence,
+                    instagram_provenance_type,
+                    instagram_reason_code,
+                    phone,
+                    phone_confidence,
+                    phone_provenance_type,
+                    phone_reason_code,
+                    address_text,
+                    address_confidence,
+                    address_provenance_type,
+                    address_reason_code,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (fraternity_slug)
+                DO UPDATE SET
+                    fraternity_name = EXCLUDED.fraternity_name,
+                    national_url = EXCLUDED.national_url,
+                    national_url_confidence = EXCLUDED.national_url_confidence,
+                    national_url_provenance_type = EXCLUDED.national_url_provenance_type,
+                    national_url_reason_code = EXCLUDED.national_url_reason_code,
+                    contact_email = COALESCE(EXCLUDED.contact_email, national_profiles.contact_email),
+                    contact_email_confidence = GREATEST(national_profiles.contact_email_confidence, EXCLUDED.contact_email_confidence),
+                    contact_email_provenance_type = COALESCE(EXCLUDED.contact_email_provenance_type, national_profiles.contact_email_provenance_type),
+                    contact_email_reason_code = COALESCE(EXCLUDED.contact_email_reason_code, national_profiles.contact_email_reason_code),
+                    instagram_url = COALESCE(EXCLUDED.instagram_url, national_profiles.instagram_url),
+                    instagram_confidence = GREATEST(national_profiles.instagram_confidence, EXCLUDED.instagram_confidence),
+                    instagram_provenance_type = COALESCE(EXCLUDED.instagram_provenance_type, national_profiles.instagram_provenance_type),
+                    instagram_reason_code = COALESCE(EXCLUDED.instagram_reason_code, national_profiles.instagram_reason_code),
+                    phone = COALESCE(EXCLUDED.phone, national_profiles.phone),
+                    phone_confidence = GREATEST(national_profiles.phone_confidence, EXCLUDED.phone_confidence),
+                    phone_provenance_type = COALESCE(EXCLUDED.phone_provenance_type, national_profiles.phone_provenance_type),
+                    phone_reason_code = COALESCE(EXCLUDED.phone_reason_code, national_profiles.phone_reason_code),
+                    address_text = COALESCE(EXCLUDED.address_text, national_profiles.address_text),
+                    address_confidence = GREATEST(national_profiles.address_confidence, EXCLUDED.address_confidence),
+                    address_provenance_type = COALESCE(EXCLUDED.address_provenance_type, national_profiles.address_provenance_type),
+                    address_reason_code = COALESCE(EXCLUDED.address_reason_code, national_profiles.address_reason_code),
+                    metadata = COALESCE(national_profiles.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+                    updated_at = NOW()
+                RETURNING
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    national_url_confidence,
+                    national_url_provenance_type,
+                    national_url_reason_code,
+                    contact_email,
+                    contact_email_confidence,
+                    contact_email_provenance_type,
+                    contact_email_reason_code,
+                    instagram_url,
+                    instagram_confidence,
+                    instagram_provenance_type,
+                    instagram_reason_code,
+                    phone,
+                    phone_confidence,
+                    phone_provenance_type,
+                    phone_reason_code,
+                    address_text,
+                    address_confidence,
+                    address_provenance_type,
+                    address_reason_code,
+                    metadata,
+                    created_at::text AS created_at,
+                    updated_at::text AS updated_at
+                """,
+                (
+                    fraternity_slug,
+                    fraternity_name,
+                    national_url,
+                    max(0.0, min(float(national_url_confidence), 0.99)),
+                    national_url_provenance_type,
+                    national_url_reason_code,
+                    contact_email,
+                    max(0.0, min(float(contact_email_confidence), 0.99)),
+                    contact_email_provenance_type,
+                    contact_email_reason_code,
+                    instagram_url,
+                    max(0.0, min(float(instagram_confidence), 0.99)),
+                    instagram_provenance_type,
+                    instagram_reason_code,
+                    phone,
+                    max(0.0, min(float(phone_confidence), 0.99)),
+                    phone_provenance_type,
+                    phone_reason_code,
+                    address_text,
+                    max(0.0, min(float(address_confidence), 0.99)),
+                    address_provenance_type,
+                    address_reason_code,
+                    Jsonb(metadata or {}),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return NationalProfileRecord(
+            fraternity_slug=row["fraternity_slug"],
+            fraternity_name=row["fraternity_name"],
+            national_url=row["national_url"],
+            national_url_confidence=float(row["national_url_confidence"] or 0.0),
+            national_url_provenance_type=row["national_url_provenance_type"],
+            national_url_reason_code=row["national_url_reason_code"],
+            contact_email=row["contact_email"],
+            contact_email_confidence=float(row["contact_email_confidence"] or 0.0),
+            contact_email_provenance_type=row["contact_email_provenance_type"],
+            contact_email_reason_code=row["contact_email_reason_code"],
+            instagram_url=row["instagram_url"],
+            instagram_confidence=float(row["instagram_confidence"] or 0.0),
+            instagram_provenance_type=row["instagram_provenance_type"],
+            instagram_reason_code=row["instagram_reason_code"],
+            phone=row["phone"],
+            phone_confidence=float(row["phone_confidence"] or 0.0),
+            phone_provenance_type=row["phone_provenance_type"],
+            phone_reason_code=row["phone_reason_code"],
+            address_text=row["address_text"],
+            address_confidence=float(row["address_confidence"] or 0.0),
+            address_provenance_type=row["address_provenance_type"],
+            address_reason_code=row["address_reason_code"],
+            metadata=row["metadata"] or {},
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     def get_school_policy(self, school_name: str | None) -> SchoolPolicyRecord | None:
         school_slug = _normalize_school_slug(school_name)
@@ -517,6 +971,113 @@ class CrawlerRepository:
             last_verified_at=row["last_verified_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+        )
+
+    def get_accuracy_recovery_metrics(self) -> AccuracyRecoveryMetrics:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH latest_evidence AS (
+                  SELECT DISTINCT ON (ce.chapter_id, ce.field_name)
+                    ce.chapter_id::text AS chapter_id,
+                    ce.field_name,
+                    ce.metadata,
+                    ce.source_url,
+                    ce.created_at
+                  FROM chapter_evidence ce
+                  WHERE ce.field_name IN ('contact_email', 'instagram_url', 'website_url', 'chapter_status')
+                  ORDER BY ce.chapter_id, ce.field_name, ce.created_at DESC
+                ),
+                enriched AS (
+                  SELECT
+                    c.id::text AS chapter_id,
+                    c.chapter_status,
+                    c.field_states,
+                    c.contact_provenance,
+                    c.website_url,
+                    c.contact_email,
+                    c.instagram_url,
+                    COALESCE(
+                      c.contact_provenance -> 'contact_email' ->> 'contactProvenanceType',
+                      le_email.metadata ->> 'contactSpecificity'
+                    ) AS email_specificity,
+                    COALESCE(
+                      c.contact_provenance -> 'instagram_url' ->> 'contactProvenanceType',
+                      le_instagram.metadata ->> 'contactSpecificity'
+                    ) AS instagram_specificity,
+                    COALESCE(
+                      c.contact_provenance -> 'chapter_status' ->> 'sourceType',
+                      le_status.metadata ->> 'evidenceSourceType'
+                    ) AS chapter_status_source_type
+                  FROM chapters c
+                  LEFT JOIN latest_evidence le_email
+                    ON le_email.chapter_id = c.id::text
+                   AND le_email.field_name = 'contact_email'
+                  LEFT JOIN latest_evidence le_instagram
+                    ON le_instagram.chapter_id = c.id::text
+                   AND le_instagram.field_name = 'instagram_url'
+                  LEFT JOIN latest_evidence le_status
+                    ON le_status.chapter_id = c.id::text
+                   AND le_status.field_name = 'chapter_status'
+                )
+                SELECT
+                  COUNT(*)::int AS total_chapters,
+                  COUNT(*) FILTER (
+                    WHERE chapter_status = 'active'
+                      AND (
+                        (contact_email IS NOT NULL AND email_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+                        OR
+                        (instagram_url IS NOT NULL AND instagram_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+                      )
+                  )::int AS complete_rows,
+                  COUNT(*) FILTER (
+                    WHERE chapter_status = 'active'
+                      AND (
+                        (contact_email IS NOT NULL AND email_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+                        OR
+                        (instagram_url IS NOT NULL AND instagram_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter'))
+                      )
+                  )::int AS chapter_specific_contact_rows,
+                  COUNT(*) FILTER (
+                    WHERE (contact_email IS NOT NULL OR instagram_url IS NOT NULL)
+                      AND (contact_email IS NULL OR email_specificity = 'national_generic')
+                      AND (instagram_url IS NULL OR instagram_specificity = 'national_generic')
+                  )::int AS nationals_only_contact_rows,
+                  COUNT(*) FILTER (
+                    WHERE chapter_status = 'inactive'
+                      AND chapter_status_source_type IN ('official_school', 'school_activity_validation', 'school_policy_validation')
+                  )::int AS inactive_validated_rows,
+                  COUNT(*) FILTER (
+                    WHERE COALESCE(field_states ->> 'website_url', '') = 'confirmed_absent'
+                  )::int AS confirmed_absent_website_rows,
+                  COUNT(*) FILTER (
+                    WHERE chapter_status = 'active'
+                      AND contact_email IS NOT NULL
+                      AND email_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter')
+                  )::int AS active_rows_with_chapter_specific_email,
+                  COUNT(*) FILTER (
+                    WHERE chapter_status = 'active'
+                      AND instagram_url IS NOT NULL
+                      AND instagram_specificity IN ('chapter_specific', 'school_specific', 'national_specific_to_chapter')
+                  )::int AS active_rows_with_chapter_specific_instagram,
+                  COUNT(*) FILTER (
+                    WHERE chapter_status = 'active'
+                      AND (website_url IS NOT NULL OR contact_email IS NOT NULL OR instagram_url IS NOT NULL)
+                  )::int AS active_rows_with_any_contact
+                FROM enriched
+                """
+            )
+            row = cursor.fetchone()
+        return AccuracyRecoveryMetrics(
+            complete_rows=int(row["complete_rows"] or 0),
+            chapter_specific_contact_rows=int(row["chapter_specific_contact_rows"] or 0),
+            nationals_only_contact_rows=int(row["nationals_only_contact_rows"] or 0),
+            inactive_validated_rows=int(row["inactive_validated_rows"] or 0),
+            confirmed_absent_website_rows=int(row["confirmed_absent_website_rows"] or 0),
+            active_rows_with_chapter_specific_email=int(row["active_rows_with_chapter_specific_email"] or 0),
+            active_rows_with_chapter_specific_instagram=int(row["active_rows_with_chapter_specific_instagram"] or 0),
+            active_rows_with_any_contact=int(row["active_rows_with_any_contact"] or 0),
+            total_chapters=int(row["total_chapters"] or 0),
         )
 
     def upsert_chapter_activity(
@@ -1142,6 +1703,12 @@ class CrawlerRepository:
     ) -> None:
         field_state_updates = field_state_updates or {}
         provenance_records = provenance_records or []
+        contact_provenance_patch = _build_contact_provenance_patch(
+            chapter_updates=chapter_updates,
+            field_state_updates=field_state_updates,
+            completed_payload=completed_payload,
+            provenance_records=provenance_records,
+        )
         with self._connection.transaction(), self._connection.cursor() as cursor:
             if chapter_updates or field_state_updates:
                 cursor.execute(
@@ -1159,6 +1726,7 @@ class CrawlerRepository:
                         university_name = COALESCE(university_name, %(university_name)s),
                         chapter_status = COALESCE(%(chapter_status)s, chapter_status),
                         field_states = COALESCE(field_states, '{}'::jsonb) || %(field_states)s,
+                        contact_provenance = COALESCE(contact_provenance, '{}'::jsonb) || %(contact_provenance)s,
                         updated_at = NOW()
                     WHERE id = %(chapter_id)s
                     """,
@@ -1170,6 +1738,7 @@ class CrawlerRepository:
                         "university_name": chapter_updates.get("university_name"),
                         "chapter_status": chapter_updates.get("chapter_status"),
                         "field_states": Jsonb(field_state_updates),
+                        "contact_provenance": Jsonb(contact_provenance_patch),
                     },
                 )
 
@@ -1177,6 +1746,7 @@ class CrawlerRepository:
             provider = completed_payload.get("provider") or completed_payload.get("source_provider")
             query = completed_payload.get("query")
             related_website_url = completed_payload.get("related_website_url")
+            decision_evidence = _build_decision_evidence(completed_payload)
 
             for record in provenance_records:
                 payload = asdict(record)
@@ -1262,6 +1832,14 @@ class CrawlerRepository:
                                 "runtime": "inline_v3",
                                 "completedStatus": completed_status,
                                 "fieldState": field_state_updates.get(record.field_name),
+                                "decisionStage": decision_evidence.decision_stage,
+                                "pageScope": decision_evidence.page_scope,
+                                "contactSpecificity": decision_evidence.contact_specificity,
+                                "evidenceSourceType": decision_evidence.source_type,
+                                "reasonCode": decision_evidence.reason_code,
+                                "supportingPageUrl": decision_evidence.evidence_url,
+                                "supportingConfidence": decision_evidence.confidence,
+                                **decision_evidence.metadata,
                             }
                         ),
                     },
@@ -1313,6 +1891,60 @@ class CrawlerRepository:
             "instagram_url": "inactive",
             "contact_email": "inactive",
         }
+        contact_provenance = {
+            "chapter_status": {
+                "supportingPageUrl": evidence_url,
+                "supportingPageScope": PAGE_SCOPE_SCHOOL_AFFILIATION,
+                "contactProvenanceType": CONTACT_SPECIFICITY_SCHOOL,
+                "decisionStage": "chapter_activity_validation",
+                "sourceType": evidence_source_type,
+                "reasonCode": reason_code,
+                "confidence": 0.95,
+                "decisionOutcome": DECISION_OUTCOME_ACCEPTED,
+                "fieldResolutionState": FIELD_RESOLUTION_INACTIVE,
+                "candidateValue": "inactive",
+                "updatedAt": datetime.utcnow().isoformat(),
+            },
+            "website_url": {
+                "supportingPageUrl": evidence_url,
+                "supportingPageScope": PAGE_SCOPE_SCHOOL_AFFILIATION,
+                "contactProvenanceType": CONTACT_SPECIFICITY_SCHOOL,
+                "decisionStage": "chapter_activity_validation",
+                "sourceType": evidence_source_type,
+                "reasonCode": reason_code,
+                "confidence": 0.95,
+                "decisionOutcome": DECISION_OUTCOME_ACCEPTED,
+                "fieldResolutionState": FIELD_RESOLUTION_INACTIVE,
+                "candidateValue": None,
+                "updatedAt": datetime.utcnow().isoformat(),
+            },
+            "instagram_url": {
+                "supportingPageUrl": evidence_url,
+                "supportingPageScope": PAGE_SCOPE_SCHOOL_AFFILIATION,
+                "contactProvenanceType": CONTACT_SPECIFICITY_SCHOOL,
+                "decisionStage": "chapter_activity_validation",
+                "sourceType": evidence_source_type,
+                "reasonCode": reason_code,
+                "confidence": 0.95,
+                "decisionOutcome": DECISION_OUTCOME_ACCEPTED,
+                "fieldResolutionState": FIELD_RESOLUTION_INACTIVE,
+                "candidateValue": None,
+                "updatedAt": datetime.utcnow().isoformat(),
+            },
+            "contact_email": {
+                "supportingPageUrl": evidence_url,
+                "supportingPageScope": PAGE_SCOPE_SCHOOL_AFFILIATION,
+                "contactProvenanceType": CONTACT_SPECIFICITY_SCHOOL,
+                "decisionStage": "chapter_activity_validation",
+                "sourceType": evidence_source_type,
+                "reasonCode": reason_code,
+                "confidence": 0.95,
+                "decisionOutcome": DECISION_OUTCOME_ACCEPTED,
+                "fieldResolutionState": FIELD_RESOLUTION_INACTIVE,
+                "candidateValue": None,
+                "updatedAt": datetime.utcnow().isoformat(),
+            },
+        }
         with self._connection.transaction(), self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -1323,10 +1955,11 @@ class CrawlerRepository:
                     instagram_url = NULL,
                     contact_email = NULL,
                     field_states = COALESCE(field_states, '{}'::jsonb) || %s,
+                    contact_provenance = COALESCE(contact_provenance, '{}'::jsonb) || %s,
                     updated_at = NOW()
                 WHERE id = %s
                 """,
-                (Jsonb(field_states), chapter_id),
+                (Jsonb(field_states), Jsonb(contact_provenance), chapter_id),
             )
             if crawl_run_id is not None:
                 cursor.execute("SELECT source_id FROM crawl_runs WHERE id = %s", (crawl_run_id,))
@@ -1396,6 +2029,11 @@ class CrawlerRepository:
                         {
                             "reasonCode": reason_code,
                             "evidenceSourceType": evidence_source_type,
+                            "decisionStage": "chapter_activity_validation",
+                            "pageScope": PAGE_SCOPE_SCHOOL_AFFILIATION,
+                            "contactSpecificity": CONTACT_SPECIFICITY_SCHOOL,
+                            "supportingPageUrl": evidence_url,
+                            "supportingConfidence": 0.95,
                             **(metadata or {}),
                         }
                     ),
@@ -1682,7 +2320,7 @@ class CrawlerRepository:
                 chapter_id=str(row["chapter_id"]),
                 chapter_slug=row["chapter_slug"],
                 chapter_name=row["chapter_name"],
-                field_name=row["field_name"],
+                field_name=self._normalize_field_job_name(str(row["field_name"] or "")),
                 payload=payload,
                 attempts=int(row["attempts"]),
                 max_attempts=int(row["max_attempts"]),
@@ -2342,6 +2980,12 @@ class CrawlerRepository:
     ) -> None:
         field_state_updates = field_state_updates or {}
         provenance_records = provenance_records or []
+        contact_provenance_patch = _build_contact_provenance_patch(
+            chapter_updates=chapter_updates,
+            field_state_updates=field_state_updates,
+            completed_payload=completed_payload,
+            provenance_records=provenance_records,
+        )
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
             if chapter_updates or field_state_updates:
@@ -2360,6 +3004,7 @@ class CrawlerRepository:
                         university_name = COALESCE(university_name, %(university_name)s),
                         chapter_status = COALESCE(%(chapter_status)s, chapter_status),
                         field_states = COALESCE(field_states, '{}'::jsonb) || %(field_states)s,
+                        contact_provenance = COALESCE(contact_provenance, '{}'::jsonb) || %(contact_provenance)s,
                         updated_at = NOW()
                     WHERE id = %(chapter_id)s
                     """,
@@ -2371,6 +3016,7 @@ class CrawlerRepository:
                         "university_name": chapter_updates.get("university_name"),
                         "chapter_status": chapter_updates.get("chapter_status"),
                         "field_states": Jsonb(field_state_updates),
+                        "contact_provenance": Jsonb(contact_provenance_patch),
                     },
                 )
 
@@ -2378,6 +3024,7 @@ class CrawlerRepository:
             provider = completed_payload.get("provider") or completed_payload.get("source_provider")
             query = completed_payload.get("query")
             related_website_url = completed_payload.get("related_website_url")
+            decision_evidence = _build_decision_evidence(completed_payload)
 
             for record in provenance_records:
                 payload = asdict(record)
@@ -2463,6 +3110,14 @@ class CrawlerRepository:
                                 "fieldJobId": job.id,
                                 "completedStatus": completed_status,
                                 "fieldState": field_state_updates.get(record.field_name),
+                                "decisionStage": decision_evidence.decision_stage,
+                                "pageScope": decision_evidence.page_scope,
+                                "contactSpecificity": decision_evidence.contact_specificity,
+                                "evidenceSourceType": decision_evidence.source_type,
+                                "reasonCode": decision_evidence.reason_code,
+                                "supportingPageUrl": decision_evidence.evidence_url,
+                                "supportingConfidence": decision_evidence.confidence,
+                                **decision_evidence.metadata,
                             }
                         ),
                     },

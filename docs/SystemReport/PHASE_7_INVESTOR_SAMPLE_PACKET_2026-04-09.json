@@ -1,0 +1,2563 @@
+{
+  "generated_at": "2026-04-09T23:47:53+00:00",
+  "system_metrics": {
+    "complete_rows": 308,
+    "chapter_specific_contact_rows": 308,
+    "nationals_only_contact_rows": 0,
+    "inactive_validated_rows": 3,
+    "confirmed_absent_website_rows": 3,
+    "active_rows_with_chapter_specific_email": 40,
+    "active_rows_with_chapter_specific_instagram": 270,
+    "active_rows_with_any_contact": 963,
+    "total_chapters": 2534,
+    "actionable_queue_count": 1519,
+    "deferred_queue_count": 3237
+  },
+  "presentation_metrics": {
+    "presentation_safe_complete_rows": 283,
+    "system_complete_rows": 308,
+    "presentation_gap": 25,
+    "instagram_placeholder_rows": 0,
+    "generic_org_portal_websites": 21,
+    "generic_school_office_emails": 10,
+    "cross_school_email_risks": 4,
+    "active_rows_with_any_contact": 963
+  },
+  "accepted_samples": [
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "beta-phi-active-university-of-idaho",
+      "name": "Beta Phi (active)",
+      "university_name": "University of Idaho",
+      "chapter_status": "active",
+      "website_url": "https://www.uidahoalphagammarho.net/",
+      "contact_email": "agr.uidaho@gmail.com",
+      "instagram_url": "https://www.instagram.com/uidahoagr",
+      "field_states": {
+        "city": "low_confidence",
+        "name": "low_confidence",
+        "state": "low_confidence",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "found",
+        "university_name": "low_confidence"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:20:38.903300+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "agr.uidaho@gmail.com",
+          "candidateValue": "agr.uidaho@gmail.com",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.uidahoalphagammarho.net/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:38.903300+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/uidahoagr",
+          "candidateValue": "https://www.instagram.com/uidahoagr",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.uidahoalphagammarho.net/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "chapter_specific",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "https://www.uidahoalphagammarho.net/",
+      "insta_support": "https://www.uidahoalphagammarho.net/"
+    },
+    {
+      "fraternity_slug": "theta-xi",
+      "chapter_slug": "alpha-sigma-bradley-university",
+      "name": "Alpha Sigma",
+      "university_name": "Bradley University",
+      "chapter_status": "active",
+      "website_url": "http://lydia.bradley.edu/campusorg/thetaxi/house.html",
+      "contact_email": "thetaxi@lydia.bradley.edu",
+      "instagram_url": null,
+      "field_states": {
+        "city": "missing",
+        "name": "low_confidence",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "missing",
+        "university_name": "low_confidence"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:18:19.229887+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "thetaxi@lydia.bradley.edu",
+          "candidateValue": "thetaxi@lydia.bradley.edu",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "http://lydia.bradley.edu/campusorg/thetaxi/house.html",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "school_specific",
+      "insta_type": "",
+      "website_support": "",
+      "email_support": "http://lydia.bradley.edu/campusorg/thetaxi/house.html",
+      "insta_support": ""
+    },
+    {
+      "fraternity_slug": "sigma-chi",
+      "chapter_slug": "theta-rho-illinois-state-university",
+      "name": "Theta Rho",
+      "university_name": "Illinois State University",
+      "chapter_status": "active",
+      "website_url": "https://redbirdlife.illinoisstate.edu/organization/sigmachifraternity",
+      "contact_email": "jaschw3@ilstu.edu",
+      "instagram_url": "https://www.instagram.com/isu_sigmachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:22:03.894798+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/isu_sigmachi",
+          "candidateValue": "https://www.instagram.com/isu_sigmachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://redbirdlife.illinoisstate.edu/organization/sigmachifraternity",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://redbirdlife.illinoisstate.edu/organization/sigmachifraternity"
+    },
+    {
+      "fraternity_slug": "sigma-chi",
+      "chapter_slug": "omega-omega-university-of-arkansas",
+      "name": "Omega Omega",
+      "university_name": "University of Arkansas",
+      "chapter_status": "active",
+      "website_url": "https://uagreeks.uark.edu/interfraternity-council/sigma-chi.php",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/arkansas.sigmachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:21:38.052090+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/arkansas.sigmachi",
+          "candidateValue": "https://www.instagram.com/arkansas.sigmachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://uagreeks.uark.edu/interfraternity-council/sigma-chi.php",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://uagreeks.uark.edu/interfraternity-council/sigma-chi.php"
+    },
+    {
+      "fraternity_slug": "sigma-chi",
+      "chapter_slug": "nu-nu-columbia-university",
+      "name": "Nu Nu",
+      "university_name": "Columbia University",
+      "chapter_status": "active",
+      "website_url": "https://www.cc-seas.columbia.edu/student-group/sigma-chi",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/sigmachi_columbia",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:21:39.227795+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/sigmachi_columbia",
+          "candidateValue": "https://www.instagram.com/sigmachi_columbia",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.cc-seas.columbia.edu/student-group/sigma-chi",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.cc-seas.columbia.edu/student-group/sigma-chi"
+    },
+    {
+      "fraternity_slug": "sigma-chi",
+      "chapter_slug": "lambda-delta-university-of-california-merced",
+      "name": "Lambda Delta",
+      "university_name": "University of California-Merced",
+      "chapter_status": "active",
+      "website_url": "https://fraternitysorority.ucmerced.edu/chapters-councils/fraternity-sorority-council/fraternity-chapters/sigma-chi",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/ucmsigmachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:22:03.272542+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/ucmsigmachi",
+          "candidateValue": "https://www.instagram.com/ucmsigmachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://fraternitysorority.ucmerced.edu/chapters-councils/fraternity-sorority-council/fraternity-chapters/sigma-chi",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://fraternitysorority.ucmerced.edu/chapters-councils/fraternity-sorority-council/fraternity-chapters/sigma-chi"
+    },
+    {
+      "fraternity_slug": "sigma-chi",
+      "chapter_slug": "beta-pi-oregon-state-university",
+      "name": "Beta Pi",
+      "university_name": "Oregon State University",
+      "chapter_status": "active",
+      "website_url": "https://sigmachioregonstate.squarespace.com",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/sigmachibetapi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:22:30.826759+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_failed_chapter_specificity",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "sigmachipresident.betapi@gmail.com",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://gogreek.oregonstate.edu/chapter-profile/sigma-chi",
+          "supportingPageScope": "unrelated",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:22:30.826759+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/sigmachibetapi",
+          "candidateValue": "https://www.instagram.com/sigmachibetapi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://gogreek.oregonstate.edu/chapter-profile/sigma-chi",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "https://gogreek.oregonstate.edu/chapter-profile/sigma-chi",
+      "insta_support": "https://gogreek.oregonstate.edu/chapter-profile/sigma-chi"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "tau-deuteron-chapter-university-of-texas",
+      "name": "Tau Deuteron Chapter",
+      "university_name": "University of Texas",
+      "chapter_status": "active",
+      "website_url": "http://texasfiji.com/",
+      "contact_email": "betsy@texasfiji.com",
+      "instagram_url": null,
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "missing",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:18:26.043770+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "betsy@texasfiji.com",
+          "candidateValue": "betsy@texasfiji.com",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://texasfiji.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "chapter_specific",
+      "insta_type": "",
+      "website_support": "",
+      "email_support": "https://texasfiji.com/",
+      "insta_support": ""
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "tau-delta-chapter-university-of-texas-dallas",
+      "name": "Tau Delta Chapter",
+      "university_name": "University of Texas Dallas",
+      "chapter_status": "active",
+      "website_url": "https://www.utdfiji.org/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/utdfiji",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:18:46.321417+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_unsupported_on_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "Texas@Dallas.Since",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://www.utdfiji.org/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:18:46.321417+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/utdfiji",
+          "candidateValue": "https://www.instagram.com/utdfiji",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.utdfiji.org/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "https://www.utdfiji.org/",
+      "insta_support": "https://www.utdfiji.org/"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "mu-deuteron-chapter-university-of-iowa",
+      "name": "Mu Deuteron Chapter",
+      "university_name": "University of Iowa",
+      "chapter_status": "active",
+      "website_url": "https://fsl.uiowa.edu/chapters-and-councils/phi-gamma-delta",
+      "contact_email": "ryan-m-witt@uiowa.edu",
+      "instagram_url": "https://www.instagram.com/iowafiji",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:18:29.263306+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/iowafiji",
+          "candidateValue": "https://www.instagram.com/iowafiji",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://fsl.uiowa.edu/chapters-and-councils/phi-gamma-delta",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://fsl.uiowa.edu/chapters-and-councils/phi-gamma-delta"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "lambda-omega-chapter-university-of-western-ontario",
+      "name": "Lambda Omega Chapter",
+      "university_name": "University of Western Ontario",
+      "chapter_status": "active",
+      "website_url": "http://www.fijiuwo.com/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/fijiuwo",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:20.048595+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/fijiuwo",
+          "candidateValue": "https://www.instagram.com/fijiuwo",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "http://www.fijiuwo.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "http://www.fijiuwo.com/"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "lambda-iota-chapter-purdue-university",
+      "name": "Lambda Iota Chapter",
+      "university_name": "Purdue University",
+      "chapter_status": "active",
+      "website_url": "https://boilerlink.purdue.edu/organization/phigammadelta",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/purdue.fiji",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:18:25.147355+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/purdue.fiji",
+          "candidateValue": "https://www.instagram.com/purdue.fiji",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://boilerlink.purdue.edu/organization/phigammadelta",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://boilerlink.purdue.edu/organization/phigammadelta"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "lambda-chapter-depauw-university",
+      "name": "Lambda Chapter",
+      "university_name": "DePauw University",
+      "chapter_status": "active",
+      "website_url": "http://www.depauwfiji.com",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/lambdafiji",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:19:03.859384+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_unsupported_on_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "reputation@DePauw.Friendship",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://depauwfiji.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:03.859384+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/lambdafiji",
+          "candidateValue": "https://www.instagram.com/lambdafiji",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://depauwfiji.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "https://depauwfiji.com/",
+      "insta_support": "https://depauwfiji.com/"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "gamma-deuteron-chapter-knox-college",
+      "name": "Gamma Deuteron Chapter",
+      "university_name": "Knox College",
+      "chapter_status": "active",
+      "website_url": "https://www.knox.edu/campus-life/clubs-and-organizations/phi-gamma-delta",
+      "contact_email": "jrwilliams@knox.edu",
+      "instagram_url": "https://www.instagram.com/knox_fiji",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:18:59.922167+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/knox_fiji",
+          "candidateValue": "https://www.instagram.com/knox_fiji",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.knox.edu/campus-life/student-organizations/phi-gamma-delta",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.knox.edu/campus-life/student-organizations/phi-gamma-delta"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "delta-chapter-bucknell-university",
+      "name": "Delta Chapter",
+      "university_name": "Bucknell University",
+      "chapter_status": "active",
+      "website_url": "https://fijibucknell.wordpress.com/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/bucknellfiji",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:19:08.327538+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_unsupported_on_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "Blog@WordPress.com.Privacy",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://fijibucknell.wordpress.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:08.327538+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/bucknellfiji",
+          "candidateValue": "https://www.instagram.com/bucknellfiji",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://fijibucknell.wordpress.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "https://fijibucknell.wordpress.com/",
+      "insta_support": "https://fijibucknell.wordpress.com/"
+    },
+    {
+      "fraternity_slug": "phi-gamma-delta",
+      "chapter_slug": "chi-alpha-chapter-clemson-university",
+      "name": "Chi Alpha Chapter",
+      "university_name": "Clemson University",
+      "chapter_status": "active",
+      "website_url": "http://www.cufiji.com/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/cufiji",
+      "field_states": {
+        "city": "missing",
+        "name": "found",
+        "state": "missing",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:03.917933+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/cufiji",
+          "candidateValue": "https://www.instagram.com/cufiji",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "http://www.cufiji.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "http://www.cufiji.com/"
+    },
+    {
+      "fraternity_slug": "delta-chi",
+      "chapter_slug": "long-beach-long-beach",
+      "name": "Long Beach",
+      "university_name": "Long Beach",
+      "chapter_status": "active",
+      "website_url": "https://www.longbeachdeltachi.com/",
+      "contact_email": "owen.martz01@student.csulb.edu",
+      "instagram_url": "https://www.instagram.com/deltachilbstate",
+      "field_states": {
+        "name": "found",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:22:07.990250+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "owen.martz01@student.csulb.edu",
+          "candidateValue": "owen.martz01@student.csulb.edu",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.asicsulb.org/corporate/documents/beach-pride/Student%20Org%20Contact%20List_2023.pdf",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "chapter_specific",
+      "insta_type": "",
+      "website_support": "",
+      "email_support": "https://www.asicsulb.org/corporate/documents/beach-pride/Student%20Org%20Contact%20List_2023.pdf",
+      "insta_support": ""
+    },
+    {
+      "fraternity_slug": "delta-chi",
+      "chapter_slug": "kennesaw-kennesaw",
+      "name": "Kennesaw",
+      "university_name": "Kennesaw",
+      "chapter_status": "active",
+      "website_url": "https://greeklife.kennesaw.edu/councils-chapters/ifc/delta-chi.php",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/ksudeltachi",
+      "field_states": {
+        "name": "found",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T17:28:05.819416+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_failed_chapter_specificity",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_quarantine",
+          "previousValue": "fsl@kennesaw.edu",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://deltachi.org/alumni-chapters/",
+          "supportingPageScope": "unrelated",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:14:11.542400+00:00",
+          "confidence": 0.88,
+          "reasonCode": "legacy_contact_backfilled_from_school_affiliation_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/ksudeltachi",
+          "candidateValue": "https://www.instagram.com/ksudeltachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://kennesawifc.mycampusdirector2.com/landing/",
+          "supportingPageScope": "school_affiliation_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "school_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "school_specific",
+      "website_support": "",
+      "email_support": "https://deltachi.org/alumni-chapters/",
+      "insta_support": "https://kennesawifc.mycampusdirector2.com/landing/"
+    },
+    {
+      "fraternity_slug": "delta-chi",
+      "chapter_slug": "kansas-state-kansas-state",
+      "name": "Kansas State",
+      "university_name": "Kansas State",
+      "chapter_status": "active",
+      "website_url": "http://ksudeltachi.com/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/deltachi_at_ksu",
+      "field_states": {
+        "name": "found",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T17:28:05.945937+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_failed_chapter_specificity",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_quarantine",
+          "previousValue": "leadership@K-State.LEARN",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://deltachi.org/alumni-chapters/",
+          "supportingPageScope": "unrelated",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:17:29.943711+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/deltachi_at_ksu",
+          "candidateValue": "https://www.instagram.com/deltachi_at_ksu",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://ksudeltachi.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "https://deltachi.org/alumni-chapters/",
+      "insta_support": "https://ksudeltachi.com/"
+    },
+    {
+      "fraternity_slug": "delta-chi",
+      "chapter_slug": "illinois-illinois",
+      "name": "Illinois",
+      "university_name": "Illinois",
+      "chapter_status": "active",
+      "website_url": "https://fsaffairs.illinois.edu/organizations/fraternities/DeltaChi",
+      "contact_email": "fsaffairs@illinois.edu",
+      "instagram_url": "https://www.instagram.com/kdchi_uiuc",
+      "field_states": {
+        "name": "found",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:21:15.877713+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/kdchi_uiuc",
+          "candidateValue": "https://www.instagram.com/kdchi_uiuc",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.instagram.com/kdchi_uiuc/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.instagram.com/kdchi_uiuc/"
+    },
+    {
+      "fraternity_slug": "delta-chi",
+      "chapter_slug": "georgia-tech-georgia-tech",
+      "name": "Georgia Tech",
+      "university_name": "Georgia Tech",
+      "chapter_status": "active",
+      "website_url": "http://www.gtdeltachi.com/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/gtdeltachi",
+      "field_states": {
+        "name": "found",
+        "website_url": "found",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:22:13.297034+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_unsupported_on_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "we...email@house.gtdeltachi",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://www.gtdeltachi.com/summer-housing.html",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:22:13.297034+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/gtdeltachi",
+          "candidateValue": "https://www.instagram.com/gtdeltachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.gtdeltachi.com/summer-housing.html",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "https://www.gtdeltachi.com/summer-housing.html",
+      "insta_support": "https://www.gtdeltachi.com/summer-housing.html"
+    },
+    {
+      "fraternity_slug": "delta-chi",
+      "chapter_slug": "auburn-university-chapter-auburn-university",
+      "name": "Auburn University Chapter",
+      "university_name": "Auburn University",
+      "chapter_status": "active",
+      "website_url": "https://www.auburndeltachi.com/",
+      "contact_email": "auburndxhouse@gmail.com",
+      "instagram_url": "https://www.instagram.com/auburndeltachi",
+      "field_states": {
+        "city": "found",
+        "state": "found",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:22:28.933671+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/auburndeltachi",
+          "candidateValue": "https://www.instagram.com/auburndeltachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.auburndeltachi.com/contact-us.html",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "chapter_specific",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.auburndeltachi.com/contact-us.html"
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "zeta-active-cornell-university",
+      "name": "Zeta (active)",
+      "university_name": "Cornell University",
+      "chapter_status": "active",
+      "website_url": "http://www.cornellagr.com/",
+      "contact_email": "agrzeta@gmail.com",
+      "instagram_url": null,
+      "field_states": {
+        "city": "low_confidence",
+        "name": "low_confidence",
+        "state": "low_confidence",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "missing",
+        "university_name": "low_confidence"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:20:31.844193+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "agrzeta@gmail.com",
+          "candidateValue": "agrzeta@gmail.com",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.cornellagr.com/",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "chapter_specific",
+      "insta_type": "",
+      "website_support": "",
+      "email_support": "https://www.cornellagr.com/",
+      "insta_support": ""
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "pi-active-oklahoma-state-university",
+      "name": "Pi (active)",
+      "university_name": "Oklahoma State University",
+      "chapter_status": "active",
+      "website_url": "http://www.osuagrs.com",
+      "contact_email": "requests.okst.agr@gmail.com",
+      "instagram_url": null,
+      "field_states": {
+        "city": "low_confidence",
+        "name": "low_confidence",
+        "state": "low_confidence",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "missing",
+        "university_name": "low_confidence"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:20:29.790526+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "requests.okst.agr@gmail.com",
+          "candidateValue": "requests.okst.agr@gmail.com",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://okstateagr.com",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        }
+      },
+      "website_type": "",
+      "email_type": "chapter_specific",
+      "insta_type": "",
+      "website_support": "",
+      "email_support": "https://okstateagr.com",
+      "insta_support": ""
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "beta-alpha-active-southern-illinois-university",
+      "name": "Beta Alpha (active)",
+      "university_name": "Southern Illinois University",
+      "chapter_status": "active",
+      "website_url": "http://www.siuagr.com",
+      "contact_email": "siuagralumni@gmail.com",
+      "instagram_url": null,
+      "field_states": {
+        "city": "low_confidence",
+        "name": "low_confidence",
+        "state": "low_confidence",
+        "website_url": "found",
+        "contact_email": "found",
+        "instagram_url": "missing",
+        "university_name": "low_confidence"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:20:38.190838+00:00",
+          "confidence": 0.93,
+          "reasonCode": "legacy_contact_backfilled_from_chapter_site",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "siuagralumni@gmail.com",
+          "candidateValue": "siuagralumni@gmail.com",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://siuagrbetaalpha.com",
+          "supportingPageScope": "chapter_site",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "chapter_specific"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T23:45:19+00:00",
+          "confidence": 1.0,
+          "reasonCode": "phase7_placeholder_instagram",
+          "sourceType": "phase7_demo_safety_cleanup",
+          "decisionStage": "phase7_demo_safety_cleanup",
+          "previousValue": "https://www.instagram.com/node",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://siuagrbetaalpha.com",
+          "supportingPageScope": "unrelated",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        }
+      },
+      "website_type": "",
+      "email_type": "chapter_specific",
+      "insta_type": "ambiguous",
+      "website_support": "",
+      "email_support": "https://siuagrbetaalpha.com",
+      "insta_support": "https://siuagrbetaalpha.com"
+    }
+  ],
+  "inactive_validated_samples": [
+    {
+      "fraternity_slug": "sigma-chi",
+      "chapter_slug": "beta-iota-university-of-oregon",
+      "name": "Beta Iota",
+      "university_name": "University of Oregon",
+      "chapter_status": "inactive",
+      "source_type": "official_school",
+      "reason_code": "fraternity_absent_from_official_school_list",
+      "evidence_url": "https://gogreek.oregonstate.edu/scorecards"
+    },
+    {
+      "fraternity_slug": "chi-psi",
+      "chapter_slug": "pi-tau-south-dakota-school-of-mines-and-technology",
+      "name": "Pi Tau",
+      "university_name": "South Dakota School of Mines and Technology",
+      "chapter_status": "inactive",
+      "source_type": "official_school",
+      "reason_code": "fraternity_absent_from_official_school_list",
+      "evidence_url": "https://fraternitysorority.mines.edu/inter-fraternity-council/"
+    },
+    {
+      "fraternity_slug": "delta-kappa-epsilon",
+      "chapter_slug": "delta-kappa-university-of-pennsylvania",
+      "name": "Delta Kappa",
+      "university_name": "University of Pennsylvania",
+      "chapter_status": "inactive",
+      "source_type": "official_school",
+      "reason_code": "fraternity_absent_from_official_school_list",
+      "evidence_url": "https://ofsl.universitylife.upenn.edu/chapters/"
+    }
+  ],
+  "national_chapter_page_samples": [
+    {
+      "fraternity_slug": "alpha-delta-phi",
+      "chapter_slug": "adelpho-chapman-university",
+      "name": "Adelpho",
+      "university_name": "Chapman University",
+      "chapter_status": "active",
+      "website_url": "https://pantherconnect.chapman.edu/groups",
+      "contact_email": "adelphos.chapman@gmail.com",
+      "instagram_url": "https://www.instagram.com/adphi1832",
+      "field_states": {
+        "city": "missing",
+        "name": "low_confidence",
+        "state": "missing",
+        "website_url": "missing",
+        "contact_email": "found",
+        "instagram_url": "found",
+        "university_name": "low_confidence"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:20:18.074055+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "adelphos.chapman@gmail.com",
+          "candidateValue": "adelphos.chapman@gmail.com",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.alphadeltaphi.org/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:18.074055+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/adphi1832",
+          "candidateValue": "https://www.instagram.com/adphi1832",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.alphadeltaphi.org/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "national_specific_to_chapter",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "https://www.alphadeltaphi.org/",
+      "insta_support": "https://www.alphadeltaphi.org/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16249",
+      "name": "Omicron-Alpha (Flagler)",
+      "university_name": "Flagler College",
+      "chapter_status": "active",
+      "website_url": "https://wilmingtonquakers.com",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/flagler_lambdachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:15.551774+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/flagler_lambdachi",
+          "candidateValue": "https://www.instagram.com/flagler_lambdachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/omicron-alpha-flagler/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/omicron-alpha-flagler/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16246",
+      "name": "Pi (Worcester Polytechnic)",
+      "university_name": "Worcester Polytechnic Institute",
+      "chapter_status": "active",
+      "website_url": "https://mywpi.wpi.edu/LCA/club_signup",
+      "contact_email": "gr-lca@wpi.edu",
+      "instagram_url": "https://www.instagram.com/lambdachiwpi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:15.009731+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/lambdachiwpi",
+          "candidateValue": "https://www.instagram.com/lambdachiwpi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-worcester-polytechnic/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/pi-worcester-polytechnic/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16245",
+      "name": "Pi-Delta (Wilmington)",
+      "university_name": "Wilmington College",
+      "chapter_status": "active",
+      "website_url": "https://wilmingtonquakers.com",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/wclambdachialpha",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:14.474606+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/wclambdachialpha",
+          "candidateValue": "https://www.instagram.com/wclambdachialpha",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-delta-wilmington/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/pi-delta-wilmington/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16243",
+      "name": "Pi-Theta (Wichita State)",
+      "university_name": "Wichita State University",
+      "chapter_status": "active",
+      "website_url": "https://www.wichita.edu/about/student_conduct/rsotext.php",
+      "contact_email": "operator@wichita.edu",
+      "instagram_url": "https://www.instagram.com/wsulambdachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:13.978161+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/wsulambdachi",
+          "candidateValue": "https://www.instagram.com/wsulambdachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-theta-wichita-state/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/pi-theta-wichita-state/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16241",
+      "name": "Lambda-Lambda (Western Kentucky)",
+      "university_name": "Western Kentucky University",
+      "chapter_status": "active",
+      "website_url": "https://www.wku.edu/wkugreeks/ifc/lambdachialpha.php",
+      "contact_email": "admission@wku.edu",
+      "instagram_url": "https://www.instagram.com/lxa_wku",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:13.482252+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/lxa_wku",
+          "candidateValue": "https://www.instagram.com/lxa_wku",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/lambda-lambda-western-kentucky/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/lambda-lambda-western-kentucky/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16195",
+      "name": "Iota-Omega (Louisiana Lafayette)",
+      "university_name": "University of Louisiana-Lafayette",
+      "chapter_status": "active",
+      "website_url": "https://www",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/ullambdachialpha",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:07.085625+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/ullambdachialpha",
+          "candidateValue": "https://www.instagram.com/ullambdachialpha",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/iota-omega-louisiana-lafayette/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/iota-omega-louisiana-lafayette/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16182",
+      "name": "Epsilon-Sigma (UCLA)",
+      "university_name": "University of California-Los Angeles",
+      "chapter_status": "active",
+      "website_url": "https://www.launidadlatina.org",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/uclalambdachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T17:28:03.394559+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_failed_chapter_specificity",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_quarantine",
+          "previousValue": "fsl@ucla.edu",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/",
+          "supportingPageScope": "unrelated",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:17:36.578899+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/uclalambdachi",
+          "candidateValue": "https://www.instagram.com/uclalambdachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/epsilon-sigma-ucla/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "https://www.lambdachi.org/chapters/",
+      "insta_support": "https://www.lambdachi.org/chapters/epsilon-sigma-ucla/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16181",
+      "name": "Gamma-Chi (Arkansas)",
+      "university_name": "University of Arkansas-Fayetteville",
+      "chapter_status": "active",
+      "website_url": "https://uagreeks.uark.edu/interfraternity-council/lambda-chi-alpha.php",
+      "contact_email": "uarklcapresident@gmail.com",
+      "instagram_url": "https://www.instagram.com/arklambdachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:06.016349+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/arklambdachi",
+          "candidateValue": "https://www.instagram.com/arklambdachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/gamma-chi-arkansas/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/gamma-chi-arkansas/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16178",
+      "name": "Lambda-Zeta (Union)",
+      "university_name": "Union University",
+      "chapter_status": "active",
+      "website_url": "https://uuathletics.com/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/unionchops",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:05.445536+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/unionchops",
+          "candidateValue": "https://www.instagram.com/unionchops",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/lambda-zeta-union/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/lambda-zeta-union/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16177",
+      "name": "Phi-Psi (Truman State)",
+      "university_name": "Truman State University",
+      "chapter_status": "active",
+      "website_url": "https://ifc.truman.edu/ifc-fraternities/lambda-chi-alpha/",
+      "contact_email": "ifc@truman.edu",
+      "instagram_url": "https://www.instagram.com/lambdachitsu",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:04.943640+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/lambdachitsu",
+          "candidateValue": "https://www.instagram.com/lambdachitsu",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/phi-psi-truman-state/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/phi-psi-truman-state/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16175",
+      "name": "Gamma-Nu (North Carolina Chapel Hill)",
+      "university_name": "University of North Carolina at Chapel Hill",
+      "chapter_status": "active",
+      "website_url": "https://wp.me/Pb2IRL-i",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/unclxa",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:20:03.861850+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_unsupported_on_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "sterlinggilreath@gmail.com",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/gamma-nu-north-carolina-chapel-hill/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:03.861850+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/unclxa",
+          "candidateValue": "https://www.instagram.com/unclxa",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/gamma-nu-north-carolina-chapel-hill/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "https://www.lambdachi.org/chapters/gamma-nu-north-carolina-chapel-hill/",
+      "insta_support": "https://www.lambdachi.org/chapters/gamma-nu-north-carolina-chapel-hill/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16170",
+      "name": "Phi-Rho (Tarleton State)",
+      "university_name": "Tarleton State University",
+      "chapter_status": "active",
+      "website_url": "https://tarleton.kualihub.com/app/68532732e1040002808b6d31/start",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/tsulambdachi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:02.262969+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/tsulambdachi",
+          "candidateValue": "https://www.instagram.com/tsulambdachi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/phi-rho-tarleton-state/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/phi-rho-tarleton-state/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16167",
+      "name": "Pi-Rho (Buffalo)",
+      "university_name": "University at Buffalo",
+      "chapter_status": "active",
+      "website_url": "https://www.buffalo.edu/studentlife/life-on-campus/clubs-and-activities/search/fraternity-and-sorority-life/chapters.html",
+      "contact_email": "makzimse@buffalo.edu",
+      "instagram_url": "https://www.instagram.com/ublxa",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:01.234874+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/ublxa",
+          "candidateValue": "https://www.instagram.com/ublxa",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-rho-buffalo/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/pi-rho-buffalo/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16165",
+      "name": "Delta-Delta (Spring Hill)",
+      "university_name": "Spring Hill College",
+      "chapter_status": "active",
+      "website_url": "https://my.shc.edu/ICS/Campus_Life/Student_Involvement/Fraternity_and_Sorority_Life.jnz",
+      "contact_email": "deltachi@shc.edu",
+      "instagram_url": "https://www.instagram.com/lambdachialpha_shc",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:20:00.113773+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/lambdachialpha_shc",
+          "candidateValue": "https://www.instagram.com/lambdachialpha_shc",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/delta-delta-spring-hill/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/delta-delta-spring-hill/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16156",
+      "name": "Epsilon-Eta (Rensselaer Polytechnic)",
+      "university_name": "Rensselaer Polytechnic Institute",
+      "chapter_status": "active",
+      "website_url": "https://sll.rpi.edu/fraternity-sorority-commons/council/interfraternity-council-ifc",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/lambdarpi",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T17:28:03.381408+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_failed_chapter_specificity",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_quarantine",
+          "previousValue": "reslife@rpi.edu",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/",
+          "supportingPageScope": "unrelated",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:17:51.933923+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/lambdarpi",
+          "candidateValue": "https://www.instagram.com/lambdarpi",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/epsilon-eta-rensselaer-polytechnic/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "https://www.lambdachi.org/chapters/",
+      "insta_support": "https://www.lambdachi.org/chapters/epsilon-eta-rensselaer-polytechnic/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16153",
+      "name": "Alpha-Lambda (Oregon State)",
+      "university_name": "Oregon State University",
+      "chapter_status": "active",
+      "website_url": "https://gogreek.oregonstate.edu/affiliated-housing-program",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/osulambda",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:55.899972+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/osulambda",
+          "candidateValue": "https://www.instagram.com/osulambda",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-lambda-oregon-state/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/alpha-lambda-oregon-state/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16152",
+      "name": "Alpha-Eta (Oklahoma State)",
+      "university_name": "Oklahoma State University",
+      "chapter_status": "active",
+      "website_url": "https://campuslife.okstate.edu/fraternity-sorority-affairs/interfraternity-council/lambda-chi-alpha",
+      "contact_email": "zacnich@okstate.edu",
+      "instagram_url": "https://www.instagram.com/Okstatelambda",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:55.398952+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/Okstatelambda",
+          "candidateValue": "https://www.instagram.com/Okstatelambda",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-eta-oklahoma-state/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/alpha-eta-oklahoma-state/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16150",
+      "name": "Alpha-Iota (Northwestern)",
+      "university_name": "Northwestern University",
+      "chapter_status": "active",
+      "website_url": "http://www.nulambdachi.com/",
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/northwesternlxa",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "contact_email": {
+          "updatedAt": "2026-04-09T22:19:54.837008+00:00",
+          "confidence": 1.0,
+          "reasonCode": "legacy_email_unsupported_on_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "website@www.nulambdachi.com.you",
+          "candidateValue": null,
+          "decisionOutcome": "rejected",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-iota-northwestern/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "missing",
+          "contactProvenanceType": "ambiguous"
+        },
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:54.837008+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/northwesternlxa",
+          "candidateValue": "https://www.instagram.com/northwesternlxa",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-iota-northwestern/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "ambiguous",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "https://www.lambdachi.org/chapters/alpha-iota-northwestern/",
+      "insta_support": "https://www.lambdachi.org/chapters/alpha-iota-northwestern/"
+    },
+    {
+      "fraternity_slug": "lambda-chi-alpha",
+      "chapter_slug": "16145",
+      "name": "Alpha-Delta (Missouri Science & Technology)",
+      "university_name": "Missouri University of Science and Technology",
+      "chapter_status": "active",
+      "website_url": "https://ifc.mst.edu/member-chapters/",
+      "contact_email": "joeminer@mst.edu",
+      "instagram_url": "https://www.instagram.com/mstlca",
+      "field_states": {
+        "city": "found",
+        "name": "found",
+        "state": "found",
+        "website_url": "missing",
+        "contact_email": "missing",
+        "instagram_url": "found",
+        "university_name": "found"
+      },
+      "contact_provenance": {
+        "instagram_url": {
+          "updatedAt": "2026-04-09T22:19:52.187150+00:00",
+          "confidence": 0.9,
+          "reasonCode": "legacy_contact_backfilled_from_nationals_chapter_page",
+          "sourceType": "cleanup_legacy_contact",
+          "decisionStage": "legacy_contact_reconciliation",
+          "previousValue": "https://www.instagram.com/mstlca",
+          "candidateValue": "https://www.instagram.com/mstlca",
+          "decisionOutcome": "accepted",
+          "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-delta-missouri-science-technology/",
+          "supportingPageScope": "nationals_chapter_page",
+          "fieldResolutionState": "resolved",
+          "contactProvenanceType": "national_specific_to_chapter"
+        }
+      },
+      "website_type": "",
+      "email_type": "",
+      "insta_type": "national_specific_to_chapter",
+      "website_support": "",
+      "email_support": "",
+      "insta_support": "https://www.lambdachi.org/chapters/alpha-delta-missouri-science-technology/"
+    }
+  ],
+  "unresolved_samples": [
+    {
+      "fraternity_slug": "alpha-delta-phi",
+      "source_slug": "alpha-delta-phi-main",
+      "chapter_slug": "cumberland-cumberland-university",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.779329+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-tau-omega",
+      "source_slug": "alpha-tau-omega-main",
+      "chapter_slug": "epsilon-zeta-louisiana-state",
+      "field_name": "find_website",
+      "outcome": "No candidate website URL available; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.591241+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-tau-omega",
+      "source_slug": "alpha-tau-omega-main",
+      "chapter_slug": "epsilon-zeta-louisiana-state",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.531056+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "source_slug": "alpha-gamma-rho-main",
+      "chapter_slug": "west-virginia-name-college",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.463576+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "source_slug": "alpha-gamma-rho-main",
+      "chapter_slug": "west-virginia-name-college",
+      "field_name": "find_website",
+      "outcome": "No candidate website URL available; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.403198+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "source_slug": "alpha-gamma-rho-main",
+      "chapter_slug": "idaho-name-college",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.340121+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "source_slug": "alpha-gamma-rho-main",
+      "chapter_slug": "idaho-name-college",
+      "field_name": "find_website",
+      "outcome": "No candidate website URL available; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.280776+00:00"
+    },
+    {
+      "fraternity_slug": "delta-sigma-phi",
+      "source_slug": "delta-sigma-phi-main",
+      "chapter_slug": "eta-beta-california-state-san-bernardino",
+      "field_name": "find_website",
+      "outcome": "No candidate website URL available; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.216506+00:00"
+    },
+    {
+      "fraternity_slug": "delta-sigma-phi",
+      "source_slug": "delta-sigma-phi-main",
+      "chapter_slug": "eta-beta-california-state-san-bernardino",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.156376+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-tau-omega",
+      "source_slug": "alpha-tau-omega-main",
+      "chapter_slug": "iota-sigma-central-missouri",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.088496+00:00"
+    },
+    {
+      "fraternity_slug": "alpha-tau-omega",
+      "source_slug": "alpha-tau-omega-main",
+      "chapter_slug": "iota-sigma-central-missouri",
+      "field_name": "find_website",
+      "outcome": "No candidate website URL available; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:19.024568+00:00"
+    },
+    {
+      "fraternity_slug": "theta-chi",
+      "source_slug": "theta-chi-main",
+      "chapter_slug": "kappa-theta-suny-geneseo",
+      "field_name": "find_website",
+      "outcome": "No candidate website URL available; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:18.957241+00:00"
+    },
+    {
+      "fraternity_slug": "theta-chi",
+      "source_slug": "theta-chi-main",
+      "chapter_slug": "kappa-theta-suny-geneseo",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:18.898674+00:00"
+    },
+    {
+      "fraternity_slug": "sigma-alpha-epsilon",
+      "source_slug": "sigma-alpha-epsilon-main",
+      "chapter_slug": "graduate-school-graduate-school",
+      "field_name": "find_instagram",
+      "outcome": "No candidate instagram URL found in provenance, chapter website, or search results; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:18.827202+00:00"
+    },
+    {
+      "fraternity_slug": "sigma-alpha-epsilon",
+      "source_slug": "sigma-alpha-epsilon-main",
+      "chapter_slug": "graduate-school-graduate-school",
+      "field_name": "find_website",
+      "outcome": "No candidate website URL available; search preflight degraded",
+      "queue_state": "deferred",
+      "queries_attempted": 0,
+      "queries_failed": 0,
+      "updated_at": "2026-04-09 23:33:18.753833+00:00"
+    }
+  ],
+  "top_risk_samples": [
+    {
+      "fraternity_slug": "alpha-chi-rho",
+      "chapter_slug": "chapter-map",
+      "name": "Chapter Map",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/alphachirho",
+      "website_url": "https://www.alphachirho.org/about/map/",
+      "risk_reasons": [
+        "generic_national_instagram",
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "2fusf",
+      "name": "%2fusf",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/%2Fusf",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha",
+      "name": "Alpha",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-beta",
+      "name": "Alpha Beta",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-beta",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-delta",
+      "name": "Alpha Delta",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-delta",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-epsilon",
+      "name": "Alpha Epsilon",
+      "university_name": null,
+      "contact_email": "netito102204@gmail.com",
+      "instagram_url": "https://www.instagram.com/adglagrangecollege",
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-epsilon",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-eta",
+      "name": "Alpha Eta",
+      "university_name": null,
+      "contact_email": "dametristen@gmail.com",
+      "instagram_url": "https://www.instagram.com/mck_alphadeltagamma",
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-eta",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-gamma",
+      "name": "Alpha Gamma",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-gamma",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-iota",
+      "name": "Alpha Iota",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/adgalphaiota",
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-iota",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-kappa",
+      "name": "Alpha Kappa",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/ak_alphadeltagamma",
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-kappa",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-lambda",
+      "name": "Alpha Lambda",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-lambda",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-theta",
+      "name": "Alpha Theta",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-theta",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "alpha-zeta",
+      "name": "Alpha Zeta",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/alpha-zeta",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "beta",
+      "name": "Beta",
+      "university_name": null,
+      "contact_email": "griffin.r.burk@slu.edu",
+      "instagram_url": "https://www.instagram.com/adg_slu",
+      "website_url": "https://www.alphadeltagamma.org/chapters/beta",
+      "risk_reasons": [
+        "cross_school_email",
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "chi",
+      "name": "Chi",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/chi",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "csu",
+      "name": "Csu",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/adg_columbusstate",
+      "website_url": "https://www.alphadeltagamma.org/chapters/csu",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "delta",
+      "name": "Delta",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/delta",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "epsilon",
+      "name": "Epsilon",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/epsilon",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "eta",
+      "name": "Eta",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/eta",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "gamma",
+      "name": "Gamma",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/gamma",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "iota",
+      "name": "Iota",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/iota",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "kappa",
+      "name": "Kappa",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": "https://www.instagram.com/adgkappa",
+      "website_url": "https://www.alphadeltagamma.org/chapters/kappa",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "lambda",
+      "name": "Lambda",
+      "university_name": null,
+      "contact_email": "bschoenlaub@outlook.com",
+      "instagram_url": "https://www.instagram.com/lmuadg",
+      "website_url": "https://www.alphadeltagamma.org/chapters/lambda",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "omicron",
+      "name": "Omicron",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/omicron",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    },
+    {
+      "fraternity_slug": "alpha-delta-gamma",
+      "chapter_slug": "phi",
+      "name": "Phi",
+      "university_name": null,
+      "contact_email": null,
+      "instagram_url": null,
+      "website_url": "https://www.alphadeltagamma.org/chapters/phi",
+      "risk_reasons": [
+        "suspicious_identity"
+      ]
+    }
+  ]
+}

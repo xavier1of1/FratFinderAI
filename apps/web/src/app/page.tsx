@@ -12,6 +12,11 @@ const pageGuide = [
     description: "Browse loaded chapters, scan contact coverage, and filter the map and table for the schools you want to show."
   },
   {
+    href: "/nationals",
+    title: "Nationals",
+    description: "Inspect national-organization profiles separately from chapter rows so HQ contact never silently masquerades as chapter contact."
+  },
+  {
     href: "/runs",
     title: "Crawl Runs",
     description: "Audit how each source performed, which strategy fired, and how many records and follow-up jobs were created."

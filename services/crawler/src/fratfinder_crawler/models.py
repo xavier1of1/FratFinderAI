@@ -33,6 +33,72 @@ FIELD_JOB_TO_STATE_KEY = {
     FIELD_JOB_VERIFY_SCHOOL: "university_name",
 }
 
+PAGE_SCOPE_CHAPTER_SITE = "chapter_site"
+PAGE_SCOPE_SCHOOL_AFFILIATION = "school_affiliation_page"
+PAGE_SCOPE_NATIONALS_CHAPTER = "nationals_chapter_page"
+PAGE_SCOPE_NATIONALS_GENERIC = "nationals_generic"
+PAGE_SCOPE_DIRECTORY = "directory_page"
+PAGE_SCOPE_UNRELATED = "unrelated"
+
+PAGE_SCOPE_VALUES = (
+    PAGE_SCOPE_CHAPTER_SITE,
+    PAGE_SCOPE_SCHOOL_AFFILIATION,
+    PAGE_SCOPE_NATIONALS_CHAPTER,
+    PAGE_SCOPE_NATIONALS_GENERIC,
+    PAGE_SCOPE_DIRECTORY,
+    PAGE_SCOPE_UNRELATED,
+)
+
+CONTACT_SPECIFICITY_CHAPTER = "chapter_specific"
+CONTACT_SPECIFICITY_SCHOOL = "school_specific"
+CONTACT_SPECIFICITY_NATIONAL_CHAPTER = "national_specific_to_chapter"
+CONTACT_SPECIFICITY_NATIONAL_GENERIC = "national_generic"
+CONTACT_SPECIFICITY_AMBIGUOUS = "ambiguous"
+
+CONTACT_SPECIFICITY_VALUES = (
+    CONTACT_SPECIFICITY_CHAPTER,
+    CONTACT_SPECIFICITY_SCHOOL,
+    CONTACT_SPECIFICITY_NATIONAL_CHAPTER,
+    CONTACT_SPECIFICITY_NATIONAL_GENERIC,
+    CONTACT_SPECIFICITY_AMBIGUOUS,
+)
+
+CHAPTER_STATUS_ACTIVE = "active"
+CHAPTER_STATUS_INACTIVE = "inactive"
+CHAPTER_STATUS_UNKNOWN = "unknown"
+
+CHAPTER_STATUS_VALUES = (
+    CHAPTER_STATUS_ACTIVE,
+    CHAPTER_STATUS_INACTIVE,
+    CHAPTER_STATUS_UNKNOWN,
+)
+
+FIELD_RESOLUTION_MISSING = "missing"
+FIELD_RESOLUTION_RESOLVED = "resolved"
+FIELD_RESOLUTION_INACTIVE = "inactive"
+FIELD_RESOLUTION_CONFIRMED_ABSENT = "confirmed_absent"
+FIELD_RESOLUTION_DEFERRED = "deferred"
+
+FIELD_RESOLUTION_STATE_VALUES = (
+    FIELD_RESOLUTION_MISSING,
+    FIELD_RESOLUTION_RESOLVED,
+    FIELD_RESOLUTION_INACTIVE,
+    FIELD_RESOLUTION_CONFIRMED_ABSENT,
+    FIELD_RESOLUTION_DEFERRED,
+)
+
+DECISION_OUTCOME_ACCEPTED = "accepted"
+DECISION_OUTCOME_REJECTED = "rejected"
+DECISION_OUTCOME_DEFERRED = "deferred"
+DECISION_OUTCOME_REVIEW_REQUIRED = "review_required"
+
+DECISION_OUTCOME_VALUES = (
+    DECISION_OUTCOME_ACCEPTED,
+    DECISION_OUTCOME_REJECTED,
+    DECISION_OUTCOME_DEFERRED,
+    DECISION_OUTCOME_REVIEW_REQUIRED,
+)
+
 
 @dataclass(slots=True)
 class SourceRecord:
@@ -65,6 +131,35 @@ class VerifiedSourceRecord:
     checked_at: str | None = None
     is_active: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class NationalProfileRecord:
+    fraternity_slug: str
+    fraternity_name: str
+    national_url: str
+    national_url_confidence: float = 0.0
+    national_url_provenance_type: str | None = None
+    national_url_reason_code: str | None = None
+    contact_email: str | None = None
+    contact_email_confidence: float = 0.0
+    contact_email_provenance_type: str | None = None
+    contact_email_reason_code: str | None = None
+    instagram_url: str | None = None
+    instagram_confidence: float = 0.0
+    instagram_provenance_type: str | None = None
+    instagram_reason_code: str | None = None
+    phone: str | None = None
+    phone_confidence: float = 0.0
+    phone_provenance_type: str | None = None
+    phone_reason_code: str | None = None
+    address_text: str | None = None
+    address_confidence: float = 0.0
+    address_provenance_type: str | None = None
+    address_reason_code: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -197,6 +292,18 @@ class ProvenanceRecord:
     field_value: str | None
     source_snippet: str | None = None
     confidence: float = 1.0
+
+
+@dataclass(slots=True)
+class DecisionEvidence:
+    decision_stage: str
+    evidence_url: str | None = None
+    source_type: str | None = None
+    page_scope: str | None = None
+    contact_specificity: str | None = None
+    confidence: float | None = None
+    reason_code: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -528,3 +635,16 @@ class ChapterActivityRecord:
     last_verified_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+@dataclass(slots=True)
+class AccuracyRecoveryMetrics:
+    complete_rows: int = 0
+    chapter_specific_contact_rows: int = 0
+    nationals_only_contact_rows: int = 0
+    inactive_validated_rows: int = 0
+    confirmed_absent_website_rows: int = 0
+    active_rows_with_chapter_specific_email: int = 0
+    active_rows_with_chapter_specific_instagram: int = 0
+    active_rows_with_any_contact: int = 0
+    total_chapters: int = 0

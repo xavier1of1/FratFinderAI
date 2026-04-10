@@ -24,6 +24,7 @@ MAX_CHAPTER_SLUG_LENGTH = 120
 
 _BLOCKED_CHAPTER_NAMES_EXACT = {
     "find a chapter",
+    "follow us on social media",
     "our chapters",
     "chapter roll",
     "the byx",
@@ -121,6 +122,11 @@ _RANKING_OR_REPORT_MARKERS = (
     "statistic",
     "survey",
     "dashboard",
+)
+
+_EXPANSION_OR_INSTALLMENT_MARKERS = (
+    "expansion",
+    "installment",
 )
 
 _WIKIPEDIA_STAT_IDENTITY_RE = re.compile(r"^\d{1,3}%?$", re.IGNORECASE)
@@ -231,6 +237,12 @@ def _has_greek_style_name(name: str) -> bool:
     return any(token in _GREEK_TOKENS for token in tokens)
 
 
+def _extract_greek_org_phrases(text: str) -> set[str]:
+    greek = "|".join(sorted(_GREEK_TOKENS, key=len, reverse=True))
+    pattern = re.compile(rf"\b(?:{greek})(?:\s+(?:{greek})){{1,3}}\b")
+    return {match.group(0).strip() for match in pattern.finditer(text)}
+
+
 def _looks_like_person_name(name: str) -> bool:
     raw_tokens = [token.strip(" .,'\"") for token in re.split(r"\s+", name) if token.strip(" .,'\"")]
     if len(raw_tokens) < 2 or len(raw_tokens) > 4:
@@ -280,6 +292,8 @@ def _semantic_invalid_reason(record: ExtractedChapter) -> str | None:
     snippet = _normalize_label(getattr(record, "source_snippet", None))
     if not chapter_name:
         return "identity_semantically_invalid"
+    if _looks_like_navigation_or_placeholder(record.name, record.university_name, _slugify(f"{record.name}-{record.university_name or ''}")):
+        return "navigation_or_chrome"
     if _looks_like_year_or_percentage(chapter_name) or _looks_like_year_or_percentage(university_name):
         return "year_or_percentage_as_identity"
     if _looks_like_rankish_identity(chapter_name) or _looks_like_rankish_identity(university_name):
@@ -308,8 +322,29 @@ def _semantic_invalid_reason(record: ExtractedChapter) -> str | None:
         return "history_or_timeline_row"
     if _contains_any(chapter_name, _RANKING_OR_REPORT_MARKERS):
         return "ranking_or_report_row"
-    if _looks_like_navigation_or_placeholder(record.name, record.university_name, _slugify(f"{record.name}-{record.university_name or ''}")):
-        return "navigation_or_chrome"
+    if _contains_any(chapter_name, _EXPANSION_OR_INSTALLMENT_MARKERS):
+        return "expansion_or_installment_row"
+    source_url = (_clean(getattr(record, "source_url", None)) or "").lower()
+    if "wikipedia.org/wiki/" in source_url:
+        greek_phrase = next(iter(_extract_greek_org_phrases(chapter_name)), "")
+        if (
+            greek_phrase
+            and len(greek_phrase.split()) >= 2
+            and _institution_signal_count(getattr(record, "university_name", None)) == 0
+        ):
+            snippet_has_alias_or_year = bool(
+                snippet
+                and (
+                    re.search(r"\b(17|18|19|20)\d{2}\b", snippet)
+                    or re.search(r"\b[a-z]-[a-z]-[a-z]+\b", snippet)
+                )
+            )
+            university_looks_noninstitutional = bool(university_name) and not any(
+                marker in university_name
+                for marker in ("university", "college", "campus", "institute", "state", "school", "academy")
+            )
+            if snippet_has_alias_or_year and (university_looks_noninstitutional or not university_name):
+                return "other_greek_organization_row"
     if snippet and _contains_any(snippet, _RANKING_OR_REPORT_MARKERS) and not _chapter_entity_signal_count(record.name, record.university_name):
         return "ranking_or_report_row"
     return None

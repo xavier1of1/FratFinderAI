@@ -1,0 +1,175 @@
+{
+  "generated_at": "2026-04-09T23:45:19+00:00",
+  "rows_cleaned": 14,
+  "cleanup_rows": [
+    {
+      "fraternity_slug": "alpha-delta-phi",
+      "chapter_slug": "yale-yale-university",
+      "reasons": [
+        "archival_export_website",
+        "cross_school_national_page_email"
+      ],
+      "before": {
+        "website_url": "https://web.library.yale.edu/book/export/html/2060",
+        "contact_email": "enroll@tamiu.edu",
+        "instagram_url": "https://www.instagram.com/adphiyale"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-beta-active-oregon-state-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://agroregonstate.com/",
+        "contact_email": "agrsocialchair@gmail.com",
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-delta-active-montana-state-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "http://agrmontanastate.net",
+        "contact_email": "president@msuagr.org",
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-epsilon-active-louisiana-state-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://www.lsuagr.com/",
+        "contact_email": null,
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-iota-active-university-of-arkansas",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "http://www.arkansasagr.com",
+        "contact_email": "alumni@arkansasagr.com",
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-lambda-active-new-mexico-state-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://crimsonconnection.nmsu.edu/organization/wwwalphagammarhoorg",
+        "contact_email": null,
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-sigma-active-california-state-university-fresno",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://jcast.fresnostate.edu/agbs/students/clubs.html",
+        "contact_email": "jiaochenl@csufresno.edu",
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-upsilon-active-university-of-tennessee-martin",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "http://www.agrutm.com/home",
+        "contact_email": "chrhkemp@ut.utm.edu",
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "alpha-zeta-active-kansas-state-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://ksuagr.com/",
+        "contact_email": "Creedc@ksu.edu",
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "beta-alpha-active-southern-illinois-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "http://www.siuagr.com",
+        "contact_email": "siuagralumni@gmail.com",
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "gamma-beta-active-fort-hays-state-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://tigerlink.fhsu.edu/organization/alphagammarho",
+        "contact_email": null,
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "gamma-delta-active-abraham-baldwin-agricultural-college",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://www.abac.edu/campus-life/greek-life/",
+        "contact_email": null,
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "gamma-epsilon-active-sam-houston-state-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://shsu.campuslabs.com/engage/organization/alphagammarho",
+        "contact_email": null,
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    },
+    {
+      "fraternity_slug": "alpha-gamma-rho",
+      "chapter_slug": "gamma-zeta-active-arkansas-tech-university",
+      "reasons": [
+        "placeholder_instagram"
+      ],
+      "before": {
+        "website_url": "https://atu.presence.io/organization/alpha-gamma-rho",
+        "contact_email": null,
+        "instagram_url": "https://www.instagram.com/node"
+      }
+    }
+  ]
+}

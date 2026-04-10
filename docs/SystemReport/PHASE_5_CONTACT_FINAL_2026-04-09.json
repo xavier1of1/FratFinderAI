@@ -1,0 +1,961 @@
+{
+  "generatedAt": "2026-04-09T22:24:00.187673+00:00",
+  "mode": "dry_run",
+  "acceptedCount": 0,
+  "rejectedCount": 0,
+  "reviewCount": 211,
+  "acceptedSamples": [],
+  "rejectedSamples": [],
+  "reviewSamples": [
+    {
+      "id": "f4b7b07d-d39f-4b52-af88-2ddf426e8ca4",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16248",
+      "name": "Alpha-Omicron (Indiana Bloomington)",
+      "universityName": "Indiana University Bloomington",
+      "email": "osfl@iu.edu",
+      "instagramUrl": "https://www.instagram.com/indianalxa",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/alpha-omicron-indiana-bloomington/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-omicron-indiana-bloomington/",
+        "normalizedValue": "osfl@iu.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "f3cc1e13-7ae0-4ff1-8e52-e1859735fd61",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "alpha-pi-active-university-of-arizona",
+      "name": "Alpha Pi (active)",
+      "universityName": "University of Arizona",
+      "email": "dos-greek@arizona.edu",
+      "instagramUrl": "https://www.instagram.com/agr_arizona",
+      "latestSourceUrl": "https://greek.arizona.edu/alpha-gamma-rho",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "school_affiliation_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://greek.arizona.edu/alpha-gamma-rho",
+        "normalizedValue": "dos-greek@arizona.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "f26afb30-7d91-467b-9792-ab19e69aa757",
+      "fraternitySlug": "phi-gamma-delta",
+      "chapterSlug": "zeta-chapter-indiana-university",
+      "name": "Zeta Chapter",
+      "universityName": "Indiana University",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/fijiindiana",
+      "latestSourceUrl": "http://zetafiji.com/",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://zetafiji.com/",
+        "normalizedValue": "https://www.instagram.com/fijiindiana"
+      }
+    },
+    {
+      "id": "f0093128-ec00-41b5-9f11-c1992f0c06b8",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16246",
+      "name": "Pi (Worcester Polytechnic)",
+      "universityName": "Worcester Polytechnic Institute",
+      "email": "gr-lca@wpi.edu",
+      "instagramUrl": "https://www.instagram.com/lambdachiwpi",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/pi-worcester-polytechnic/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-worcester-polytechnic/",
+        "normalizedValue": "gr-lca@wpi.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "ee3a7ac6-7621-4f15-bb32-d51019ac3f4e",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16241",
+      "name": "Lambda-Lambda (Western Kentucky)",
+      "universityName": "Western Kentucky University",
+      "email": "admission@wku.edu",
+      "instagramUrl": "https://www.instagram.com/lxa_wku",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/lambda-lambda-western-kentucky/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/lambda-lambda-western-kentucky/",
+        "normalizedValue": "admission@wku.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "ea9f643e-89b1-47da-940a-5187210864c0",
+      "fraternitySlug": "phi-gamma-delta",
+      "chapterSlug": "pi-deuteron-chapter-university-of-kansas",
+      "name": "Pi Deuteron Chapter",
+      "universityName": "University of Kansas",
+      "email": "a043h151@ku.edu",
+      "instagramUrl": "https://www.instagram.com/kufiji",
+      "latestSourceUrl": "http://www.kufiji.org/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.kufiji.org/",
+        "normalizedValue": "a043h151@ku.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "ea1e6411-8527-48cf-9eb9-e859113a8d7f",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "beta-mu-active-austin-peay-state-university",
+      "name": "Beta Mu (active)",
+      "universityName": "Austin Peay State University",
+      "email": "glittleton2@my.apsu.edu",
+      "instagramUrl": "https://www.instagram.com/apsuagr",
+      "latestSourceUrl": "https://www.apsu.edu/greek-life/fraternities/alpha-gamma-rho.php",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "school_affiliation_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.apsu.edu/greek-life/fraternities/alpha-gamma-rho.php",
+        "normalizedValue": "glittleton2@my.apsu.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "e6cee197-1aa3-4ee8-8595-144453861dff",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16193",
+      "name": "Zeta-Iota (Kansas)",
+      "universityName": "University of Kansas",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/lambdachialphaku",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/zeta-iota-kansas/",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/zeta-iota-kansas/",
+        "normalizedValue": "https://www.instagram.com/lambdachialphaku"
+      }
+    },
+    {
+      "id": "e695e5a4-f404-4351-b152-cdd11cd8f1bc",
+      "fraternitySlug": "alpha-delta-gamma",
+      "chapterSlug": "kappa",
+      "name": "Kappa",
+      "universityName": null,
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/adgkappa",
+      "latestSourceUrl": "https://www.alphadeltagamma.org/chapters/kappa",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphadeltagamma.org/chapters/kappa",
+        "normalizedValue": "https://www.instagram.com/adgkappa"
+      }
+    },
+    {
+      "id": "e22befa9-d2d2-47e8-bdf9-898574bdcb89",
+      "fraternitySlug": "delta-chi",
+      "chapterSlug": "huntsville-huntsville",
+      "name": "Huntsville",
+      "universityName": "Huntsville",
+      "email": "aka@uah.edu",
+      "instagramUrl": "https://www.instagram.com/uah_deltachi",
+      "latestSourceUrl": "https://www.uah.edu/images/administrative/dos/student-life/Student%20Activities/RSO/RSO_Categories/FratSoror.pdf",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.uah.edu/images/administrative/dos/student-life/Student%20Activities/RSO/RSO_Categories/FratSoror.pdf",
+        "normalizedValue": "https://www.instagram.com/uah_deltachi"
+      }
+    },
+    {
+      "id": "e0286b4a-8961-4023-a77c-4c095ac42e75",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16167",
+      "name": "Pi-Rho (Buffalo)",
+      "universityName": "University at Buffalo",
+      "email": "makzimse@buffalo.edu",
+      "instagramUrl": "https://www.instagram.com/ublxa",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/pi-rho-buffalo/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-rho-buffalo/",
+        "normalizedValue": "makzimse@buffalo.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "d90b1eb6-603f-4b10-b4b3-b0898aa736fe",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16145",
+      "name": "Alpha-Delta (Missouri Science & Technology)",
+      "universityName": "Missouri University of Science and Technology",
+      "email": "joeminer@mst.edu",
+      "instagramUrl": "https://www.instagram.com/mstlca",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/alpha-delta-missouri-science-technology/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-delta-missouri-science-technology/",
+        "normalizedValue": "joeminer@mst.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "d691bbd0-3c8e-4e77-a45d-bf88f7c6a83c",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16141",
+      "name": "Theta-Eta (Millsaps)",
+      "universityName": "Millsaps College",
+      "email": "1c1c@millsaps.edu",
+      "instagramUrl": "https://www.instagram.com/millsapslxa",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/theta-eta-millsaps/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/theta-eta-millsaps/",
+        "normalizedValue": "1c1c@millsaps.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "d53dc1ad-8bdb-4e4d-890b-a2c73b184dea",
+      "fraternitySlug": "alpha-delta-phi",
+      "chapterSlug": "rutgers-rutgers-university",
+      "name": "Rutgers",
+      "universityName": "Rutgers University",
+      "email": "bm716@scarletmail.rutgers.edu",
+      "instagramUrl": null,
+      "latestSourceUrl": "https://www.alphadeltaphi.org/chapter-roll",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphadeltaphi.org/chapter-roll",
+        "normalizedValue": "bm716@scarletmail.rutgers.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "d50671bd-3776-4821-9d0d-c12697a4105b",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16165",
+      "name": "Delta-Delta (Spring Hill)",
+      "universityName": "Spring Hill College",
+      "email": "deltachi@shc.edu",
+      "instagramUrl": "https://www.instagram.com/lambdachialpha_shc",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/delta-delta-spring-hill/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/delta-delta-spring-hill/",
+        "normalizedValue": "deltachi@shc.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "cfffc8e6-153d-49f9-ad63-75180183ad06",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16152",
+      "name": "Alpha-Eta (Oklahoma State)",
+      "universityName": "Oklahoma State University",
+      "email": "zacnich@okstate.edu",
+      "instagramUrl": "https://www.instagram.com/Okstatelambda",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/alpha-eta-oklahoma-state/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-eta-oklahoma-state/",
+        "normalizedValue": "zacnich@okstate.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "c64a3f9b-ed17-4459-a82f-65793bbc8416",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16234",
+      "name": "Alpha-Kappa (Wabash)",
+      "universityName": "Wabash College",
+      "email": "nelsond@wabash.edu",
+      "instagramUrl": "https://www.instagram.com/lca_wabash",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/alpha-kappa-wabash/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-kappa-wabash/",
+        "normalizedValue": "nelsond@wabash.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "c50ef9fd-9a1f-48f1-85b3-b388a144f9a3",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16244",
+      "name": "Epsilon-Nu (William Jewell)",
+      "universityName": "William Jewell College",
+      "email": "admission@william.jewell.edu",
+      "instagramUrl": "https://www.instagram.com/lambda_wjc",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/epsilon-nu-william-jewell/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/epsilon-nu-william-jewell/",
+        "normalizedValue": "admission@william.jewell.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "bd3a7482-5ff3-425c-bb03-472d5ded80d6",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16148",
+      "name": "Theta-Upsilon (New York)",
+      "universityName": "New York University",
+      "email": "panhellenic@nyu.edu",
+      "instagramUrl": "https://www.instagram.com/nyulambdachi",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/theta-upsilon-new-york/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/theta-upsilon-new-york/",
+        "normalizedValue": "panhellenic@nyu.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "b9425e79-e322-440c-bf2f-ccb503580f30",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16128",
+      "name": "Alpha-Tau (Iowa State)",
+      "universityName": "Iowa State University",
+      "email": "studentengage@iastate.edu",
+      "instagramUrl": "https://www.instagram.com/lambdachiiowastate",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/alpha-tau-iowa-state/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/alpha-tau-iowa-state/",
+        "normalizedValue": "studentengage@iastate.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "b6e41e84-e7a5-48c0-8987-1e2cb6fbedf4",
+      "fraternitySlug": "delta-chi",
+      "chapterSlug": "chapter-playbook-chapter-playbook",
+      "name": "Chapter Playbook.",
+      "universityName": "Chapter Playbook.",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/uofadchi",
+      "latestSourceUrl": "https://deltachi.org/chapter-directory/alberta/",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://deltachi.org/chapter-directory/alberta/",
+        "normalizedValue": "https://www.instagram.com/uofadchi"
+      }
+    },
+    {
+      "id": "b3681091-f7c5-47da-a70a-af102ad968a2",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "alpha-beta-active-oregon-state-university",
+      "name": "Alpha Beta (active)",
+      "universityName": "Oregon State University",
+      "email": "agrsocialchair@gmail.com",
+      "instagramUrl": "https://www.instagram.com/node",
+      "latestSourceUrl": "https://www.alphagammarho.org",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphagammarho.org/",
+        "normalizedValue": "agrsocialchair@gmail.com"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "afed9be4-cfce-4721-9465-817ef71d1328",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "alpha-sigma-active-california-state-university-fresno",
+      "name": "Alpha Sigma (active)",
+      "universityName": "California State University\u2013Fresno",
+      "email": "jiaochenl@csufresno.edu",
+      "instagramUrl": "https://www.instagram.com/node",
+      "latestSourceUrl": "https://www.alphagammarho.org/chapters",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphagammarho.org/chapters",
+        "normalizedValue": "jiaochenl@csufresno.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "a18bb786-8217-4856-aa8a-03860f134fbc",
+      "fraternitySlug": "delta-sigma-phi",
+      "chapterSlug": "iota-eta-indiana-indianapolis",
+      "name": "Iota Eta",
+      "universityName": "Indiana, Indianapolis",
+      "email": "doe@deltasig.org",
+      "instagramUrl": "https://www.instagram.com/deltasigmaphi",
+      "latestSourceUrl": "https://deltasig.org/groups?type=collegiate_chapters",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://deltasig.org/groups?type=collegiate_chapters",
+        "normalizedValue": "doe@deltasig.org"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "a1744adb-daff-4e72-9890-f63574a793fc",
+      "fraternitySlug": "beta-upsilon-chi",
+      "chapterSlug": "purdue-university-purdue-university",
+      "name": "Purdue University",
+      "universityName": "Purdue University",
+      "email": "purdue@byx.org",
+      "instagramUrl": "https://www.instagram.com/purduebyx.",
+      "latestSourceUrl": "https://byx.org",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://byx.org/",
+        "normalizedValue": "purdue@byx.org"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "9539542c-cc1e-450d-a9d8-bb8ed237e99f",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "alpha-upsilon-active-university-of-tennessee-martin",
+      "name": "Alpha Upsilon (active)",
+      "universityName": "University of Tennessee\u2013Martin",
+      "email": "chrhkemp@ut.utm.edu",
+      "instagramUrl": "https://www.instagram.com/node",
+      "latestSourceUrl": "http://www.agrutm.com/recruitment-information",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "http://www.agrutm.com/recruitment-information",
+        "normalizedValue": "chrhkemp@ut.utm.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "9462e699-d88d-4bb4-9ce4-dce1221f4c54",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "alpha-iota-active-university-of-arkansas",
+      "name": "Alpha Iota (active)",
+      "universityName": "University of Arkansas",
+      "email": "alumni@arkansasagr.com",
+      "instagramUrl": "https://www.instagram.com/node",
+      "latestSourceUrl": "http://www.arkansasagr.com/alumni-board",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "http://www.arkansasagr.com/alumni-board",
+        "normalizedValue": "alumni@arkansasagr.com"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "9253939c-e7ae-483e-8dbb-3d191bfedcde",
+      "fraternitySlug": "alpha-delta-gamma",
+      "chapterSlug": "alpha-kappa",
+      "name": "Alpha Kappa",
+      "universityName": null,
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/ak_alphadeltagamma",
+      "latestSourceUrl": "https://www.alphadeltagamma.org/chapters/alpha-kappa",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphadeltagamma.org/chapters/alpha-kappa",
+        "normalizedValue": "https://www.instagram.com/ak_alphadeltagamma"
+      }
+    },
+    {
+      "id": "903942fd-f8e0-4d67-a0d8-6f3e162ca676",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16247",
+      "name": "Pi-Nu (Johnson & Wales Providence)",
+      "universityName": "Johnson & Wales University-Providence",
+      "email": "jwudpt@jwu.edu",
+      "instagramUrl": "https://www.instagram.com/lambdachijwu",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/pi-nu-johnson-wales-providence/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-nu-johnson-wales-providence/",
+        "normalizedValue": "jwudpt@jwu.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "8f54f267-3a01-4b96-a64c-c366a5a39ac1",
+      "fraternitySlug": "sigma-chi",
+      "chapterSlug": "eta-xi-austin-peay-state-university",
+      "name": "Eta Xi",
+      "universityName": "Austin Peay State University",
+      "email": "lbeckham1@my.apsu.edu",
+      "instagramUrl": "https://www.instagram.com/APSUSigmaChi",
+      "latestSourceUrl": "https://www.apsu.edu/greek-life/fraternities/sigma-chi.php",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "school_affiliation_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.apsu.edu/greek-life/fraternities/sigma-chi.php",
+        "normalizedValue": "lbeckham1@my.apsu.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "8785bd0c-1b3b-4c45-9392-c8d39587f0cf",
+      "fraternitySlug": "beta-upsilon-chi",
+      "chapterSlug": "mercer-university-mercer-university",
+      "name": "Mercer University",
+      "universityName": "Mercer University",
+      "email": "baylor@byx.org",
+      "instagramUrl": "https://www.instagram.com/betaupsilonchi",
+      "latestSourceUrl": "https://byx.org/join-a-chapter",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://byx.org/join-a-chapter/",
+        "normalizedValue": "https://www.instagram.com/betaupsilonchi"
+      }
+    },
+    {
+      "id": "841240b0-4724-43be-8ad4-b1a8caca427a",
+      "fraternitySlug": "delta-chi",
+      "chapterSlug": "jacksonville-state-jacksonville-state",
+      "name": "Jacksonville State",
+      "universityName": "Jacksonville State",
+      "email": "digitalcommons@jsu.edu",
+      "instagramUrl": "https://www.instagram.com/deltachijsu",
+      "latestSourceUrl": "https://digitalcommons.jsu.edu/lib-ac-histimg/15319/",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://digitalcommons.jsu.edu/lib-ac-histimg/15319/",
+        "normalizedValue": "https://www.instagram.com/deltachijsu"
+      }
+    },
+    {
+      "id": "7e75b6c3-c69c-4261-a9b0-afd65aa0e717",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16192",
+      "name": "Iota-Chi (Iowa)",
+      "universityName": "University of Iowa",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/iowalambdachialpha",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/iota-chi-iowa/",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/iota-chi-iowa/",
+        "normalizedValue": "https://www.instagram.com/iowalambdachialpha"
+      }
+    },
+    {
+      "id": "7dcc77bc-3866-458c-bbb6-ec8e16fdb9e0",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16181",
+      "name": "Gamma-Chi (Arkansas)",
+      "universityName": "University of Arkansas-Fayetteville",
+      "email": "uarklcapresident@gmail.com",
+      "instagramUrl": "https://www.instagram.com/arklambdachi",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/gamma-chi-arkansas/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/gamma-chi-arkansas/",
+        "normalizedValue": "uarklcapresident@gmail.com"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "7ccf1894-6b2c-4b0d-a2cf-946dee561aa8",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16233",
+      "name": "Sigma-Lambda (Virginia Tech)",
+      "universityName": "Virginia Polytechnic Institute & State University",
+      "email": "jbennett@music.cc.uga.edu",
+      "instagramUrl": "https://www.instagram.com/vtlambdachi",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/sigma-lambda-virginia-tech/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/sigma-lambda-virginia-tech/",
+        "normalizedValue": "jbennett@music.cc.uga.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "7bb70879-4121-4e7f-a82d-08fa0371b337",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16235",
+      "name": "Theta-Tau (Wake Forest)",
+      "universityName": "Wake Forest University",
+      "email": "harrisnb@wfu.edu",
+      "instagramUrl": "https://www.instagram.com/wfulambdachi",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/theta-tau-wake-forest/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/theta-tau-wake-forest/",
+        "normalizedValue": "harrisnb@wfu.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "7a6a1642-c162-4274-9eb1-1907415d9fe9",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16243",
+      "name": "Pi-Theta (Wichita State)",
+      "universityName": "Wichita State University",
+      "email": "operator@wichita.edu",
+      "instagramUrl": "https://www.instagram.com/wsulambdachi",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/pi-theta-wichita-state/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/pi-theta-wichita-state/",
+        "normalizedValue": "operator@wichita.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "7625a731-3097-4a43-8e40-6d2bec7a2cb4",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16236",
+      "name": "Gamma-Phi (Washington and Lee)",
+      "universityName": "Washington and Lee University",
+      "email": "kmccoil@wlu.edu",
+      "instagramUrl": "https://www.instagram.com/wlu_lambda",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/gamma-phi-washington-and-lee/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/gamma-phi-washington-and-lee/",
+        "normalizedValue": "kmccoil@wlu.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "70992448-c4ee-497d-91b7-692962e3b508",
+      "fraternitySlug": "alpha-delta-phi",
+      "chapterSlug": "eliot-washington-university",
+      "name": "Eliot",
+      "universityName": "Washington University",
+      "email": "littrell@wustl.edu",
+      "instagramUrl": null,
+      "latestSourceUrl": "https://www.alphadeltaphi.org/chapter-roll",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphadeltaphi.org/chapter-roll",
+        "normalizedValue": "littrell@wustl.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "6aea5e12-56dd-4625-ad47-d32222f7fd2a",
+      "fraternitySlug": "delta-chi",
+      "chapterSlug": "tri-state-tri-state",
+      "name": "Tri-State",
+      "universityName": "Tri-State",
+      "email": "jlstockwell19@my.trine.edu",
+      "instagramUrl": "https://www.instagram.com/deltachitrine",
+      "latestSourceUrl": "http://tristatedeltachi.org/contact/",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "http://tristatedeltachi.org/contact/",
+        "normalizedValue": "https://www.instagram.com/deltachitrine"
+      }
+    },
+    {
+      "id": "650bbcec-639c-445d-bc12-c4cdf02dece4",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16177",
+      "name": "Phi-Psi (Truman State)",
+      "universityName": "Truman State University",
+      "email": "ifc@truman.edu",
+      "instagramUrl": "https://www.instagram.com/lambdachitsu",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/phi-psi-truman-state/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/phi-psi-truman-state/",
+        "normalizedValue": "ifc@truman.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "64629eee-55b4-4682-9013-c16d3a29d76c",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "alpha-delta-active-montana-state-university",
+      "name": "Alpha Delta (active)",
+      "universityName": "Montana State University",
+      "email": "president@msuagr.org",
+      "instagramUrl": "https://www.instagram.com/node",
+      "latestSourceUrl": "http://agrmontanastate.net",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.msuagr.org/",
+        "normalizedValue": "president@msuagr.org"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "61703808-b398-4aa5-be1d-faa91f87903d",
+      "fraternitySlug": "beta-upsilon-chi",
+      "chapterSlug": "louisiana-state-university-louisiana-state-university",
+      "name": "Louisiana State University",
+      "universityName": "Louisiana State University",
+      "email": "lsubyx@gmail.com",
+      "instagramUrl": "https://www.instagram.com/betaupsilonchi",
+      "latestSourceUrl": "https://byx.org/join-a-chapter/",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://byx.org/join-a-chapter/",
+        "normalizedValue": "https://www.instagram.com/betaupsilonchi"
+      }
+    },
+    {
+      "id": "5f6d554b-e6b5-4250-bec4-38fca8cd3ce3",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16144",
+      "name": "Beta-Psi (Missouri State)",
+      "universityName": "Missouri State University",
+      "email": "cg374s@missouristate.edu",
+      "instagramUrl": "https://www.instagram.com/mostatelca",
+      "latestSourceUrl": "https://www.lambdachi.org/chapters/beta-psi-missouri-state/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.lambdachi.org/chapters/beta-psi-missouri-state/",
+        "normalizedValue": "cg374s@missouristate.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "56b39c1e-8bfb-40fc-978d-01afee81c841",
+      "fraternitySlug": "delta-chi",
+      "chapterSlug": "illinois-illinois",
+      "name": "Illinois",
+      "universityName": "Illinois",
+      "email": "fsaffairs@illinois.edu",
+      "instagramUrl": "https://www.instagram.com/kdchi_uiuc",
+      "latestSourceUrl": "https://www.instagram.com/kdchi_uiuc/",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "chapter_site",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.instagram.com/kdchi_uiuc/",
+        "normalizedValue": "fsaffairs@illinois.edu"
+      },
+      "instagramDecision": null
+    },
+    {
+      "id": "56612694-b5a8-4be6-bfeb-47aa146fcc2a",
+      "fraternitySlug": "alpha-delta-gamma",
+      "chapterSlug": "psi",
+      "name": "Psi",
+      "universityName": null,
+      "email": "John.boone@mymail.barry.edu",
+      "instagramUrl": "https://www.instagram.com/adg_psi",
+      "latestSourceUrl": "https://www.alphadeltagamma.org/chapters/psi",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphadeltagamma.org/chapters/psi",
+        "normalizedValue": "https://www.instagram.com/adg_psi"
+      }
+    },
+    {
+      "id": "564c67ff-0984-41f7-93db-08ed16550bdd",
+      "fraternitySlug": "alpha-gamma-rho",
+      "chapterSlug": "lambda-active-university-of-minnesota-twin-cities",
+      "name": "Lambda (active)",
+      "universityName": "University of Minnesota\u2013Twin Cities",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/agrlambda",
+      "latestSourceUrl": "https://www.alphagammarho.org",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphagammarho.org/",
+        "normalizedValue": "https://www.instagram.com/agrlambda"
+      }
+    },
+    {
+      "id": "51c5f45e-b472-4df3-b3c3-5901a7805502",
+      "fraternitySlug": "alpha-delta-gamma",
+      "chapterSlug": "alpha-iota",
+      "name": "Alpha Iota",
+      "universityName": null,
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/adgalphaiota",
+      "latestSourceUrl": "https://www.alphadeltagamma.org/chapters/alpha-iota",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://www.alphadeltagamma.org/chapters/alpha-iota",
+        "normalizedValue": "https://www.instagram.com/adgalphaiota"
+      }
+    },
+    {
+      "id": "4f7f2106-f143-4861-adef-1478c08dd22f",
+      "fraternitySlug": "sigma-chi",
+      "chapterSlug": "eta-tau-stephen-f-austin-state-university",
+      "name": "Eta Tau",
+      "universityName": "Stephen F. Austin State University",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/sfasigmachi",
+      "latestSourceUrl": "https://sigmachi.org",
+      "emailDecision": null,
+      "instagramDecision": {
+        "action": "review",
+        "reasonCode": "legacy_instagram_requires_review",
+        "pageScope": "nationals_chapter_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://sigmachi.org/",
+        "normalizedValue": "https://www.instagram.com/sfasigmachi"
+      }
+    },
+    {
+      "id": "4eabac81-ad9a-44a3-8e0e-3786500a7aa5",
+      "fraternitySlug": "sigma-chi",
+      "chapterSlug": "theta-rho-illinois-state-university",
+      "name": "Theta Rho",
+      "universityName": "Illinois State University",
+      "email": "jaschw3@ilstu.edu",
+      "instagramUrl": "https://www.instagram.com/isu_sigmachi",
+      "latestSourceUrl": "https://redbirdlife.illinoisstate.edu/organization/sigmachifraternity",
+      "emailDecision": {
+        "action": "review",
+        "reasonCode": "legacy_email_requires_review",
+        "pageScope": "school_affiliation_page",
+        "contactSpecificity": "ambiguous",
+        "supportingPageUrl": "https://redbirdlife.illinoisstate.edu/organization/sigmachifraternity",
+        "normalizedValue": "jaschw3@ilstu.edu"
+      },
+      "instagramDecision": null
+    }
+  ]
+}

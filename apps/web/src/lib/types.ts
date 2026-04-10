@@ -1,4 +1,47 @@
 export type ReviewStatus = "open" | "triaged" | "resolved" | "ignored";
+export type PageScope =
+  | "chapter_site"
+  | "school_affiliation_page"
+  | "nationals_chapter_page"
+  | "nationals_generic"
+  | "directory_page"
+  | "unrelated";
+
+export type ContactSpecificity =
+  | "chapter_specific"
+  | "school_specific"
+  | "national_specific_to_chapter"
+  | "national_generic"
+  | "ambiguous";
+
+export type ChapterStatusModel = "active" | "inactive" | "unknown";
+export type FieldResolutionStateModel = "missing" | "resolved" | "inactive" | "confirmed_absent" | "deferred";
+export type DecisionOutcomeModel = "accepted" | "rejected" | "deferred" | "review_required";
+
+export interface DecisionEvidence {
+  decisionStage: string;
+  evidenceUrl: string | null;
+  sourceType: string | null;
+  pageScope: PageScope | null;
+  contactSpecificity: ContactSpecificity | null;
+  confidence: number | null;
+  reasonCode: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface FieldContactProvenance {
+  supportingPageUrl: string | null;
+  supportingPageScope: PageScope | null;
+  contactProvenanceType: ContactSpecificity | null;
+  decisionStage: string | null;
+  sourceType: string | null;
+  reasonCode: string | null;
+  confidence: number | null;
+  decisionOutcome: DecisionOutcomeModel | null;
+  fieldResolutionState: FieldResolutionStateModel | null;
+  candidateValue: string | null;
+  updatedAt: string | null;
+}
 
 export interface ChapterListItem {
   id: string;
@@ -15,6 +58,7 @@ export interface ChapterListItem {
   contactEmail: string | null;
   chapterStatus: string;
   fieldStates: Record<string, string>;
+  contactProvenance?: Record<string, FieldContactProvenance>;
   updatedAt: string;
 }
 
@@ -509,7 +553,48 @@ export interface ChapterEvidence {
   query: string | null;
   relatedWebsiteUrl: string | null;
   metadata: Record<string, unknown>;
+  decisionEvidence?: DecisionEvidence | null;
   createdAt: string;
+}
+
+export interface AccuracyRecoveryMetrics {
+  completeRows: number;
+  chapterSpecificContactRows: number;
+  nationalsOnlyContactRows: number;
+  inactiveValidatedRows: number;
+  confirmedAbsentWebsiteRows: number;
+  activeRowsWithChapterSpecificEmail: number;
+  activeRowsWithChapterSpecificInstagram: number;
+  activeRowsWithAnyContact: number;
+  totalChapters: number;
+}
+
+export interface NationalProfile {
+  fraternitySlug: string;
+  fraternityName: string;
+  nationalUrl: string;
+  nationalUrlConfidence: number;
+  nationalUrlProvenanceType: string | null;
+  nationalUrlReasonCode: string | null;
+  contactEmail: string | null;
+  contactEmailConfidence: number;
+  contactEmailProvenanceType: string | null;
+  contactEmailReasonCode: string | null;
+  instagramUrl: string | null;
+  instagramConfidence: number;
+  instagramProvenanceType: string | null;
+  instagramReasonCode: string | null;
+  phone: string | null;
+  phoneConfidence: number;
+  phoneProvenanceType: string | null;
+  phoneReasonCode: string | null;
+  addressText: string | null;
+  addressConfidence: number;
+  addressProvenanceType: string | null;
+  addressReasonCode: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface AgentOpsSummary {
@@ -550,6 +635,7 @@ export interface AgentOpsSummary {
   chapterValidityRepairable: number;
   chapterValidityBlockedInvalid: number;
   chapterValidityBlockedRepairable: number;
+  accuracyRecovery: AccuracyRecoveryMetrics;
   opsAlertsOpen: number;
   opsAlertsCritical: number;
   opsAlertsWarning: number;

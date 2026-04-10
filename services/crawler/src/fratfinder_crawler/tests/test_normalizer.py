@@ -253,6 +253,52 @@ def test_chapter_validity_blocks_wikipedia_sports_or_category_pairs():
     assert decision.invalid_reason == "ranking_or_report_row"
 
 
+def test_chapter_validity_blocks_expansion_rows():
+    decision = classify_chapter_validity(
+        ExtractedChapter(
+            name="2026 Spring Expansion",
+            university_name="UC-Davis",
+            source_url="https://ato.example.org/expansion",
+            source_confidence=0.95,
+        ),
+        source_class="national",
+    )
+
+    assert decision.validity_class == "invalid_non_chapter"
+    assert decision.invalid_reason == "expansion_or_installment_row"
+
+
+def test_chapter_validity_blocks_navigation_social_media_rows():
+    decision = classify_chapter_validity(
+        ExtractedChapter(
+            name="follow us on social media",
+            university_name="Unknown",
+            source_url="https://phigam.example.org/chapters",
+            source_confidence=0.95,
+        ),
+        source_class="national",
+    )
+
+    assert decision.validity_class == "invalid_non_chapter"
+    assert decision.invalid_reason == "navigation_or_chrome"
+
+
+def test_chapter_validity_blocks_wikipedia_other_greek_org_rows_without_school_identity():
+    decision = classify_chapter_validity(
+        ExtractedChapter(
+            name="Alpha Delta Pi",
+            university_name="ΑΔΠ",
+            source_url="https://en.wikipedia.org/wiki/University_of_Mount_Union",
+            source_confidence=0.95,
+            source_snippet="Alpha Delta Pi ΑΔΠ 1851 A-D-Pi",
+        ),
+        source_class="national",
+    )
+
+    assert decision.validity_class == "invalid_non_chapter"
+    assert decision.invalid_reason == "other_greek_organization_row"
+
+
 def test_chapter_validity_blocks_history_timeline_rows_with_year_ranges():
     decision = classify_chapter_validity(
         ExtractedChapter(

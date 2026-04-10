@@ -13,7 +13,9 @@ from fratfinder_crawler.field_jobs import (
     NationalsChapterEntry,
     RetryableJobError,
     SearchDocument,
+    _email_local_part_has_identity,
     _fraternity_matches,
+    _instagram_looks_relevant_to_job,
     _nationals_entry_match_score,
     _normalized_match_text,
     _search_result_is_useful,
@@ -783,6 +785,29 @@ def test_verify_website_fails_terminal_on_max_attempts_after_server_error():
 
 
 
+def test_verify_website_clears_invalid_mailto_candidate_and_backfills_email():
+    job = _job("verify_website", website_url="mailto:admin@example.org")
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"website_url": None, "contact_email": "admin@example.org"}
+    assert repo.completed[0][2] == {"website_url": "missing", "contact_email": "found"}
+
+
+def test_process_normalizes_legacy_field_name_aliases_before_dispatch():
+    job = _job("contact_email", website_url="https://chapter.example.edu")
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["mailto:chapter@example.edu"]})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1]["contact_email"] == "chapter@example.edu"
+
+
 def test_find_website_requeues_when_only_source_base_url_exists():
     job = _job("find_website", university_name="Example University")
     repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["No website in this snippet"]})
@@ -978,6 +1003,35 @@ def test_fraternity_matches_requires_full_identity_for_three_letter_greek_orgs()
     assert _fraternity_matches(job, _normalized_match_text("Sigma Gamma Rho at West Texas A&M")) is False
 
 
+def test_email_local_part_identity_rejects_two_letter_fraternity_initials_alone():
+    sigma_chi_job = replace(
+        _job("find_email", university_name="University of Tulsa", chapter_name="Delta Omega"),
+        fraternity_slug="sigma-chi",
+    )
+
+    assert _email_local_part_has_identity("sga.ssc@utulsa.edu", sigma_chi_job) is False
+
+    syracuse_job = replace(
+        _job("find_email", university_name="Syracuse University", chapter_name="Psi Psi"),
+        fraternity_slug="sigma-chi",
+    )
+    assert _email_local_part_has_identity("scpsscheduling@syr.edu", syracuse_job) is False
+
+
+def test_email_local_part_identity_accepts_school_or_fraternity_specific_local_parts():
+    agr_job = replace(
+        _job("find_email", university_name="South Dakota State University", chapter_name="Alpha Phi"),
+        fraternity_slug="alpha-gamma-rho",
+    )
+    assert _email_local_part_has_identity("alphagammarhosdsu@gmail.com", agr_job) is True
+
+    byx_job = replace(
+        _job("find_email", university_name="University of Central Oklahoma", chapter_name="University of Central Oklahoma"),
+        fraternity_slug="beta-upsilon-chi",
+    )
+    assert _email_local_part_has_identity("ucobyx@gmail.com", byx_job) is True
+
+
 def test_search_result_is_useful_rejects_partial_greek_token_overlap():
     job = replace(
         _job("find_website", university_name="West Texas A&M University", chapter_name="West Texas A&M Colony (active)"),
@@ -1073,6 +1127,37 @@ def test_email_search_gate_rejects_generic_office_email_without_identity_anchor(
     )
 
     assert engine._email_search_candidate_passes_gate("reslife@columbia.edu", document, job) is False
+
+
+def test_email_search_gate_rejects_graduate_program_office_email_on_school_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_email", university_name="Bryant University", chapter_name="Zeta Chi"), fraternity_slug="theta-chi")
+    document = SearchDocument(
+        text="Theta Chi appears on Bryant University student involvement pages. Contact graduateprograms@bryant.edu for graduate office support.",
+        url="https://www.bryant.edu/student-life/student-involvement",
+        title="Theta Chi | Bryant University Student Involvement",
+        provider="search_page",
+    )
+
+    assert engine._email_search_candidate_passes_gate("graduateprograms@bryant.edu", document, job) is False
+
+
+def test_email_search_gate_rejects_fsl_office_email_on_official_school_page():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_email", university_name="University of Missouri", chapter_name="Missouri Alpha (A)"),
+        fraternity_slug="sigma-alpha-epsilon",
+    )
+    document = SearchDocument(
+        text="Fraternity and Sorority Life (FSL) lists Sigma Alpha Epsilon among fraternities. Questions? Email fsl@missouri.edu.",
+        url="https://fsl.missouri.edu/chapters/sigma-alpha-epsilon",
+        title="Sigma Alpha Epsilon | University of Missouri FSL",
+        provider="search_page",
+    )
+
+    assert engine._email_search_candidate_passes_gate("fsl@missouri.edu", document, job) is False
 
 
 def test_verify_school_match_creates_review_item_on_clear_mismatch():
@@ -1951,6 +2036,41 @@ def test_instagram_queries_skip_two_letter_school_initials_by_default():
     assert all("sigmachibu" not in query for query in queries)
 
 
+def test_extract_instagram_matches_rejects_placeholder_handle_without_real_chapter_identity():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_instagram", university_name="Washington State University"), fraternity_slug="sigma-chi")
+    document = SearchDocument(
+        text="Housing page for Washington State University Fraternity & Sorority Life.",
+        links=["https://www.instagram.com/Umbraco.Cms.Core.Models.Link"],
+        url="https://gogreek.wsu.edu/joining-the-community/housing/",
+        title="Housing",
+        provider="search_page",
+    )
+
+    matches = engine._extract_instagram_matches(document, job)
+
+    assert matches == []
+
+
+def test_extract_relaxed_authoritative_matches_rejects_generic_school_contact_page_email():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(_job("find_email", university_name="University of Utah"), fraternity_slug="phi-gamma-delta", chapter_name="Sigma Lambda Provisional Chapter")
+    document = SearchDocument(
+        text="Contact Us Fraternity and Sorority Life University of Utah general office greeks@utah.edu",
+        links=["mailto:greeks@utah.edu"],
+        url="https://fraternityandsororitylife.utah.edu/contact-us/",
+        title="Contact Us - Fraternity and Sorority Life",
+        provider="search_page",
+    )
+
+    relaxed_email, relaxed_instagram = engine._extract_relaxed_authoritative_matches(document, job)
+
+    assert relaxed_email is None
+    assert relaxed_instagram is None
+
+
 def test_instagram_queries_keep_strong_three_plus_character_initials():
     repo = FakeRepository(jobs=[], snippets_by_chapter={})
     engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker", search_provider="bing_html")
@@ -2804,6 +2924,25 @@ def test_instagram_search_gate_keeps_valid_school_page_chapter_handle():
     matches = engine._extract_instagram_matches(document, job)
 
     assert [match.value for match in matches] == ["https://www.instagram.com/wwufiji"]
+
+
+def test_instagram_relevance_accepts_fiji_alias_handle_with_authoritative_context():
+    job = replace(
+        _job("find_instagram", university_name="William Woods College", chapter_name="Kappa Chi Chapter"),
+        fraternity_slug="phi-gamma-delta",
+        source_slug="phi-gamma-delta-main",
+        source_base_url="https://phigam.org/about/overview/our-chapters/",
+        payload={"candidateSchoolName": "William Woods College", "sourceSlug": "phi-gamma-delta-main"},
+    )
+    document = SearchDocument(
+        text="William Woods College. Phi Gamma Delta. Instagram wwufiji.",
+        links=[],
+        url="https://phigam.org/about/overview/our-chapters/",
+        title="Our Chapters | Phi Gamma Delta",
+        provider="nationals_directory",
+    )
+
+    assert _instagram_looks_relevant_to_job("https://www.instagram.com/wwufiji/", job, document=document) is True
 
 
 def test_instagram_source_page_rejects_hq_handle_without_local_identity():

@@ -14,6 +14,7 @@ export const metadata: Metadata = {
 const navItems = [
   { href: "/", label: "Overview" },
   { href: "/chapters", label: "Chapters" },
+  { href: "/nationals", label: "Nationals" },
   { href: "/runs", label: "Crawl Runs" },
   { href: "/agent-ops", label: "Agent Ops" },
   { href: "/review-items", label: "Review Queue" },

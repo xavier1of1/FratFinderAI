@@ -1,0 +1,10 @@
+{
+  "generatedAt": "2026-04-09T19:43:23.779612+00:00",
+  "mode": "apply",
+  "invalidRowsToDelete": 0,
+  "legacyWebsiteRowsToQuarantine": 0,
+  "legacyContactRowsToQuarantine": 0,
+  "invalidSamples": [],
+  "websiteQuarantineSamples": [],
+  "quarantineSamples": []
+}

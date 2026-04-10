@@ -4,6 +4,16 @@
 - Added `infra/supabase/migrations/0027_school_policy_and_chapter_activity.sql` to introduce durable `school_greek_life_registry` and `fraternity_school_activity_cache` tables for campus policy and school-specific chapter activity validation.
 - Added a `purge_inactive_schools` request-graph stage plus crawler/UI state to expose school-policy and chapter-activity validation before contact enrichment is admitted.
 - Added precision helpers for campus policy, school chapter-list validation, site-scope classification, directory block matching, and Greek-string detection to support authoritative school/nationals-first validation.
+- Added `infra/supabase/migrations/0028_accuracy_recovery_foundations.sql` to introduce first-class `national_profiles` plus durable chapter-side `contact_provenance`.
+- Added the approval-gated accuracy program docs:
+  - `docs/SystemReport/ACCURACY_CONCEPTUAL_MODEL_2026-04-09.md`
+  - `docs/SystemReport/APPROVAL_GATED_PHASE_REPORT_TEMPLATE.md`
+  - `docs/SystemReport/APPROVAL_GATED_FAILURE_PACKET_TEMPLATE.md`
+- Added `scripts/generate_accuracy_phase0_baseline.py` to generate the locked Phase 0 baseline packet directly from the live database.
+- Added the new nationals operator surface:
+  - `apps/web/src/app/nationals/page.tsx`
+  - `apps/web/src/app/api/nationals/route.ts`
+  - `apps/web/src/lib/repositories/nationals-profile-repository.ts`
 
 ### Changed
 - Campus policy validation now runs from official school evidence only and reuses stored `unknown` results only when they came from a real official-school page, preventing stale or inconsistent legacy `unknown` rows from blocking fresh validation.
@@ -16,6 +26,16 @@
 - Stress-run queue reconciliation now defers canonical email jobs whenever a confident website prerequisite is missing, even if no sibling website job is still pending, so email enrichment no longer sits falsely `actionable` after website discovery exhausts.
 - Chapter-repair promotion now preserves the same confident-website prerequisite for email jobs instead of automatically reactivating them after repair, preventing repaired chapters from reintroducing actionable-email queue leaks.
 - Stress-mode field-job processing now preserves deferred canonical jobs, honors provider hard-blocks mid-job, and reuses prerequisite defer states instead of reactivating them under later reconciliation passes.
+- Field-job completion now persists a shared evidence contract into both `chapter_evidence.metadata` and `chapters.contact_provenance`, including page scope, contact specificity, decision stage, source type, confidence, and reason code.
+- Agent Ops now exposes Phase 0 accuracy recovery metrics for `complete_row`, chapter-specific contact coverage, nationals-only pollution, validated inactive rows, and confirmed-absent websites.
+- The field-job runtime now distinguishes generic nationals contact from chapter-supported contact and rejects HQ-only email/Instagram/website matches from counting as chapter data while still allowing chapter-specific national-directory matches.
+- Verified-source upserts now mirror into first-class `national_profiles`, so national truth is visible separately from chapter truth.
+- Residual website cleanup now deep-verifies candidate pages directly, distinguishes chapter-specific school profile/organization pages from generic school FSL/IFC/portal landing pages, and treats generic org-portal roots like `/engage` and `/club_signup` as non-chapter directories instead of weak website matches.
+- Phase 5 legacy contact reconciliation now backfills chapter-safe email and Instagram provenance, clears unsupported school-office and wrong-context legacy contact, and normalizes direct Instagram evidence back to the actual handle URL instead of storing login redirects.
+- Phase 6 scaling now normalizes legacy field-job aliases during claim/runtime processing, clears non-HTTP `verify_website` candidates instead of requeueing them, and tightens school-hosted website/email/Instagram acceptance so school pages must show explicit fraternity or chapter identity before they can donate chapter data.
+- Instagram identity matching now ignores two-letter fraternity initials, preventing placeholder or CMS-generated handles from being misread as chapter accounts for organizations such as Sigma Chi.
+- Phase 7 investor-readiness reporting now distinguishes `system complete`, `presentation-safe`, and curated demo `supporting page` samples, so investor-facing walkthroughs can stay accuracy-first without implying every supporting URL is a chapter-owned website.
+- Candidate sanitization now rejects placeholder Instagram handles such as `instagram.com/node`, and the final demo-safety cleanup quarantines those deterministic artifacts plus cross-school `.edu` emails from chapter-specific national pages when they clearly do not match the target campus.
 
 ### Fixed
 - Fixed a queue-oscillation bug in historical triage where already deferred canonical jobs were being reset back to `actionable`, causing provider- and dependency-backed jobs to thrash instead of cooling down.
@@ -24,6 +44,10 @@
 - Fixed the false inactive decision for Phi Gamma Delta at Louisiana State University by treating LSU’s Greek Life scorecard as an active fraternity roster instead of a generic community page.
 - Fixed low-yield rerun regressions that had previously written wrong-school Drexel/IUP data, archival WSU URLs, and other non-chapter artifacts into Theta Chi chapter records.
 - Fixed the live rerun cleanup path so legacy bad sample rows can be safely reset and reprocessed without carrying forward stale `unknown` school-policy decisions.
+- Fixed a new provenance-ordering regression where generic-national guards were incorrectly rejecting chapter-specific Instagram handles, external chapter websites, and national-directory chapter entries because the supporting page classification overrode the candidate asset classification.
+- Fixed a residual website-verification gap where generic school organization-portal roots (for example CampusLabs or campus `club_signup` landing pages) could be rejected only as low-confidence instead of being safely quarantined as generic school directories, leaving a small set of bad legacy chapter websites behind.
+- Fixed a Phase 5 contact-specificity leak where two-letter fraternity initials like `SC` were treated as sufficient identity in legacy email/page classification, causing unrelated school pages and office emails to be over-accepted.
+- Fixed standalone fraternity-branded hosts such as chapter-owned `*.com` domains from being misclassified as official school-affiliation pages when the host also resembled a campus name.
 
 ### Validated
 - Validated school-policy and chapter-activity changes with:
@@ -36,6 +60,35 @@
   - `alpha-omicron-washington-state-university`
   - `beta-rho-chapter-louisiana-state-university`
   The reruns no longer rewrote wrong-school, archival, or garbage contact values, and LSU remained `active` instead of being marked inactive.
+- Validated the approval-gated accuracy foundation with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py -q`
+  - `pnpm.cmd --filter @fratfinder/web typecheck`
+  - `pnpm.cmd --filter @fratfinder/web build`
+  - `python scripts/generate_accuracy_phase0_baseline.py`
+- Validated the bounded residual website cleanup phase with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_precision_tools.py services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py services/crawler/src/fratfinder_crawler/tests/test_normalizer.py -q`
+  - `python scripts/apply_phase35_accuracy_cleanup.py --apply --report docs/SystemReport/PHASE_4_RESIDUAL_WEBSITE_APPLY3_2026-04-09.json`
+  - `python scripts/apply_phase35_accuracy_cleanup.py --report docs/SystemReport/PHASE_4_RESIDUAL_WEBSITE_FINAL_2026-04-09.json`
+  The residual website quarantine cohort drained to `0`, while chapter-specific school pages and organization-profile pages such as UWYO FSL, TAMUK IFC, TerpLink, and Delaware project pages remained intact.
+- Validated the bounded Phase 5 contact cleanup phase with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_precision_tools.py services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py -q`
+  - `python scripts/reconcile_phase5_contacts.py --report docs/SystemReport/PHASE_5_CONTACT_DRYRUN_2026-04-09.json`
+  - `python scripts/reconcile_phase5_contacts.py --apply --report docs/SystemReport/PHASE_5_CONTACT_APPLY_2026-04-09.json`
+  - `python scripts/reconcile_phase5_contacts.py --report docs/SystemReport/PHASE_5_CONTACT_FINAL_2026-04-09.json`
+  The live legacy contact cohort drained to `0` remaining auto-accept and `0` remaining auto-reject rows, leaving only the intentionally unresolved review bucket.
+- Validated the bounded Phase 6 scaling phase with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py services/crawler/src/fratfinder_crawler/tests/test_precision_tools.py -q`
+  - `python scripts/run_phase6_rollout.py`
+  - `docs/SystemReport/PHASE_6_SCALING_APPROVAL_REPORT_2026-04-09.md`
+  The first Phase 6 pass exposed a small set of school-hosted false positives, which were remediated and rerun; the final Phase 6 packet shows safer queue movement with no new accepted-sample regressions.
+- Validated the final Phase 7 investor-readiness slice with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_candidate_sanitizer.py services/crawler/src/fratfinder_crawler/tests/test_precision_tools.py services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py -q`
+  - `python scripts/finalize_phase7_demo_readiness.py`
+  - `python scripts/generate_phase7_investor_readiness.py`
+  - `docs/SystemReport/PHASE_7_INVESTOR_READINESS_REPORT_2026-04-09.md`
+  - `docs/SystemReport/PHASE_7_INVESTOR_SAMPLE_PACKET_2026-04-09.json`
+  - `docs/SystemReport/PHASE_7_DEMO_NOTES_2026-04-09.md`
+  The final pass cleared all placeholder Instagram rows, quarantined the known cross-school Yale email/export-page regression, and produced a curated investor packet over the stricter presentation-safe cohort.
 - Validated the large `stress-20260409-full` field-job cohort with:
   - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py -q`
   - `docs/reports/stress/stress-20260409-post-preserve-deferred.out`

@@ -1,0 +1,166 @@
+{
+  "generatedAt": "2026-04-09T19:50:08.780532+00:00",
+  "mode": "apply",
+  "invalidRowsToDelete": 0,
+  "legacyWebsiteRowsToQuarantine": 7,
+  "legacyContactRowsToQuarantine": 7,
+  "invalidSamples": [],
+  "websiteQuarantineSamples": [
+    {
+      "id": "3cfb893d-1350-4143-a5c7-75811bdab5c8",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16127",
+      "name": "Iota-Epsilon (Indiana State)",
+      "universityName": "Indiana State University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://indstate.campuslabs.com/engage"
+    },
+    {
+      "id": "85c44bfb-34c8-4ba0-9cd6-91c57f3f2c1b",
+      "fraternitySlug": "alpha-tau-omega",
+      "chapterSlug": "kappa-psi-pittsburgh",
+      "name": "Kappa Psi",
+      "universityName": "Pittsburgh",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://experience.pitt.edu/club_signup?group_type=86573"
+    },
+    {
+      "id": "e4d7df2b-4a51-467e-9a48-bacc6fb87417",
+      "fraternitySlug": "alpha-tau-omega",
+      "chapterSlug": "epsilon-tau-utah",
+      "name": "Epsilon Tau",
+      "universityName": "Utah",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://campusconnect.utah.edu/club_signup?view=all&club_url=BCatUofU"
+    },
+    {
+      "id": "a6ff4c7c-8578-41dc-8d30-151aa9fef43d",
+      "fraternitySlug": "sigma-chi",
+      "chapterSlug": "beta-chi-emory-university",
+      "name": "Beta Chi",
+      "universityName": "Emory University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://thehub.emory.edu/club_signup?group_type=27087"
+    },
+    {
+      "id": "52774aac-99c9-4dc5-84a4-1424ced2d0c8",
+      "fraternitySlug": "beta-upsilon-chi",
+      "chapterSlug": "james-madison-university-james-madison-university",
+      "name": "James Madison University",
+      "universityName": "James Madison University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://beinvolved.jmu.edu/club_signup?group_type=&search=faith&category_tags=&order=name_asc"
+    },
+    {
+      "id": "b78ef168-e95b-45b9-88d9-fc6abb1b94e5",
+      "fraternitySlug": "beta-upsilon-chi",
+      "chapterSlug": "university-of-central-oklahoma-university-of-central-oklahoma",
+      "name": "University of Central Oklahoma",
+      "universityName": "University of Central Oklahoma",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://ucore.uco.edu/club_signup?view=all&"
+    },
+    {
+      "id": "60ad4b36-2804-4d19-8752-6b7facd8c051",
+      "fraternitySlug": "sigma-chi",
+      "chapterSlug": "mu-gamma-binghamton-university",
+      "name": "Mu Gamma",
+      "universityName": "Binghamton University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://bengaged.binghamton.edu/club_signup?view=all&group_type=14106"
+    }
+  ],
+  "quarantineSamples": [
+    {
+      "id": "3cfb893d-1350-4143-a5c7-75811bdab5c8",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16127",
+      "name": "Iota-Epsilon (Indiana State)",
+      "universityName": "Indiana State University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://indstate.campuslabs.com/engage",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/lambdachi_indstate"
+    },
+    {
+      "id": "85c44bfb-34c8-4ba0-9cd6-91c57f3f2c1b",
+      "fraternitySlug": "alpha-tau-omega",
+      "chapterSlug": "kappa-psi-pittsburgh",
+      "name": "Kappa Psi",
+      "universityName": "Pittsburgh",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://experience.pitt.edu/club_signup?group_type=86573",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/ato.pitt"
+    },
+    {
+      "id": "e4d7df2b-4a51-467e-9a48-bacc6fb87417",
+      "fraternitySlug": "alpha-tau-omega",
+      "chapterSlug": "epsilon-tau-utah",
+      "name": "Epsilon Tau",
+      "universityName": "Utah",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://campusconnect.utah.edu/club_signup?view=all&club_url=BCatUofU",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/utahato"
+    },
+    {
+      "id": "a6ff4c7c-8578-41dc-8d30-151aa9fef43d",
+      "fraternitySlug": "sigma-chi",
+      "chapterSlug": "beta-chi-emory-university",
+      "name": "Beta Chi",
+      "universityName": "Emory University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://thehub.emory.edu/club_signup?group_type=27087",
+      "email": "community@large.foster",
+      "instagramUrl": null
+    },
+    {
+      "id": "52774aac-99c9-4dc5-84a4-1424ced2d0c8",
+      "fraternitySlug": "beta-upsilon-chi",
+      "chapterSlug": "james-madison-university-james-madison-university",
+      "name": "James Madison University",
+      "universityName": "James Madison University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://beinvolved.jmu.edu/club_signup?group_type=&search=faith&category_tags=&order=name_asc",
+      "email": "jmu@byx.org",
+      "instagramUrl": null
+    },
+    {
+      "id": "b78ef168-e95b-45b9-88d9-fc6abb1b94e5",
+      "fraternitySlug": "beta-upsilon-chi",
+      "chapterSlug": "university-of-central-oklahoma-university-of-central-oklahoma",
+      "name": "University of Central Oklahoma",
+      "universityName": "University of Central Oklahoma",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://ucore.uco.edu/club_signup?view=all&",
+      "email": "ucobyx@gmail.com",
+      "instagramUrl": null
+    },
+    {
+      "id": "60ad4b36-2804-4d19-8752-6b7facd8c051",
+      "fraternitySlug": "sigma-chi",
+      "chapterSlug": "mu-gamma-binghamton-university",
+      "name": "Mu Gamma",
+      "universityName": "Binghamton University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://bengaged.binghamton.edu/club_signup?view=all&group_type=14106",
+      "email": null,
+      "instagramUrl": null
+    }
+  ]
+}

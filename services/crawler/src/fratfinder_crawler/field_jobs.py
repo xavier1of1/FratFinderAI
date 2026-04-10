@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import unquote, urljoin, urlparse
 
@@ -18,14 +18,28 @@ from fratfinder_crawler.candidate_sanitizer import (
 )
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.models import (
+    CONTACT_SPECIFICITY_AMBIGUOUS,
+    CONTACT_SPECIFICITY_CHAPTER,
+    CONTACT_SPECIFICITY_NATIONAL_CHAPTER,
+    CONTACT_SPECIFICITY_NATIONAL_GENERIC,
+    CONTACT_SPECIFICITY_SCHOOL,
     ExtractedChapter,
     FieldJob,
+    FIELD_RESOLUTION_CONFIRMED_ABSENT,
+    FIELD_RESOLUTION_INACTIVE,
+    FIELD_RESOLUTION_RESOLVED,
     FIELD_JOB_FIND_EMAIL,
     FIELD_JOB_FIND_INSTAGRAM,
     FIELD_JOB_FIND_WEBSITE,
     FIELD_JOB_TO_STATE_KEY,
     FIELD_JOB_VERIFY_SCHOOL,
     FIELD_JOB_VERIFY_WEBSITE,
+    PAGE_SCOPE_CHAPTER_SITE,
+    PAGE_SCOPE_DIRECTORY,
+    PAGE_SCOPE_NATIONALS_CHAPTER,
+    PAGE_SCOPE_NATIONALS_GENERIC,
+    PAGE_SCOPE_SCHOOL_AFFILIATION,
+    PAGE_SCOPE_UNRELATED,
     ProvenanceRecord,
     ReviewItemCandidate,
     SourceRecord,
@@ -59,7 +73,19 @@ _INSTAGRAM_NEARBY_HANDLE_RE = re.compile(
 _URL_RE = re.compile(r'https?://[^\s\]\[\)\("<>]+', re.IGNORECASE)
 _OBFUSCATED_AT_RE = re.compile(r"\s*(?:@|\(at\)|\[at\]|\{at\}|\sat\s)\s*", re.IGNORECASE)
 _OBFUSCATED_DOT_RE = re.compile(r"\s*(?:\.|\(dot\)|\[dot\]|\{dot\}|\sdot\s)\s*", re.IGNORECASE)
-_GENERIC_EMAIL_PREFIXES = {"info", "contact", "admin", "office", "hello", "membership", "national", "headquarters"}
+_GENERIC_EMAIL_PREFIXES = {
+    "info",
+    "contact",
+    "admin",
+    "office",
+    "hello",
+    "membership",
+    "national",
+    "nationals",
+    "headquarters",
+    "hq",
+    "ihq",
+}
 _IGNORED_INSTAGRAM_SEGMENTS = {"p", "reel", "tv", "stories", "explore", "accounts", "mailto"}
 _DOCUMENT_URL_EXTENSIONS = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".ics")
 _BLOCKED_WEBSITE_HOSTS = {"reddit.com", "www.reddit.com", "old.reddit.com", "facebook.com", "www.facebook.com", "instagram.com", "www.instagram.com", "twitter.com", "x.com", "youtube.com", "www.youtube.com", "linkedin.com", "www.linkedin.com", "bing.com", "www.bing.com", "stackoverflow.com", "www.stackoverflow.com", "stackexchange.com", "github.com", "www.github.com", "sigmaaldrich.com", "www.sigmaaldrich.com", "sigma-aldrich.com", "www.sigma-aldrich.com", "milliporesigma.com", "www.milliporesigma.com", "merckmillipore.com", "www.merckmillipore.com"}
@@ -159,6 +185,7 @@ _LOW_SIGNAL_WEBSITE_PATH_MARKERS = (
     "wp-content",
 )
 _OFFICIAL_AFFILIATION_MARKERS = (
+    "fsl",
     "chapter profile",
     "chapter profiles",
     "chapters",
@@ -167,6 +194,7 @@ _OFFICIAL_AFFILIATION_MARKERS = (
     "find a student org",
     "fraternities",
     "fraternity and sorority",
+    "fraternity student life",
     "fraternity chapters",
     "fraternity sorority life",
     "greek life",
@@ -213,14 +241,23 @@ _EMAIL_ROLE_MARKERS = (
 _GENERIC_OFFICE_EMAIL_MARKERS = {
     "admissions",
     "advisor",
+    "fsl",
     "greeklife",
     "greek.life",
+    "graduateprogram",
+    "graduateprograms",
     "leadership",
+    "ofsl",
     "office",
     "reslife",
+    "studentengagement",
     "studentaffairs",
+    "studentinvolvement",
     "student.life",
     "studentlife",
+    "studentorg",
+    "studentorganization",
+    "studentorganizations",
 }
 _FRATERNITY_NON_IDENTITY_TOKENS = {"main", "national", "nationals"}
 _CHAPTER_SIGNAL_STOPWORDS = {
@@ -241,6 +278,13 @@ _INSTAGRAM_CONFLICT_MARKERS = {
     "sigma sigma sigma": "sigma sigma sigma",
     "trisigma": "sigma sigma sigma",
     "delta chi fraternity": "delta chi",
+}
+_NATIONAL_GENERIC_INSTAGRAM_MARKERS = {
+    "hq",
+    "ihq",
+    "national",
+    "nationals",
+    "officialhq",
 }
 _GREEDY_COLLECT_NONE = "none"
 _GREEDY_COLLECT_PASSIVE = "passive"
@@ -374,6 +418,31 @@ class NationalsChapterEntry:
     source_url: str
     source_snippet: str
     confidence: float
+
+
+def _map_scope_classifier_to_page_scope(decision: str, *, prefer_chapter_nationals: bool = False) -> str:
+    normalized = str(decision or "").strip().lower()
+    if normalized == "chapter_site":
+        return PAGE_SCOPE_CHAPTER_SITE
+    if normalized == "school_affiliation":
+        return PAGE_SCOPE_SCHOOL_AFFILIATION
+    if normalized == "nationals":
+        return PAGE_SCOPE_NATIONALS_CHAPTER if prefer_chapter_nationals else PAGE_SCOPE_NATIONALS_GENERIC
+    if normalized == "directory":
+        return PAGE_SCOPE_DIRECTORY
+    return PAGE_SCOPE_UNRELATED
+
+
+def _contact_specificity_for_page_scope(page_scope: str) -> str:
+    if page_scope == PAGE_SCOPE_CHAPTER_SITE:
+        return CONTACT_SPECIFICITY_CHAPTER
+    if page_scope == PAGE_SCOPE_SCHOOL_AFFILIATION:
+        return CONTACT_SPECIFICITY_SCHOOL
+    if page_scope == PAGE_SCOPE_NATIONALS_CHAPTER:
+        return CONTACT_SPECIFICITY_NATIONAL_CHAPTER
+    if page_scope == PAGE_SCOPE_NATIONALS_GENERIC:
+        return CONTACT_SPECIFICITY_NATIONAL_GENERIC
+    return CONTACT_SPECIFICITY_AMBIGUOUS
 
 
 class FieldJobEngine:
@@ -524,6 +593,7 @@ class FieldJobEngine:
             )
             if job is None:
                 break
+            job = replace(job, field_name=_STATE_KEY_TO_FIELD_JOB.get(job.field_name, job.field_name))
 
             log_event(
                 self._logger,
@@ -818,6 +888,169 @@ class FieldJobEngine:
 
     def _fraternity_name_for_job(self, job: FieldJob) -> str:
         return _display_name(job.fraternity_slug)
+
+    def _classify_page_scope(
+        self,
+        job: FieldJob,
+        *,
+        page_url: str | None,
+        page_text: str = "",
+        prefer_chapter_nationals: bool = False,
+    ) -> str:
+        if not page_url:
+            return PAGE_SCOPE_UNRELATED
+        scope = tool_site_scope_classifier(
+            page_url=page_url,
+            title="",
+            text=page_text[:1600],
+            fraternity_name=self._fraternity_name_for_job(job),
+            school_name=self._school_name_for_job(job),
+            chapter_name=job.chapter_name,
+        )
+        return _map_scope_classifier_to_page_scope(scope.decision, prefer_chapter_nationals=prefer_chapter_nationals)
+
+    def _resolution_evidence_for_candidate(
+        self,
+        job: FieldJob,
+        match: CandidateMatch,
+        *,
+        target_field: str,
+        decision_stage: str,
+    ) -> dict[str, Any]:
+        parsed_source = urlparse(match.source_url or "")
+        parsed_base = urlparse(job.source_base_url or "")
+        parsed_candidate = urlparse(match.value or "") if target_field in {"website_url", "instagram_url"} else urlparse("")
+        snippet_text = _normalized_match_text(match.source_snippet)
+        supporting_document = SearchDocument(
+            text=match.source_snippet,
+            url=match.source_url,
+            title="",
+            provider=match.source_provider,
+            query=match.query,
+        )
+        same_source_host = bool(parsed_source.netloc and parsed_base.netloc) and (
+            parsed_source.netloc.lower() == parsed_base.netloc.lower()
+            or parsed_source.netloc.lower().endswith(f".{parsed_base.netloc.lower()}")
+            or parsed_base.netloc.lower().endswith(f".{parsed_source.netloc.lower()}")
+        )
+        chapterish_context = any(
+            (
+                _school_matches(job, snippet_text),
+                _fraternity_matches(job, snippet_text),
+                _chapter_matches(job, snippet_text),
+                bool(match.related_website_url),
+                "chapter website" in snippet_text,
+                "official student organization" in snippet_text,
+            )
+        )
+        prefer_chapter_nationals = match.source_provider in {"nationals_directory", "chapter_website"} or (
+            match.source_provider == "provenance" and same_source_host and chapterish_context
+        )
+        page_scope = self._classify_page_scope(
+            job,
+            page_url=match.source_url,
+            page_text=match.source_snippet,
+            prefer_chapter_nationals=prefer_chapter_nationals,
+        )
+        if target_field == "website_url":
+            trust_tier = _website_trust_tier(job, match.value or "")
+            if trust_tier == "tier1":
+                page_scope = PAGE_SCOPE_SCHOOL_AFFILIATION
+            elif parsed_candidate.netloc and not _website_candidate_looks_low_signal(match.value or ""):
+                candidate_same_as_source = bool(parsed_candidate.netloc and parsed_base.netloc) and (
+                    parsed_candidate.netloc.lower() == parsed_base.netloc.lower()
+                    or parsed_candidate.netloc.lower().endswith(f".{parsed_base.netloc.lower()}")
+                    or parsed_base.netloc.lower().endswith(f".{parsed_candidate.netloc.lower()}")
+                )
+                if not candidate_same_as_source:
+                    page_scope = PAGE_SCOPE_CHAPTER_SITE
+        if match.source_provider == "nationals_directory":
+            page_scope = PAGE_SCOPE_NATIONALS_CHAPTER
+        elif match.source_provider == "provenance" and same_source_host:
+            if chapterish_context or bool((parsed_source.path or "").strip("/")):
+                page_scope = PAGE_SCOPE_NATIONALS_CHAPTER
+            else:
+                page_scope = PAGE_SCOPE_NATIONALS_GENERIC
+        if (
+            target_field == "instagram_url"
+            and match.source_provider in {"chapter_website", "provenance", "nationals_directory"}
+            and page_scope != PAGE_SCOPE_SCHOOL_AFFILIATION
+            and sanitize_as_instagram(match.value)
+            and _instagram_looks_relevant_to_job(sanitize_as_instagram(match.value) or "", job, document=supporting_document)
+        ):
+            page_scope = PAGE_SCOPE_CHAPTER_SITE
+        elif target_field == "instagram_url" and ("instagram.com" in parsed_source.netloc.lower()) and chapterish_context:
+            page_scope = PAGE_SCOPE_CHAPTER_SITE
+        elif (
+            target_field == "contact_email"
+            and match.source_provider in {"chapter_website", "provenance", "nationals_directory"}
+            and page_scope != PAGE_SCOPE_SCHOOL_AFFILIATION
+            and sanitize_as_email(match.value)
+            and _email_looks_relevant_to_job(sanitize_as_email(match.value) or "", job, document=supporting_document)
+        ):
+            page_scope = PAGE_SCOPE_CHAPTER_SITE
+        if target_field == "website_url" and parsed_candidate.netloc and not _website_candidate_looks_low_signal(match.value or ""):
+            candidate_same_as_source = bool(parsed_candidate.netloc and parsed_base.netloc) and (
+                parsed_candidate.netloc.lower() == parsed_base.netloc.lower()
+                or parsed_candidate.netloc.lower().endswith(f".{parsed_base.netloc.lower()}")
+                or parsed_base.netloc.lower().endswith(f".{parsed_candidate.netloc.lower()}")
+            )
+            if not candidate_same_as_source:
+                page_scope = PAGE_SCOPE_CHAPTER_SITE
+        return {
+            "decisionStage": decision_stage,
+            "evidenceUrl": match.source_url,
+            "sourceType": match.source_provider,
+            "pageScope": page_scope,
+            "contactSpecificity": _contact_specificity_for_page_scope(page_scope),
+            "confidence": round(match.confidence, 4),
+            "reasonCode": None,
+            "metadata": {
+                "query": match.query,
+                "relatedWebsiteUrl": match.related_website_url,
+            },
+        }
+
+    def _resolution_evidence_for_activity_decision(self, decision: ActivityValidationDecision, *, decision_stage: str) -> dict[str, Any]:
+        source_type = str(decision.evidence_source_type or "official_school").strip() or "official_school"
+        page_scope = PAGE_SCOPE_SCHOOL_AFFILIATION if "school" in source_type else PAGE_SCOPE_NATIONALS_CHAPTER
+        return {
+            "decisionStage": decision_stage,
+            "evidenceUrl": decision.evidence_url,
+            "sourceType": source_type,
+            "pageScope": page_scope,
+            "contactSpecificity": _contact_specificity_for_page_scope(page_scope),
+            "confidence": round(float(decision.confidence or 0.0), 4),
+            "reasonCode": decision.reason_code,
+            "metadata": dict(decision.metadata or {}),
+        }
+
+    def _resolution_evidence_for_authoritative_bundle(
+        self,
+        job: FieldJob,
+        bundle: AuthoritativeBundle,
+        *,
+        target_field: str,
+    ) -> dict[str, Any]:
+        match = {
+            "website_url": bundle.website_match,
+            "contact_email": bundle.email_match,
+            "instagram_url": bundle.instagram_match,
+        }.get(target_field)
+        if match is not None:
+            return self._resolution_evidence_for_candidate(job, match, target_field=target_field, decision_stage="authoritative_bundle")
+        source_type = str(bundle.evidence_source_type or "authoritative_validation").strip() or "authoritative_validation"
+        page_scope = PAGE_SCOPE_SCHOOL_AFFILIATION if "school" in source_type else PAGE_SCOPE_NATIONALS_CHAPTER if "national" in source_type else PAGE_SCOPE_DIRECTORY
+        return {
+            "decisionStage": "authoritative_bundle",
+            "evidenceUrl": bundle.evidence_url,
+            "sourceType": source_type,
+            "pageScope": page_scope,
+            "contactSpecificity": _contact_specificity_for_page_scope(page_scope),
+            "confidence": 0.9,
+            "reasonCode": bundle.reason_code,
+            "metadata": {},
+        }
 
     def _decision_from_school_policy(self, record) -> ActivityValidationDecision:
         return ActivityValidationDecision(
@@ -1437,6 +1670,10 @@ class FieldJobEngine:
                 "field": target_field,
                 "reasonCode": decision.reason_code or "inactive_by_school_validation",
                 "evidenceUrl": decision.evidence_url,
+                "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                    decision,
+                    decision_stage="chapter_activity_validation",
+                ),
                 "decision_trace": self._build_decision_trace_summary(),
             },
             field_state_updates={target_field: "inactive"},
@@ -1587,6 +1824,13 @@ class FieldJobEngine:
         ):
             if match is None:
                 continue
+            evidence = self._resolution_evidence_for_candidate(job, match, target_field=field_key, decision_stage="authoritative_bundle")
+            if field_key == "website_url" and evidence.get("pageScope") == PAGE_SCOPE_NATIONALS_GENERIC:
+                self._trace("authoritative_match_rejected", field=field_key, reason="nationals_generic_page")
+                continue
+            if field_key in {"contact_email", "instagram_url"} and evidence.get("contactSpecificity") == CONTACT_SPECIFICITY_NATIONAL_GENERIC:
+                self._trace("authoritative_match_rejected", field=field_key, reason="nationals_generic_contact")
+                continue
             chapter_updates[field_key] = match.value
             state_updates[field_key] = "found"
 
@@ -1621,6 +1865,10 @@ class FieldJobEngine:
                     "field": "website_url",
                     "reasonCode": bundle.reason_code or "authoritative_no_website_found",
                     "evidenceUrl": bundle.evidence_url,
+                    "resolutionEvidence": {
+                        **self._resolution_evidence_for_authoritative_bundle(job, bundle, target_field="website_url"),
+                        "reasonCode": bundle.reason_code or "authoritative_no_website_found",
+                    },
                     "decision_trace": self._build_decision_trace_summary(),
                 },
                 field_state_updates=state_updates,
@@ -1635,6 +1883,7 @@ class FieldJobEngine:
                 "status": "updated",
                 "field": target_field,
                 "sourceUrl": (bundle.website_match or bundle.email_match or bundle.instagram_match).source_url if (bundle.website_match or bundle.email_match or bundle.instagram_match) is not None else bundle.evidence_url,
+                "resolutionEvidence": self._resolution_evidence_for_authoritative_bundle(job, bundle, target_field=target_field),
                 "decision_trace": self._build_decision_trace_summary(),
             },
             field_state_updates=state_updates,
@@ -1675,16 +1924,19 @@ class FieldJobEngine:
             )
         )
         if should_verify_website:
+            verification_source = SearchDocument(
+                text=match.source_snippet,
+                url=match.source_url,
+                title="",
+                provider=match.source_provider,
+                query=match.query,
+            )
+            verified_value, verification_document = self._website_verification_document(job, match.value, verification_source)
+            match.value = verified_value
             verification = _verify_official_website_candidate(
                 job,
                 match.value,
-                SearchDocument(
-                    text=match.source_snippet,
-                    url=match.source_url,
-                    title="",
-                    provider=match.source_provider,
-                    query=match.query,
-                ),
+                verification_document,
             )
             if verification.decision == "reject":
                 self._trace(
@@ -1700,6 +1952,14 @@ class FieldJobEngine:
                 decision=verification.decision,
                 confidence=round(verification.confidence, 4),
             )
+
+        resolution_evidence = self._resolution_evidence_for_candidate(job, match, target_field=target_field, decision_stage="search_candidate")
+        if target_field == "website_url" and resolution_evidence.get("pageScope") == PAGE_SCOPE_NATIONALS_GENERIC:
+            self._trace("candidate_rejected", target=target_field, reason="nationals_generic_website")
+            raise self._no_candidate_error(job, "Generic nationals page does not count as a chapter website")
+        if target_field in {"contact_email", "instagram_url"} and resolution_evidence.get("contactSpecificity") == CONTACT_SPECIFICITY_NATIONAL_GENERIC:
+            self._trace("candidate_rejected", target=target_field, reason="nationals_generic_contact")
+            raise self._no_candidate_error(job, f"Generic nationals {target_field} does not count as chapter contact")
 
         base_source_slug = job.source_slug or job.payload.get("sourceSlug") or "search-enrichment"
         provenance_records = [
@@ -1724,6 +1984,7 @@ class FieldJobEngine:
                     "source_url": match.source_url,
                     "query": match.query,
                     "provider": match.source_provider,
+                    "resolutionEvidence": resolution_evidence,
                     "decision_trace": self._build_decision_trace_summary(),
                     "rejection_summary": self._candidate_rejection_summary_payload(),
                 },
@@ -1791,6 +2052,7 @@ class FieldJobEngine:
             "confidence": f"{match.confidence:.2f}",
             "source_url": match.source_url,
             "provider": match.source_provider,
+            "resolutionEvidence": resolution_evidence,
             "decision_trace": self._build_decision_trace_summary(),
         }
         if match.query:
@@ -1818,6 +2080,27 @@ class FieldJobEngine:
         )
 
     def _verify_website(self, job: FieldJob) -> FieldJobResult:
+        raw_website = str(job.website_url or "").strip()
+        if raw_website and not raw_website.lower().startswith(("http://", "https://")):
+            chapter_updates: dict[str, Any] = {"website_url": None}
+            completed_payload: dict[str, str] = {
+                "status": "invalid_candidate",
+                "website_url": raw_website,
+                "reason_code": "invalid_candidate",
+            }
+            field_state_updates = {"website_url": "missing"}
+            if raw_website.lower().startswith("mailto:"):
+                mailto_match = _MAILTO_RE.match(raw_website)
+                candidate_email = (mailto_match.group(1).strip().lower() if mailto_match else "").strip()
+                if candidate_email and not (job.contact_email or "").strip():
+                    chapter_updates["contact_email"] = candidate_email
+                    field_state_updates["contact_email"] = "found"
+                    completed_payload["contact_email"] = candidate_email
+            return FieldJobResult(
+                chapter_updates=chapter_updates,
+                completed_payload=completed_payload,
+                field_state_updates=field_state_updates,
+            )
         current_website = _current_website_url(job)
         if not current_website:
             raise RetryableJobError(
@@ -3060,7 +3343,7 @@ class FieldJobEngine:
             return SearchDocument(
                 text=cached_document.text,
                 links=list(cached_document.links),
-                url=url,
+                url=cached_document.url or url,
                 title=cached_document.title,
                 provider=provider,
                 query=query,
@@ -3083,6 +3366,8 @@ class FieldJobEngine:
             self._search_document_cache[cache_key] = None
             return None
 
+        final_url = str(getattr(response, "url", "") or url)
+
         soup = BeautifulSoup(html, "html.parser")
         links = [href.strip() for href in (node.get("href") for node in soup.select("a[href]")) if href and href.strip()]
         text = " ".join(soup.stripped_strings)
@@ -3090,12 +3375,32 @@ class FieldJobEngine:
         self._search_document_cache[cache_key] = SearchDocument(
             text=text,
             links=list(links),
-            url=url,
+            url=final_url,
             title=title,
             provider="cached",
             html=html,
         )
-        return SearchDocument(text=text, links=links, url=url, title=title, provider=provider, query=query, html=html)
+        return SearchDocument(text=text, links=links, url=final_url, title=title, provider=provider, query=query, html=html)
+
+    def _website_verification_document(self, job: FieldJob, candidate_url: str, source_document: SearchDocument) -> tuple[str, SearchDocument]:
+        verification_document = SearchDocument(
+            text=source_document.text,
+            links=list(source_document.links),
+            url=source_document.url,
+            title=source_document.title,
+            provider=source_document.provider,
+            query=source_document.query,
+            html=source_document.html,
+        )
+        candidate_tier = _website_trust_tier(job, candidate_url)
+        if not _looks_like_document_asset_url(candidate_url) and candidate_tier != "blocked":
+            fetched_candidate = self._fetch_search_document(candidate_url, provider="chapter_website", query=source_document.query)
+            if fetched_candidate is not None:
+                verification_document = fetched_candidate
+                verified_url = sanitize_as_website(fetched_candidate.url or candidate_url, base_url=candidate_url)
+                if verified_url:
+                    candidate_url = verified_url
+        return candidate_url, verification_document
 
     def _already_populated_result(self, field_name: str, value: str) -> FieldJobResult:
         state_key = FIELD_JOB_TO_STATE_KEY[field_name]
@@ -3376,6 +3681,9 @@ class FieldJobEngine:
         if _website_document_looks_low_signal(document):
             self._record_candidate_rejection("email", "low_signal_page")
             return False
+        if generic_office_email and not identity_email and source_tier == "tier1":
+            self._record_candidate_rejection("email", "generic_office_email")
+            return False
         if generic_office_email and not identity_email and not strong_context:
             self._record_candidate_rejection("email", "generic_office_email")
             return False
@@ -3583,7 +3891,11 @@ class FieldJobEngine:
             candidate_host = (urlparse(url).netloc or "").lower()
             official_verification = None
             if document.provider in {"search_result", "search_page"}:
-                official_verification = _verify_official_website_candidate(job, url, document)
+                url, verification_document = self._website_verification_document(job, url, document)
+                candidate_host = (urlparse(url).netloc or "").lower()
+                official_verification = _verify_official_website_candidate(job, url, verification_document)
+            else:
+                verification_document = document
             if (
                 document.provider == "search_page"
                 and _website_trust_tier(job, document.url or "") == "tier1"
@@ -3610,11 +3922,11 @@ class FieldJobEngine:
                 if _looks_like_generic_site_root(url):
                     self._record_candidate_rejection("website", "generic_school_root")
                     continue
-                if not _ambiguous_school_tier1_candidate_allowed(job, url, document):
+                if not _ambiguous_school_tier1_candidate_allowed(job, url, verification_document):
                     self._record_candidate_rejection("website", "ambiguous_school_tier1_generic")
                     continue
                 if (
-                    not _tier1_website_candidate_has_specificity(job, url, document)
+                    not _tier1_website_candidate_has_specificity(job, url, verification_document)
                     and not (
                         official_verification is not None
                         and official_verification.decision in {"official_affiliation_page", "official_chapter_domain"}
@@ -4264,22 +4576,47 @@ def _email_context_overlap_score(job: FieldJob, email: str, document: SearchDocu
 def _email_looks_relevant_to_job(email: str, job: FieldJob, *, document: SearchDocument | None = None) -> bool:
     lowered = email.lower()
     normalized_email = _normalized_match_text(lowered)
-    if _fraternity_matches(job, normalized_email):
-        return True
-
+    identity_email = _email_local_part_has_identity(email, job)
+    generic_office_email = _email_local_part_looks_generic_office(email)
     domain = _email_domain(email)
-    if _email_domain_matches_known_school_or_website(job, domain):
-        return True
-
-    school_tokens = _significant_tokens(job.university_name or str(job.payload.get("candidateSchoolName") or ""))
-    if any(token in lowered for token in school_tokens):
-        return True
+    domain_matches = _email_domain_matches_known_school_or_website(job, domain)
 
     if document is None:
-        return False
+        if generic_office_email and not identity_email:
+            return False
+        if identity_email and (domain_matches or _fraternity_matches(job, normalized_email)):
+            return True
+        return bool(_fraternity_matches(job, normalized_email) and _school_matches(job, normalized_email))
 
     combined = _normalized_match_text(" ".join(part for part in [document.title or "", document.text[:1200], document.url or "", email] if part))
-    return _fraternity_matches(job, combined) and (_school_matches(job, combined) or _chapter_matches(job, combined))
+    if _school_has_conflicting_signal(job, combined):
+        return False
+
+    school_match = _school_matches(job, combined)
+    fraternity_match = _fraternity_matches(job, combined)
+    chapter_match = _chapter_matches(job, combined)
+    strong_contact_context = _email_document_has_contact_context(document) and (school_match or chapter_match)
+    tier1_school_page = _website_trust_tier(job, document.url or "") == "tier1"
+
+    if generic_office_email and not identity_email:
+        return bool(document.provider == "chapter_website" and fraternity_match and strong_contact_context)
+
+    if document.provider == "provenance" and domain_matches and not generic_office_email and not _website_document_has_conflicting_org_signal(job, document):
+        return True
+
+    if tier1_school_page and document.provider != "provenance":
+        if not (fraternity_match or chapter_match or identity_email):
+            return False
+        if generic_office_email and not chapter_match and not identity_email:
+            return False
+
+    if identity_email and (school_match or chapter_match or fraternity_match):
+        return True
+    if fraternity_match and (school_match or chapter_match) and domain_matches:
+        return True
+    if strong_contact_context and domain_matches and not generic_office_email:
+        return True
+    return False
 
 
 def _document_match_text(document: SearchDocument, *, limit: int = 1600) -> str:
@@ -4330,6 +4667,7 @@ def _verify_official_website_candidate(job: FieldJob, candidate_url: str, docume
         document_url=document.url,
         document_title=document.title or "",
         document_text=document.text,
+        document_html=document.html or "",
     )
 
 
@@ -4371,15 +4709,20 @@ def _email_local_part_has_identity(email: str, job: FieldJob) -> bool:
     fraternity_initials = _initialism(fraternity_display)
     if fraternity_compact and fraternity_compact in local_part:
         return True
-    if fraternity_initials and len(fraternity_initials) >= 2 and fraternity_initials in local_part:
-        return True
 
     school_initials = _school_initials(job.university_name or str(job.payload.get("candidateSchoolName") or ""))
-    if school_initials and len(school_initials) >= 3 and school_initials in local_part:
+    school_signal = bool(school_initials and len(school_initials) >= 3 and school_initials in local_part)
+    if school_signal:
         return True
 
     chapter_tokens = _significant_tokens(job.chapter_name)
-    return any(token in local_part for token in chapter_tokens if len(token) >= 4)
+    chapter_signal = any(token in local_part for token in chapter_tokens if len(token) >= 4)
+    if chapter_signal:
+        return True
+
+    if fraternity_initials and len(fraternity_initials) >= 3 and fraternity_initials in local_part:
+        return True
+    return False
 
 
 def _email_local_part_looks_personal(email: str) -> bool:
@@ -4398,8 +4741,15 @@ def _email_document_has_contact_context(document: SearchDocument) -> bool:
     combined = _document_match_text(document, limit=1200)
     return any(marker in combined for marker in _EMAIL_ROLE_MARKERS)
 
+def _instagram_handle_text(instagram_url: str) -> str:
+    normalized = (instagram_url or "").strip().rstrip("/")
+    if not normalized:
+        return ""
+    return _compact_text(normalized.rsplit("/", 1)[-1])
+
+
 def _instagram_handle_match_score(instagram_url: str, job: FieldJob) -> int:
-    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    handle = _instagram_handle_text(instagram_url)
     score = 0
     fraternity_compact = _compact_text(_display_name(job.fraternity_slug))
     fraternity_initials = _initialism(_display_name(job.fraternity_slug))
@@ -4417,7 +4767,7 @@ def _instagram_handle_match_score(instagram_url: str, job: FieldJob) -> int:
         score += 2
     elif any(alias and len(alias) >= 3 and alias in handle for alias in fraternity_aliases):
         score += 2
-    elif fraternity_initials and len(fraternity_initials) >= 2 and fraternity_initials in handle:
+    elif fraternity_initials and len(fraternity_initials) >= 3 and fraternity_initials in handle:
         score += 1
 
     if school_initials and len(school_initials) >= 3 and school_initials in handle:
@@ -4435,7 +4785,7 @@ def _instagram_handle_match_score(instagram_url: str, job: FieldJob) -> int:
 
 
 def _instagram_handle_has_fraternity_token(instagram_url: str, job: FieldJob) -> bool:
-    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    handle = _instagram_handle_text(instagram_url)
     fraternity_compact = _compact_text(_display_name(job.fraternity_slug))
     fraternity_initials = _initialism(_display_name(job.fraternity_slug))
     fraternity_aliases = [
@@ -4447,11 +4797,11 @@ def _instagram_handle_has_fraternity_token(instagram_url: str, job: FieldJob) ->
         return True
     if any(alias and len(alias) >= 3 and alias in handle for alias in fraternity_aliases):
         return True
-    return bool(fraternity_initials and len(fraternity_initials) >= 2 and fraternity_initials in handle)
+    return bool(fraternity_initials and len(fraternity_initials) >= 3 and fraternity_initials in handle)
 
 
 def _instagram_handle_has_local_identity(instagram_url: str, job: FieldJob) -> bool:
-    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    handle = _instagram_handle_text(instagram_url)
     if not handle:
         return False
 
@@ -4476,7 +4826,7 @@ def _instagram_handle_has_local_identity(instagram_url: str, job: FieldJob) -> b
 
 
 def _instagram_handle_looks_like_school_brand(instagram_url: str, job: FieldJob) -> bool:
-    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    handle = _instagram_handle_text(instagram_url)
     if not handle:
         return False
 
@@ -4489,6 +4839,17 @@ def _instagram_handle_looks_like_school_brand(instagram_url: str, job: FieldJob)
         if len(handle) >= 5 and school_compact.startswith(handle):
             return True
     return bool(school_initials and len(school_initials) >= 3 and handle == school_initials.lower())
+
+
+def _instagram_handle_looks_national_generic(instagram_url: str, job: FieldJob) -> bool:
+    handle = _instagram_handle_text(instagram_url)
+    if not handle:
+        return False
+    if not _instagram_handle_has_fraternity_token(instagram_url, job):
+        return False
+    if _instagram_handle_has_local_identity(instagram_url, job):
+        return False
+    return any(marker in handle for marker in _NATIONAL_GENERIC_INSTAGRAM_MARKERS)
 
 
 def _instagram_candidate_text(document: SearchDocument, instagram_url: str) -> str:
@@ -4561,7 +4922,7 @@ def _instagram_context_overlap_score(job: FieldJob, instagram_url: str, document
 
 
 def _instagram_has_generic_handle(instagram_url: str, job: FieldJob) -> bool:
-    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    handle = _instagram_handle_text(instagram_url)
     fraternity_compact = _compact_text(_display_name(job.fraternity_slug))
     if not fraternity_compact:
         return False
@@ -4570,7 +4931,7 @@ def _instagram_has_generic_handle(instagram_url: str, job: FieldJob) -> bool:
 
 
 def _instagram_looks_institutional_or_directory_account(instagram_url: str, document: SearchDocument) -> bool:
-    handle = _compact_text(instagram_url.rsplit("/", 1)[-1])
+    handle = _instagram_handle_text(instagram_url)
     if not handle:
         return False
     handle_markers = (
@@ -4619,10 +4980,12 @@ def _school_affiliation_document_is_trusted(job: FieldJob, document: SearchDocum
 def _looks_like_official_school_affiliation_page(document: SearchDocument) -> bool:
     lowered = (document.text or "").lower()
     markers = (
+        "fsl",
         "ifc fraternities",
         "recognized chapters",
         "fraternity chapters",
         "fraternities",
+        "fraternity student life",
         "greek life",
         "greek organizations",
         "chapters",
@@ -4676,6 +5039,8 @@ def _instagram_document_is_relevant(job: FieldJob, document: SearchDocument) -> 
 
 def _instagram_looks_relevant_to_job(instagram_url: str, job: FieldJob, *, document: SearchDocument | None = None) -> bool:
     handle_score = _instagram_handle_match_score(instagram_url, job)
+    if _instagram_handle_looks_national_generic(instagram_url, job):
+        return False
     if handle_score >= 4:
         return True
     if handle_score >= 3 and _has_nongeneric_chapter_signal(job) and _instagram_handle_has_fraternity_token(instagram_url, job):
@@ -4687,10 +5052,13 @@ def _instagram_looks_relevant_to_job(instagram_url: str, job: FieldJob, *, docum
         return False
     if _instagram_has_conflicting_org_signal(job, combined) and handle_score < 5:
         return False
+    fraternity_match = _fraternity_matches(job, combined)
     chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
     local_identity = _instagram_handle_has_local_identity(instagram_url, job)
     if document.provider == "chapter_website":
         if _instagram_looks_institutional_or_directory_account(instagram_url, document):
+            return False
+        if _website_trust_tier(job, document.url or "") == "tier1" and not (local_identity or fraternity_match or chapter_match or _chapter_designation_signal(job, combined) > 0):
             return False
         if local_identity:
             return True
@@ -4711,6 +5079,8 @@ def _instagram_looks_relevant_to_job(instagram_url: str, job: FieldJob, *, docum
         if handle_score >= 4:
             return True
         if local_identity and _instagram_handle_has_fraternity_token(instagram_url, job):
+            return True
+        if handle_score >= 2 and _instagram_handle_has_fraternity_token(instagram_url, job) and _school_matches(job, combined):
             return True
         if handle_score >= 3 and _school_matches(job, combined):
             return True
@@ -5206,7 +5576,9 @@ def _parse_nationals_entry_block(heading_text: str, block_text: str, links: list
     instagram_url: str | None = None
     website_url: str | None = None
     contact_email: str | None = None
-    website_label_present = "website" in block_text.lower()
+    block_text_lower = block_text.lower()
+    website_label_present = "website" in block_text_lower
+    national_website_label = any(marker in block_text_lower for marker in ("national website", "international website", "headquarters website", "hq website"))
 
     for link in normalized_links:
         insta = _normalize_instagram_candidate(link)
@@ -5223,7 +5595,7 @@ def _parse_nationals_entry_block(heading_text: str, block_text: str, links: list
             continue
         host = (urlparse(link).netloc or "").lower()
         is_external = bool(host) and host != source_host and not host.endswith(f".{source_host}")
-        if website_label_present and is_external and link.lower().startswith(("http://", "https://")) and not website_url:
+        if website_label_present and not national_website_label and is_external and link.lower().startswith(("http://", "https://")) and not website_url:
             website_url = link
 
     if not instagram_url:
@@ -5240,12 +5612,12 @@ def _parse_nationals_entry_block(heading_text: str, block_text: str, links: list
         if email_match:
             contact_email = email_match.group(0)
 
-    if not website_url and website_label_present:
+    if not website_url and website_label_present and not national_website_label:
         website_pattern = re.search(r"website\s*:\s*(https?://[^\s]+)", block_text, flags=re.IGNORECASE)
         if website_pattern:
             website_url = website_pattern.group(1).rstrip(".,;)")
 
-    if not website_url:
+    if not website_url and not national_website_label:
         for link in normalized_links:
             lowered_link = link.lower()
             if not lowered_link.startswith(("http://", "https://")):

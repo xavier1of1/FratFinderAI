@@ -2,6 +2,12 @@ import { getDbPool } from "../db";
 import { normalizeInstagramUrl } from "../social";
 import type { ChapterActionResult, ChapterFieldName, ChapterListItem, ChapterListResponse, ChapterMapStateSummary } from "../types";
 
+type ChapterListQueryRow = ChapterListItem & {
+  contactProvenance: Record<string, unknown> | null;
+  nationalEmail: string | null;
+  nationalInstagramUrl: string | null;
+};
+
 const STATE_NORMALIZATION_CASE = `
   CASE
     WHEN c.state IS NULL OR btrim(c.state) = '' THEN NULL
@@ -67,6 +73,100 @@ const STATE_NORMALIZATION_CASE = `
   END
 `;
 
+function normalizeCompact(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function hasTrustedContactProvenance(raw: unknown) {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  const value = raw as Record<string, unknown>;
+  const specificity = typeof value.contactProvenanceType === "string" ? value.contactProvenanceType : null;
+  return specificity === "chapter_specific" || specificity === "school_specific" || specificity === "national_specific_to_chapter";
+}
+
+function looksLikeGenericOfficeEmail(email: string) {
+  const localPart = (email.split("@", 1)[0] ?? "").toLowerCase();
+  const markers = [
+    "fsl",
+    "graduateprogram",
+    "graduateprograms",
+    "greeklife",
+    "greek.life",
+    "hq",
+    "ihq",
+    "leadership",
+    "national",
+    "nationals",
+    "office",
+    "ofsl",
+    "reslife",
+    "studentaffairs",
+    "studentengagement",
+    "studentinvolvement",
+    "studentlife",
+    "studentorg",
+    "studentorganization",
+    "studentorganizations"
+  ];
+  return markers.some((marker) => localPart.includes(marker));
+}
+
+function looksLikeNationalGenericInstagram(instagramUrl: string) {
+  const handle = normalizeCompact(normalizeInstagramUrl(instagramUrl)?.split("/").pop());
+  return ["hq", "ihq", "national", "nationals", "officialhq"].some((marker) => handle.includes(marker));
+}
+
+function sanitizeChapterForDisplay(row: ChapterListQueryRow): ChapterListItem | null {
+  const fieldStates = row.fieldStates ?? {};
+  const allInvalid =
+    fieldStates.website_url === "invalid_entity" &&
+    fieldStates.instagram_url === "invalid_entity" &&
+    fieldStates.contact_email === "invalid_entity";
+  if (allInvalid) {
+    return null;
+  }
+
+  const contactProvenance = row.contactProvenance ?? {};
+  const emailProvenance = (contactProvenance as Record<string, unknown>).contact_email;
+  const instagramProvenance = (contactProvenance as Record<string, unknown>).instagram_url;
+
+  let contactEmail = row.contactEmail;
+  let instagramUrl = normalizeInstagramUrl(row.instagramUrl);
+  const nextFieldStates = { ...fieldStates };
+
+  const nationalEmail = row.nationalEmail?.trim().toLowerCase() ?? null;
+  if (contactEmail) {
+    const normalizedEmail = contactEmail.trim().toLowerCase();
+    const trusted = hasTrustedContactProvenance(emailProvenance);
+    if ((!trusted && nationalEmail && normalizedEmail === nationalEmail) || (!trusted && looksLikeGenericOfficeEmail(normalizedEmail))) {
+      contactEmail = null;
+      nextFieldStates.contact_email = "missing";
+    }
+  }
+
+  const nationalInstagram = normalizeInstagramUrl(row.nationalInstagramUrl);
+  if (instagramUrl) {
+    const trusted = hasTrustedContactProvenance(instagramProvenance);
+    if (
+      (!trusted && nationalInstagram && normalizeCompact(instagramUrl) === normalizeCompact(nationalInstagram)) ||
+      (!trusted && looksLikeNationalGenericInstagram(instagramUrl))
+    ) {
+      instagramUrl = null;
+      nextFieldStates.instagram_url = "missing";
+    }
+  }
+
+  return {
+    ...row,
+    contactEmail,
+    instagramUrl,
+    fieldStates: nextFieldStates,
+    contactProvenance: (row.contactProvenance ?? undefined) as ChapterListItem["contactProvenance"]
+  };
+}
+
 export async function listChapters(params: {
   search?: string;
   limit?: number;
@@ -77,7 +177,7 @@ export async function listChapters(params: {
   const offset = params.offset ?? 0;
 
   const dbPool = getDbPool();
-  const { rows } = await dbPool.query<ChapterListItem>(
+  const { rows } = await dbPool.query<ChapterListQueryRow>(
     `
       SELECT
         c.id,
@@ -94,9 +194,13 @@ export async function listChapters(params: {
         c.contact_email AS "contactEmail",
         c.chapter_status AS "chapterStatus",
         c.field_states AS "fieldStates",
+        c.contact_provenance AS "contactProvenance",
+        np.contact_email AS "nationalEmail",
+        np.instagram_url AS "nationalInstagramUrl",
         c.updated_at AS "updatedAt"
       FROM chapters c
       JOIN fraternities f ON f.id = c.fraternity_id
+      LEFT JOIN national_profiles np ON np.fraternity_slug = f.slug
       LEFT JOIN LATERAL (
         SELECT s.slug
         FROM chapter_provenance cp
@@ -106,16 +210,20 @@ export async function listChapters(params: {
         LIMIT 1
       ) latest_source ON TRUE
       WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.university_name ILIKE '%' || $1 || '%')
+        AND NOT (
+          COALESCE(c.field_states ->> 'website_url', '') = 'invalid_entity'
+          AND COALESCE(c.field_states ->> 'instagram_url', '') = 'invalid_entity'
+          AND COALESCE(c.field_states ->> 'contact_email', '') = 'invalid_entity'
+        )
       ORDER BY c.updated_at DESC, c.id DESC
       LIMIT $2 OFFSET $3
     `,
     [search, limit, offset]
   );
 
-  return rows.map((row) => ({
-    ...row,
-    instagramUrl: normalizeInstagramUrl(row.instagramUrl)
-  }));
+  return rows
+    .map((row) => sanitizeChapterForDisplay(row))
+    .filter((row): row is ChapterListItem => row !== null);
 }
 
 export async function getChapterListMetadata(params: {
@@ -139,6 +247,11 @@ export async function getChapterListMetadata(params: {
         FROM chapters c
         JOIN fraternities f ON f.id = c.fraternity_id
         WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.university_name ILIKE '%' || $1 || '%')
+          AND NOT (
+            COALESCE(c.field_states ->> 'website_url', '') = 'invalid_entity'
+            AND COALESCE(c.field_states ->> 'instagram_url', '') = 'invalid_entity'
+            AND COALESCE(c.field_states ->> 'contact_email', '') = 'invalid_entity'
+          )
       )
       SELECT
         COUNT(*)::int AS total_count,
@@ -172,6 +285,11 @@ export async function listChapterMapSummary(): Promise<ChapterMapStateSummary[]>
       WITH normalized AS (
         SELECT ${STATE_NORMALIZATION_CASE} AS state_code
         FROM chapters c
+        WHERE NOT (
+          COALESCE(c.field_states ->> 'website_url', '') = 'invalid_entity'
+          AND COALESCE(c.field_states ->> 'instagram_url', '') = 'invalid_entity'
+          AND COALESCE(c.field_states ->> 'contact_email', '') = 'invalid_entity'
+        )
       )
       SELECT
         state_code AS "stateCode",

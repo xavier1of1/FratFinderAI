@@ -1,0 +1,34 @@
+{
+  "generatedAt": "2026-04-09T19:42:52.781696+00:00",
+  "mode": "dry_run",
+  "invalidRowsToDelete": 0,
+  "legacyWebsiteRowsToQuarantine": 1,
+  "legacyContactRowsToQuarantine": 1,
+  "invalidSamples": [],
+  "websiteQuarantineSamples": [
+    {
+      "id": "3cfb893d-1350-4143-a5c7-75811bdab5c8",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16127",
+      "name": "Iota-Epsilon (Indiana State)",
+      "universityName": "Indiana State University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "websiteUrl": "https://indstate.campuslabs.com/engage"
+    }
+  ],
+  "quarantineSamples": [
+    {
+      "id": "3cfb893d-1350-4143-a5c7-75811bdab5c8",
+      "fraternitySlug": "lambda-chi-alpha",
+      "chapterSlug": "16127",
+      "name": "Iota-Epsilon (Indiana State)",
+      "universityName": "Indiana State University",
+      "websiteReason": "legacy_website_failed_official_verification",
+      "emailReason": null,
+      "instagramReason": null,
+      "websiteUrl": "https://indstate.campuslabs.com/engage",
+      "email": null,
+      "instagramUrl": "https://www.instagram.com/lambdachi_indstate"
+    }
+  ]
+}

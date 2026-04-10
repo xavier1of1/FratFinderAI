@@ -16,6 +16,8 @@ _IGNORED_INSTAGRAM_SEGMENTS = {
     "accounts",
     "mailto",
     "tel",
+    "node",
+    "umbraco.cms.core.models.link",
     "index.html",
     "index.php",
     "home",

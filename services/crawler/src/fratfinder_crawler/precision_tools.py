@@ -181,6 +181,91 @@ _OFFICIAL_AFFILIATION_MARKERS = (
     "student organizations",
 )
 
+_GENERIC_SCHOOL_DIRECTORY_MARKERS = (
+    "about us",
+    "about",
+    "active undergraduate chapters",
+    "campus life",
+    "chapter directory",
+    "chapter list",
+    "chapter scorecard",
+    "chapters and councils",
+    "councils and chapters",
+    "departments",
+    "department",
+    "fraternity chapters",
+    "fraternities",
+    "fraternity and sorority life",
+    "greek life",
+    "housing information",
+    "interfraternity council",
+    "joining",
+    "member chapters",
+    "our community",
+    "rush",
+    "student groups",
+    "student involvement",
+)
+
+_CHAPTER_SPECIFIC_SCHOOL_PATH_MARKERS = (
+    "/chapter-page/",
+    "/chapter_page/",
+    "/organization/",
+    "/project/",
+)
+
+_GENERIC_SCHOOL_DIRECTORY_PATH_MARKERS = (
+    "/councils/",
+    "/fraternities",
+    "/fraternity-chapters",
+    "/fraternity-sorority-life",
+    "/housing_information",
+    "/ifc",
+    "/joining",
+    "/our-community",
+    "/student-groups",
+)
+
+_GENERIC_SCHOOL_PORTAL_ROOT_PATHS = {
+    "/club-signup",
+    "/club-signup/",
+    "/club_signup",
+    "/club_signup/",
+    "/engage",
+    "/engage/",
+    "/organization",
+    "/organization/",
+    "/organizations",
+    "/organizations/",
+}
+
+_GENERIC_SCHOOL_PORTAL_MARKERS = (
+    "browse and join organizations",
+    "discover unique opportunities",
+    "find and attend events",
+    "showcase your involvement",
+)
+
+_MISSING_PAGE_MARKERS = (
+    "404",
+    "page not found",
+    "this site is no longer available",
+    "wordpress error",
+    "not available",
+    "site is no longer available",
+)
+
+_GENERIC_CHAPTER_TOKENS = {
+    "active",
+    "alumni",
+    "chapter",
+    "chapters",
+    "colony",
+    "colonies",
+    "inactive",
+    "mother",
+}
+
 _GREEK_SYMBOLS = {
     "\u0391": "alpha",
     "\u03b1": "alpha",
@@ -348,7 +433,7 @@ def _host_is_blocked(host: str) -> bool:
 def _fraternity_phrase_candidates(fraternity_name: str, fraternity_slug: str) -> list[str]:
     phrases = [fraternity_name, fraternity_slug.replace("-", " ")]
     initials = _initialism(fraternity_name)
-    if len(initials) >= 2:
+    if len(initials) >= 3:
         phrases.append(initials)
     compact_slug = fraternity_slug.replace("-", "")
     if compact_slug:
@@ -751,11 +836,18 @@ def tool_official_domain_verifier(
     document_url: str | None = None,
     document_title: str = "",
     document_text: str = "",
+    document_html: str = "",
 ) -> PrecisionDecision:
     parsed = urlparse(candidate_url)
     host = (parsed.netloc or "").lower()
     path = (parsed.path or "").lower()
-    normalized_context = _normalize_text(" ".join(part for part in [document_title, document_text[:1600], document_url or "", candidate_url] if part))
+    normalized_context = _verification_context_text(
+        candidate_url=candidate_url,
+        document_url=document_url,
+        document_title=document_title,
+        document_text=document_text,
+        document_html=document_html,
+    )
 
     if not host:
         return PrecisionDecision(decision="reject", confidence=0.0, reason_codes=["missing_host"], evidence_urls=[candidate_url], next_action="reject")
@@ -776,10 +868,63 @@ def tool_official_domain_verifier(
         return PrecisionDecision(decision="reject", confidence=0.1, reason_codes=["low_signal_path"], evidence_urls=[candidate_url], next_action="reject")
     if _text_has_conflicting_org_phrase(fraternity_name, fraternity_slug, normalized_context):
         return PrecisionDecision(decision="reject", confidence=0.05, reason_codes=["cross_fraternity_conflict"], evidence_urls=[candidate_url], next_action="reject")
+    school_page_specificity = _school_owned_page_specificity(
+        candidate_url=candidate_url,
+        document_url=document_url,
+        document_title=document_title,
+        document_text=document_text,
+        document_html=document_html,
+        fraternity_name=fraternity_name,
+        fraternity_slug=fraternity_slug,
+        chapter_name=chapter_name,
+        university_name=university_name,
+    )
+    if school_page_specificity == "page_missing":
+        return PrecisionDecision(
+            decision="reject",
+            confidence=0.05,
+            reason_codes=["page_missing"],
+            evidence_urls=[url for url in [candidate_url, document_url] if url],
+            next_action="reject",
+        )
+    if school_page_specificity == "generic_school_root":
+        return PrecisionDecision(
+            decision="reject",
+            confidence=0.08,
+            reason_codes=["generic_school_root"],
+            evidence_urls=[url for url in [candidate_url, document_url] if url],
+            next_action="reject",
+        )
+    if school_page_specificity == "generic_school_directory":
+        return PrecisionDecision(
+            decision="reject",
+            confidence=0.1,
+            reason_codes=["generic_school_directory"],
+            evidence_urls=[url for url in [candidate_url, document_url] if url],
+            next_action="reject",
+        )
+    if host.endswith(".edu") and not _official_school_source(host, university_name):
+        same_host_document = bool(document_url and urlparse(document_url).netloc.lower() == host)
+        candidate_page_context = _verification_context_text(
+            candidate_url=candidate_url,
+            document_url=document_url if same_host_document else None,
+            document_title=document_title if same_host_document else "",
+            document_text=document_text if same_host_document else "",
+            document_html=document_html if same_host_document else "",
+        )
+        if not _text_contains_any(candidate_page_context, _school_phrase_candidates(university_name)):
+            return PrecisionDecision(
+                decision="reject",
+                confidence=0.12,
+                reason_codes=["missing_target_school_context"],
+                evidence_urls=[url for url in [candidate_url, document_url] if url],
+                next_action="reject",
+                metadata={"host": host, "path": path},
+            )
 
     fraternity_match = any(_contains_phrase(value, fraternity_name) for value in [candidate_url, document_title, document_text])
     fraternity_slug_match = bool(fraternity_slug and fraternity_slug.replace("-", "") in _compact_text(candidate_url))
-    chapter_tokens = _significant_tokens(chapter_name)
+    chapter_tokens = _chapter_signal_tokens(chapter_name, university_name)
     school_tokens = _significant_tokens(university_name)
     candidate_identity_text = _normalize_text(f"{host} {path}")
     chapter_hits = sum(1 for token in chapter_tokens if token in candidate_identity_text or token in normalized_context)
@@ -803,6 +948,9 @@ def tool_official_domain_verifier(
     if official_affiliation_hits > 0:
         confidence += min(0.16, official_affiliation_hits * 0.05)
         reasons.append("official_affiliation_context")
+    if school_page_specificity == "chapter_specific_school_page":
+        confidence += 0.18
+        reasons.append("chapter_specific_school_page")
     if host.endswith(".edu"):
         confidence += 0.08
         reasons.append("school_domain")
@@ -856,19 +1004,130 @@ def tool_official_domain_verifier(
     )
 
 
+def _verification_context_text(
+    *,
+    candidate_url: str,
+    document_url: str | None,
+    document_title: str,
+    document_text: str,
+    document_html: str,
+) -> str:
+    return _normalize_text(
+        " ".join(
+            part
+            for part in [
+                document_title,
+                document_text[:4000],
+                document_html[:16000],
+                document_url or "",
+                candidate_url,
+            ]
+            if part
+        )
+    )
+
+
+def _school_owned_page_specificity(
+    *,
+    candidate_url: str,
+    document_url: str | None,
+    document_title: str,
+    document_text: str,
+    document_html: str,
+    fraternity_name: str,
+    fraternity_slug: str,
+    chapter_name: str,
+    university_name: str | None,
+) -> str:
+    parsed = urlparse(candidate_url)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").lower()
+    if not host.endswith(".edu") and not _official_school_source(host, university_name):
+        return "not_school_owned"
+
+    combined = _verification_context_text(
+        candidate_url=candidate_url,
+        document_url=document_url,
+        document_title=document_title,
+        document_text=document_text,
+        document_html=document_html,
+    )
+    if any(marker in combined for marker in _MISSING_PAGE_MARKERS):
+        return "page_missing"
+
+    path_text = _normalize_text(f"{host} {path} {parsed.query or ''}")
+    path_compact = _compact_text(path_text)
+    fraternity_candidates = _fraternity_phrase_candidates(fraternity_name, fraternity_slug)
+    fraternity_match = _text_contains_any(combined, fraternity_candidates)
+    strong_fraternity_match = _text_contains_any(
+        combined,
+        [fraternity_name, _normalize_text(fraternity_name), fraternity_slug.replace("-", " ")],
+    )
+    fraternity_slug_match = bool(fraternity_slug and fraternity_slug.replace("-", "") in path_compact)
+    chapter_tokens = _chapter_signal_tokens(chapter_name, university_name)
+    chapter_match = _text_contains_any(combined, [chapter_name or "", *chapter_tokens])
+    school_match = _text_contains_any(combined, _school_phrase_candidates(university_name))
+    official_affiliation_hits = sum(1 for marker in _OFFICIAL_AFFILIATION_MARKERS if marker in combined)
+    path_has_profile_marker = any(marker in path for marker in _CHAPTER_SPECIFIC_SCHOOL_PATH_MARKERS)
+    path_has_generic_directory_marker = any(marker in path for marker in _GENERIC_SCHOOL_DIRECTORY_PATH_MARKERS)
+    path_has_identity = fraternity_slug_match or any(_compact_text(candidate) in path_compact for candidate in fraternity_candidates if _compact_text(candidate))
+    path_has_chapter_token = any(token in path_compact for token in chapter_tokens)
+    root_path = not path.strip("/")
+    generic_directory_context = any(marker in combined for marker in _GENERIC_SCHOOL_DIRECTORY_MARKERS)
+    generic_portal_root = path in _GENERIC_SCHOOL_PORTAL_ROOT_PATHS
+    generic_portal_context = any(marker in combined for marker in _GENERIC_SCHOOL_PORTAL_MARKERS)
+
+    if root_path and not fraternity_match and not chapter_match and not path_has_identity:
+        return "generic_school_root"
+
+    if generic_portal_root and not path_has_identity and not path_has_chapter_token and not path_has_profile_marker:
+        return "generic_school_directory"
+
+    if path_has_generic_directory_marker and not path_has_identity and not path_has_chapter_token and not path_has_profile_marker:
+        return "generic_school_directory"
+
+    if (
+        (path_has_identity or path_has_chapter_token or path_has_profile_marker)
+        and (strong_fraternity_match or fraternity_match or path_has_identity or chapter_match)
+        and (school_match or official_affiliation_hits > 0)
+    ):
+        return "chapter_specific_school_page"
+
+    if generic_directory_context and not path_has_identity and not path_has_chapter_token and not strong_fraternity_match:
+        return "generic_school_directory"
+
+    if generic_portal_context and generic_portal_root and not path_has_identity and not path_has_chapter_token:
+        return "generic_school_directory"
+
+    if official_affiliation_hits > 0 and not path_has_identity and not path_has_chapter_token and not strong_fraternity_match:
+        return "generic_school_directory"
+
+    return "unknown"
+
+
+def _chapter_signal_tokens(chapter_name: str | None, school_name: str | None) -> list[str]:
+    school_tokens = set(_significant_tokens(school_name))
+    return [
+        token
+        for token in _significant_tokens(chapter_name)
+        if len(token) >= 4 and token not in school_tokens and token not in _GENERIC_CHAPTER_TOKENS
+    ]
+
+
 def _school_phrase_candidates(school_name: str | None) -> list[str]:
     if not school_name:
         return []
     normalized = _normalize_text(school_name)
     candidates = [school_name, normalized]
-    trailing_core = re.sub(r"\b(university|college|institute|school)\b", "", normalized).strip()
-    trailing_core = re.sub(r"\s+", " ", trailing_core).strip()
+    tokens = [token for token in re.split(r"[^a-z0-9]+", normalized) if token]
+    filtered_tokens = [token for token in tokens if token not in {"university", "college", "institute", "school", "of", "the", "at"}]
+    trailing_core = " ".join(filtered_tokens).strip()
     if trailing_core and trailing_core != normalized:
         candidates.append(trailing_core)
-    if normalized.startswith("university of "):
-        core = normalized.removeprefix("university of ").strip()
-        if core:
-            candidates.append(core)
+    if len(tokens) >= 2 and tokens[0] == "university" and tokens[1] == "of" and filtered_tokens:
+        candidates.append(f"university of {filtered_tokens[0]}")
+        if len(filtered_tokens) >= 2:
+            candidates.append(f"university of {filtered_tokens[0]} {filtered_tokens[1]}")
     return [candidate for candidate in candidates if candidate]
 
 
@@ -967,14 +1226,17 @@ def tool_site_scope_classifier(
     host = (parsed.netloc or "").lower()
     path = (parsed.path or "").lower()
     combined = _normalize_text(" ".join(part for part in [title, text[:1600], page_url] if part))
+    host_text = _normalize_text(host.replace(".", " "))
     school_match = _text_contains_any(combined, _school_phrase_candidates(school_name))
     fraternity_match = _text_contains_any(combined, _fraternity_phrase_candidates(fraternity_name, fraternity_name.replace(" ", "-")))
+    fraternity_host_match = _text_contains_any(host_text, _fraternity_phrase_candidates(fraternity_name, fraternity_name.replace(" ", "-")))
     chapter_match = _text_contains_any(combined, [chapter_name or ""])
+    path_or_title_has_directory_signal = _page_has_directory_signal(path, title)
 
     decision = "other"
     reasons: list[str] = []
     confidence = 0.35
-    if _official_school_source(host, school_name):
+    if _official_school_source(host, school_name) and not fraternity_host_match:
         if any(marker in combined for marker in _OFFICIAL_AFFILIATION_MARKERS) or _looks_like_official_chapter_list_page(combined) or _looks_like_tabbed_chapter_status_page(combined):
             decision = "school_affiliation"
             confidence = 0.88 if school_match else 0.72
@@ -983,14 +1245,14 @@ def tool_site_scope_classifier(
             decision = "school_affiliation"
             confidence = 0.7
             reasons.append("school_owned_source")
+    elif fraternity_match and (school_match or chapter_match or fraternity_host_match) and not path_or_title_has_directory_signal:
+        decision = "chapter_site"
+        confidence = 0.82
+        reasons.append("chapter_identity_context")
     elif _page_has_directory_signal(path, title, text):
         decision = "nationals"
         confidence = 0.78 if fraternity_match else 0.58
         reasons.append("directory_markers")
-    elif fraternity_match and (school_match or chapter_match):
-        decision = "chapter_site"
-        confidence = 0.82
-        reasons.append("chapter_identity_context")
 
     return PrecisionDecision(
         decision=decision,

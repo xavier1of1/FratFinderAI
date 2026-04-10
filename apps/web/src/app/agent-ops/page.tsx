@@ -74,6 +74,25 @@ export default async function AgentOpsPage() {
       </section>
 
       <section className="panel">
+        <h2>Accuracy Recovery</h2>
+        <p className="sectionDescription">These are the approval-gated Phase 0 metrics: chapter-specific contact coverage, nationals pollution, and inactive/confirmed-absent outcomes.</p>
+        <div className="metrics">
+          <MetricCard label="Complete Rows" value={data.summary.accuracyRecovery.completeRows} />
+          <MetricCard label="Chapter-Specific Contact Rows" value={data.summary.accuracyRecovery.chapterSpecificContactRows} />
+          <MetricCard label="Nationals-Only Contact Rows" value={data.summary.accuracyRecovery.nationalsOnlyContactRows} />
+          <MetricCard label="Validated Inactive Rows" value={data.summary.accuracyRecovery.inactiveValidatedRows} />
+          <MetricCard label="Confirmed-Absent Websites" value={data.summary.accuracyRecovery.confirmedAbsentWebsiteRows} />
+          <MetricCard label="Active Rows With Chapter Email" value={data.summary.accuracyRecovery.activeRowsWithChapterSpecificEmail} />
+          <MetricCard label="Active Rows With Chapter Instagram" value={data.summary.accuracyRecovery.activeRowsWithChapterSpecificInstagram} />
+          <MetricCard label="Active Rows With Any Contact" value={data.summary.accuracyRecovery.activeRowsWithAnyContact} />
+          <MetricCard label="Total Chapters" value={data.summary.accuracyRecovery.totalChapters} />
+        </div>
+        <p className="muted">
+          Complete rows use the locked investor-safe rule: active chapter plus at least one chapter-supported email or Instagram, excluding generic nationals contact.
+        </p>
+      </section>
+
+      <section className="panel">
         <h2>Chapter Search Core</h2>
         <p className="sectionDescription">This is the new V3 chapter-discovery surface: national and institutional follow behavior, canonical vs provisional creation, and rejected candidate reasons.</p>
         <div className="metrics">
@@ -278,6 +297,9 @@ export default async function AgentOpsPage() {
                 <th>Trust</th>
                 <th>Confidence</th>
                 <th>Provider</th>
+                <th>Scope</th>
+                <th>Specificity</th>
+                <th>Reason</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -291,6 +313,9 @@ export default async function AgentOpsPage() {
                   <td>{item.trustTier ?? <span className="muted">n/a</span>}</td>
                   <td>{item.confidence !== null ? item.confidence.toFixed(2) : <span className="muted">n/a</span>}</td>
                   <td>{item.provider ?? <span className="muted">n/a</span>}</td>
+                  <td>{item.decisionEvidence?.pageScope ?? <span className="muted">n/a</span>}</td>
+                  <td>{item.decisionEvidence?.contactSpecificity ?? <span className="muted">n/a</span>}</td>
+                  <td>{item.decisionEvidence?.reasonCode ?? <span className="muted">n/a</span>}</td>
                   <td>{new Date(item.createdAt).toLocaleString()}</td>
                 </tr>
               ))}
