@@ -1,5 +1,31 @@
 import { headers } from "next/headers";
 
+type ServerBaseUrlEnv = {
+  NEXT_PUBLIC_API_BASE_URL?: string;
+  PORT?: string;
+  WEB_PORT?: string;
+};
+
+function normalizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+export function resolveServerBaseUrl(
+  env: ServerBaseUrlEnv = process.env as ServerBaseUrlEnv
+): string {
+  const explicitBaseUrl = env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (explicitBaseUrl) {
+    return normalizeBaseUrl(explicitBaseUrl);
+  }
+
+  const runtimePort = env.PORT?.trim() || env.WEB_PORT?.trim();
+  if (runtimePort) {
+    return `http://127.0.0.1:${runtimePort}`;
+  }
+
+  return "http://127.0.0.1:3000";
+}
+
 function getBaseUrl(): string {
   if (typeof window !== "undefined") {
     return "";
@@ -16,7 +42,7 @@ function getBaseUrl(): string {
     // Fall through to environment-based fallback for non-request contexts.
   }
 
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
+  return resolveServerBaseUrl();
 }
 
 export async function fetchFromApi<T>(path: string): Promise<T> {
