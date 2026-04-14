@@ -880,11 +880,21 @@ class RequestSupervisorGraphRuntime:
         effective_config = _compute_adaptive_enrichment_config(request.config, progress, cycle_state)
         queue_at_start = int((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("queueAtStart", 0)) or _total_field_jobs(progress.get("totals")))
         runtime_fallback_count = int((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("runtimeFallbackCount", 0)) or 0) + int(field_result.get("runtime_fallback_count", 0) or 0)
-        previous_queue_triage = dict((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("queueTriage") or {}))
-        previous_chapter_repair = dict((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("chapterRepair") or {}))
+        previous_enrichment = dict((((request.progress.get("analytics") or {}).get("enrichment") or {})) )
+        previous_queue_triage = dict(previous_enrichment.get("queueTriage") or {})
+        previous_chapter_repair = dict(previous_enrichment.get("chapterRepair") or {})
         current_queue_triage = dict(field_result.get("queue_triage") or {})
         current_chapter_repair = dict(field_result.get("chapter_repair") or {})
         queue_burn_rate = round((queue_at_start - remaining_queue) / queue_at_start, 4) if queue_at_start > 0 else 0.0
+        preflight_probe_queries = list(dict.fromkeys([
+            *list(previous_enrichment.get("preflightProbeQueries") or []),
+            *list(field_result.get("preflight_probe_queries") or []),
+        ]))
+        chapter_search_queries = list(dict.fromkeys([
+            *list(previous_enrichment.get("chapterSearchQueries") or []),
+            *list(field_result.get("chapter_search_queries") or []),
+        ]))
+        provider_window_state = dict(field_result.get("provider_window_state") or previous_enrichment.get("providerWindowState") or {})
         progress = _update_progress_analytics(
             progress,
             source_quality=state.get("source_quality") or _current_source_quality(request),
@@ -903,6 +913,23 @@ class RequestSupervisorGraphRuntime:
                 "processedTotal": int(cycle_state.get("processedTotal", 0) or 0),
                 "requeuedTotal": int(cycle_state.get("requeuedTotal", 0) or 0),
                 "failedTerminalTotal": int(cycle_state.get("failedTerminalTotal", 0) or 0),
+                "newCompleteRows": int(previous_enrichment.get("newCompleteRows", 0) or 0) + int(field_result.get("new_complete_rows", 0) or 0),
+                "newInactiveValidatedRows": int(previous_enrichment.get("newInactiveValidatedRows", 0) or 0) + int(field_result.get("new_inactive_validated_rows", 0) or 0),
+                "newConfirmedAbsentWebsiteRows": int(previous_enrichment.get("newConfirmedAbsentWebsiteRows", 0) or 0) + int(field_result.get("new_confirmed_absent_website_rows", 0) or 0),
+                "providerDegradedDeferred": int(previous_enrichment.get("providerDegradedDeferred", 0) or 0) + int(field_result.get("provider_degraded_deferred", 0) or 0),
+                "dependencyWaitDeferred": int(previous_enrichment.get("dependencyWaitDeferred", 0) or 0) + int(field_result.get("dependency_wait_deferred", 0) or 0),
+                "supportingPageResolved": int(previous_enrichment.get("supportingPageResolved", 0) or 0) + int(field_result.get("supporting_page_resolved", 0) or 0),
+                "supportingPageContactResolved": int(previous_enrichment.get("supportingPageContactResolved", 0) or 0) + int(field_result.get("supporting_page_contact_resolved", 0) or 0),
+                "externalSearchContactResolved": int(previous_enrichment.get("externalSearchContactResolved", 0) or 0) + int(field_result.get("external_search_contact_resolved", 0) or 0),
+                "enrichmentObservationsLogged": int(previous_enrichment.get("enrichmentObservationsLogged", 0) or 0) + int(field_result.get("enrichment_observations_logged", 0) or 0),
+                "midBatchProviderRechecks": int(previous_enrichment.get("midBatchProviderRechecks", 0) or 0) + int(field_result.get("mid_batch_provider_rechecks", 0) or 0),
+                "midBatchProviderReorders": int(previous_enrichment.get("midBatchProviderReorders", 0) or 0) + int(field_result.get("mid_batch_provider_reorders", 0) or 0),
+                "productiveYield": float(field_result.get("productive_yield", 0.0) or 0.0),
+                "preflightProbeQueries": preflight_probe_queries,
+                "chapterSearchQueries": chapter_search_queries,
+                "preflightProbeCount": len(preflight_probe_queries),
+                "chapterSearchQueryCount": len(chapter_search_queries),
+                "providerWindowState": provider_window_state,
                 "queueTriage": {
                     "invalidCancelled": int(previous_queue_triage.get("invalidCancelled", 0) or 0) + int(current_queue_triage.get("invalidCancelled", 0) or 0),
                     "deferredLongCooldown": int(previous_queue_triage.get("deferredLongCooldown", 0) or 0) + int(current_queue_triage.get("deferredLongCooldown", 0) or 0),
@@ -937,6 +964,14 @@ class RequestSupervisorGraphRuntime:
                 "failedTerminal": field_result.get("failed_terminal", 0),
                 "runtimeModeUsed": field_result.get("runtime_mode_used", self._field_job_runtime_mode),
                 "totals": progress.get("totals"),
+                "newCompleteRows": field_result.get("new_complete_rows", 0),
+                "providerDegradedDeferred": field_result.get("provider_degraded_deferred", 0),
+                "dependencyWaitDeferred": field_result.get("dependency_wait_deferred", 0),
+                "supportingPageContactResolved": field_result.get("supporting_page_contact_resolved", 0),
+                "externalSearchContactResolved": field_result.get("external_search_contact_resolved", 0),
+                "preflightProbeQueries": field_result.get("preflight_probe_queries", []),
+                "chapterSearchQueries": field_result.get("chapter_search_queries", []),
+                "providerWindowState": field_result.get("provider_window_state", {}),
             },
         )
         if remaining_queue <= 0:
@@ -963,7 +998,52 @@ class RequestSupervisorGraphRuntime:
                 "graph_status": "succeeded",
                 "terminal_reason": "completed",
             }
+        preflight_snapshot = dict(state.get("preflight_snapshot") or {})
+        if (
+            _should_complete_with_deferred_residual_queue(
+                progress=progress,
+                effective_config=effective_config,
+                preflight_snapshot=preflight_snapshot,
+            )
+            or _should_complete_stalled_residual_queue(
+                progress=progress,
+                effective_config=effective_config,
+                cycle_state=cycle_state,
+            )
+        ) and (
+            int(cycle_state.get("lowProgressCycles", 0) or 0) >= 2
+            or int(cycle_state.get("degradedCycleCount", 0) or 0) >= 2
+        ):
+            return self._complete_with_deferred_residual_queue(
+                request=request,
+                progress=progress,
+                cycle_state=cycle_state,
+                effective_config=effective_config,
+                remaining_queue=remaining_queue,
+                preflight_snapshot=preflight_snapshot,
+                source_quality=state.get("source_quality") or _current_source_quality(request),
+                message="Request completed early with small residual actionable queue deferred because provider health was degraded and progress had stalled",
+            )
         if cycle_state["cyclesCompleted"] >= int(effective_config.get("maxEnrichmentCycles", 1)):
+            if _should_complete_with_deferred_residual_queue(
+                progress=progress,
+                effective_config=effective_config,
+                preflight_snapshot=preflight_snapshot,
+            ) or _should_complete_stalled_residual_queue(
+                progress=progress,
+                effective_config=effective_config,
+                cycle_state=cycle_state,
+            ):
+                return self._complete_with_deferred_residual_queue(
+                    request=request,
+                    progress=progress,
+                    cycle_state=cycle_state,
+                    effective_config=effective_config,
+                    remaining_queue=remaining_queue,
+                    preflight_snapshot=preflight_snapshot,
+                    source_quality=state.get("source_quality") or _current_source_quality(request),
+                    message="Request completed with small residual actionable queue deferred because provider health was degraded",
+                )
             self._request_repository.update_request(
                 request.id,
                 status="failed",
@@ -999,6 +1079,63 @@ class RequestSupervisorGraphRuntime:
             "continue_enrichment": True,
             "graph_status": "running",
             "terminal_reason": None,
+        }
+
+    def _complete_with_deferred_residual_queue(
+        self,
+        *,
+        request: FraternityCrawlRequestRecord,
+        progress: dict[str, Any],
+        cycle_state: dict[str, int],
+        effective_config: dict[str, int],
+        remaining_queue: int,
+        preflight_snapshot: dict[str, Any],
+        source_quality: dict[str, Any],
+        message: str,
+    ) -> dict[str, Any]:
+        residual_threshold = _residual_queue_threshold(progress=progress, effective_config=effective_config)
+        progress = _update_progress_analytics(
+            progress,
+            source_quality=source_quality,
+            enrichment={
+                **(((progress.get("analytics") or {}).get("enrichment") or {})),
+                "completionMode": "deferred_provider_residual",
+                "residualActionableAtCompletion": remaining_queue,
+                "providerDegradedAtCompletion": True,
+                "residualThreshold": residual_threshold,
+            },
+        )
+        self._request_repository.update_request(
+            request.id,
+            status="succeeded",
+            stage="completed",
+            finished_at_now=True,
+            progress=progress,
+            last_error="",
+        )
+        self._request_repository.append_request_event(
+            request.id,
+            "request_completed",
+            message,
+            {
+                "totals": progress.get("totals"),
+                "residualActionable": remaining_queue,
+                "completionMode": "deferred_provider_residual",
+                "preflightHealthy": bool(preflight_snapshot.get("healthy", True)),
+                "preflightSuccessRate": float(preflight_snapshot.get("success_rate", 0.0) or 0.0),
+                "lowProgressCycles": int(cycle_state.get("lowProgressCycles", 0) or 0),
+                "degradedCycleCount": int(cycle_state.get("degradedCycleCount", 0) or 0),
+                "residualThreshold": residual_threshold,
+            },
+        )
+        return {
+            "request": self._request_repository.get_request(request.id),
+            "progress": progress,
+            "cycle_state": cycle_state,
+            "effective_config": effective_config,
+            "continue_enrichment": False,
+            "graph_status": "succeeded",
+            "terminal_reason": "completed_deferred_provider_recovery",
         }
 
     def _evaluate_provisional_promotions(self, state: RequestGraphState) -> dict[str, Any]:
@@ -1143,6 +1280,65 @@ def _remaining_actionable_queue(progress: dict[str, Any] | None) -> int:
     if contact_resolution:
         return int(contact_resolution.get("queuedActionable", 0) or 0) + int(totals.get("running", 0) or 0)
     return _remaining_queue(totals)
+
+
+def _residual_queue_threshold(*, progress: dict[str, Any], effective_config: dict[str, int]) -> int:
+    enrichment = ((progress.get("analytics") or {}).get("enrichment") or {})
+    queue_at_start = int(enrichment.get("queueAtStart", 0) or 0)
+    effective_limit = max(1, int(effective_config.get("fieldJobLimitPerCycle", 1) or 1))
+    return max(
+        2,
+        min(
+            30,
+            max(int(queue_at_start * 0.05) if queue_at_start > 0 else 0, int(effective_limit * 0.75)),
+        ),
+    )
+
+
+def _should_complete_with_deferred_residual_queue(
+    *,
+    progress: dict[str, Any],
+    effective_config: dict[str, int],
+    preflight_snapshot: dict[str, Any],
+) -> bool:
+    if bool(preflight_snapshot.get("healthy", True)):
+        return False
+    remaining_queue = _remaining_actionable_queue(progress)
+    if remaining_queue <= 0:
+        return False
+    enrichment = ((progress.get("analytics") or {}).get("enrichment") or {})
+    residual_threshold = _residual_queue_threshold(progress=progress, effective_config=effective_config)
+    if remaining_queue > residual_threshold:
+        return False
+    crawl_run = progress.get("crawlRun") or {}
+    contact_resolution = progress.get("contactResolution") or {}
+    if int(crawl_run.get("recordsSeen", 0) or 0) <= 0 and int(contact_resolution.get("processed", 0) or 0) <= 0:
+        return False
+    return True
+
+
+def _should_complete_stalled_residual_queue(
+    *,
+    progress: dict[str, Any],
+    effective_config: dict[str, int],
+    cycle_state: dict[str, int],
+) -> bool:
+    remaining_queue = _remaining_actionable_queue(progress)
+    if remaining_queue <= 0:
+        return False
+    enrichment = ((progress.get("analytics") or {}).get("enrichment") or {})
+    residual_threshold = _residual_queue_threshold(progress=progress, effective_config=effective_config)
+    if remaining_queue > residual_threshold:
+        return False
+    if int(cycle_state.get("lowProgressCycles", 0) or 0) < 2 and int(cycle_state.get("degradedCycleCount", 0) or 0) < 2:
+        return False
+    if float(enrichment.get("queueBurnRate", 1.0) or 0.0) > 0.05:
+        return False
+    crawl_run = progress.get("crawlRun") or {}
+    contact_resolution = progress.get("contactResolution") or {}
+    if int(crawl_run.get("recordsSeen", 0) or 0) <= 0 and int(contact_resolution.get("processed", 0) or 0) <= 0:
+        return False
+    return True
 
 
 def _total_field_jobs(totals: dict[str, Any] | None) -> int:

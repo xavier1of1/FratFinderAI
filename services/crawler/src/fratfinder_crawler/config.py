@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     crawler_retry_backoff_seconds: float = Field(default=1.0, alias="CRAWLER_RETRY_BACKOFF_SECONDS")
     crawler_field_job_worker_id: str = Field(default="local-crawler-worker", alias="CRAWLER_FIELD_JOB_WORKER_ID")
     crawler_field_job_base_backoff_seconds: int = Field(default=30, alias="CRAWLER_FIELD_JOB_BASE_BACKOFF_SECONDS")
-    crawler_field_job_max_workers: int = Field(default=8, alias="CRAWLER_FIELD_JOB_MAX_WORKERS")
+    crawler_field_job_max_workers: int = Field(default=12, alias="CRAWLER_FIELD_JOB_MAX_WORKERS")
     crawler_field_job_stale_claim_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_STALE_CLAIM_MINUTES")
     crawler_field_job_graph_run_stale_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_GRAPH_RUN_STALE_MINUTES")
     crawler_field_job_runtime_mode: str = Field(
@@ -52,24 +52,28 @@ class Settings(BaseSettings):
     crawler_search_provider_pacing_ms_bing_html: int = Field(default=0, alias="CRAWLER_SEARCH_PROVIDER_PACING_MS_BING_HTML")
     crawler_search_provider_pacing_ms_duckduckgo_html: int = Field(default=0, alias="CRAWLER_SEARCH_PROVIDER_PACING_MS_DUCKDUCKGO_HTML")
     crawler_search_provider_pacing_ms_brave_html: int = Field(default=0, alias="CRAWLER_SEARCH_PROVIDER_PACING_MS_BRAVE_HTML")
-    crawler_search_negative_cooldown_days: int = Field(default=30, alias="CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS")
-    crawler_search_dependency_wait_seconds: int = Field(default=300, alias="CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS")
+    crawler_search_negative_cooldown_days: int = Field(default=1, alias="CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS")
+    crawler_search_dependency_wait_seconds: int = Field(default=180, alias="CRAWLER_SEARCH_DEPENDENCY_WAIT_SECONDS")
     crawler_search_transient_short_retries: int = Field(default=2, alias="CRAWLER_SEARCH_TRANSIENT_SHORT_RETRIES")
     crawler_search_transient_long_cooldown_seconds: int = Field(default=900, alias="CRAWLER_SEARCH_TRANSIENT_LONG_COOLDOWN_SECONDS")
     crawler_search_require_confident_website_for_email: bool = Field(default=True, alias="CRAWLER_SEARCH_REQUIRE_CONFIDENT_WEBSITE_FOR_EMAIL")
     crawler_search_email_escape_on_provider_block: bool = Field(default=True, alias="CRAWLER_SEARCH_EMAIL_ESCAPE_ON_PROVIDER_BLOCK")
     crawler_search_email_escape_min_website_failures: int = Field(default=2, alias="CRAWLER_SEARCH_EMAIL_ESCAPE_MIN_WEBSITE_FAILURES")
     crawler_search_min_no_candidate_backoff_seconds: int = Field(default=60, alias="CRAWLER_SEARCH_MIN_NO_CANDIDATE_BACKOFF_SECONDS")
-    crawler_search_email_max_queries: int = Field(default=5, alias="CRAWLER_SEARCH_EMAIL_MAX_QUERIES")
-    crawler_search_instagram_max_queries: int = Field(default=6, alias="CRAWLER_SEARCH_INSTAGRAM_MAX_QUERIES")
+    crawler_search_email_max_queries: int = Field(default=4, alias="CRAWLER_SEARCH_EMAIL_MAX_QUERIES")
+    crawler_search_instagram_max_queries: int = Field(default=5, alias="CRAWLER_SEARCH_INSTAGRAM_MAX_QUERIES")
     crawler_search_preflight_enabled: bool = Field(default=False, alias="CRAWLER_SEARCH_PREFLIGHT_ENABLED")
     crawler_search_preflight_probe_count: int = Field(default=3, alias="CRAWLER_SEARCH_PREFLIGHT_PROBE_COUNT")
     crawler_search_preflight_min_success_rate: float = Field(default=0.34, alias="CRAWLER_SEARCH_PREFLIGHT_MIN_SUCCESS_RATE")
-    crawler_search_degraded_worker_cap: int = Field(default=2, alias="CRAWLER_SEARCH_DEGRADED_WORKER_CAP")
-    crawler_search_degraded_max_results: int = Field(default=3, alias="CRAWLER_SEARCH_DEGRADED_MAX_RESULTS")
+    crawler_search_mid_batch_recheck_enabled: bool = Field(default=True, alias="CRAWLER_SEARCH_MID_BATCH_RECHECK_ENABLED")
+    crawler_search_mid_batch_recheck_every_jobs: int = Field(default=40, alias="CRAWLER_SEARCH_MID_BATCH_RECHECK_EVERY_JOBS")
+    crawler_search_mid_batch_recheck_every_seconds: int = Field(default=120, alias="CRAWLER_SEARCH_MID_BATCH_RECHECK_EVERY_SECONDS")
+    crawler_search_mid_batch_min_success_rate: float = Field(default=0.25, alias="CRAWLER_SEARCH_MID_BATCH_MIN_SUCCESS_RATE")
+    crawler_search_degraded_worker_cap: int = Field(default=4, alias="CRAWLER_SEARCH_DEGRADED_WORKER_CAP")
+    crawler_search_degraded_max_results: int = Field(default=2, alias="CRAWLER_SEARCH_DEGRADED_MAX_RESULTS")
     crawler_search_degraded_max_pages_per_job: int = Field(default=1, alias="CRAWLER_SEARCH_DEGRADED_MAX_PAGES_PER_JOB")
-    crawler_search_degraded_email_max_queries: int = Field(default=3, alias="CRAWLER_SEARCH_DEGRADED_EMAIL_MAX_QUERIES")
-    crawler_search_degraded_instagram_max_queries: int = Field(default=4, alias="CRAWLER_SEARCH_DEGRADED_INSTAGRAM_MAX_QUERIES")
+    crawler_search_degraded_email_max_queries: int = Field(default=2, alias="CRAWLER_SEARCH_DEGRADED_EMAIL_MAX_QUERIES")
+    crawler_search_degraded_instagram_max_queries: int = Field(default=3, alias="CRAWLER_SEARCH_DEGRADED_INSTAGRAM_MAX_QUERIES")
     crawler_search_degraded_dependency_wait_seconds: int = Field(default=600, alias="CRAWLER_SEARCH_DEGRADED_DEPENDENCY_WAIT_SECONDS")
     crawler_search_enable_school_initials: bool = Field(default=True, alias="CRAWLER_SEARCH_ENABLE_SCHOOL_INITIALS")
     crawler_search_min_school_initial_length: int = Field(default=3, alias="CRAWLER_SEARCH_MIN_SCHOOL_INITIAL_LENGTH")
@@ -95,8 +99,8 @@ class Settings(BaseSettings):
     crawler_v3_execution_mode: str = Field(default="worker_service", alias="CRAWLER_V3_EXECUTION_MODE")
     crawler_v3_request_worker_id: str = Field(default="local-request-worker", alias="CRAWLER_V3_REQUEST_WORKER_ID")
     crawler_v3_request_worker_runtime_owner: str = Field(default="python_request_worker", alias="CRAWLER_V3_REQUEST_WORKER_RUNTIME_OWNER")
-    crawler_v3_request_poll_seconds: int = Field(default=5, alias="CRAWLER_V3_REQUEST_POLL_SECONDS")
-    crawler_v3_request_batch_limit: int = Field(default=10, alias="CRAWLER_V3_REQUEST_BATCH_LIMIT")
+    crawler_v3_request_poll_seconds: int = Field(default=2, alias="CRAWLER_V3_REQUEST_POLL_SECONDS")
+    crawler_v3_request_batch_limit: int = Field(default=20, alias="CRAWLER_V3_REQUEST_BATCH_LIMIT")
     crawler_v3_request_stale_minutes: int = Field(default=45, alias="CRAWLER_V3_REQUEST_STALE_MINUTES")
     crawler_v3_request_worker_lease_seconds: int = Field(default=180, alias="CRAWLER_V3_REQUEST_WORKER_LEASE_SECONDS")
     crawler_v3_request_worker_heartbeat_seconds: int = Field(default=30, alias="CRAWLER_V3_REQUEST_WORKER_HEARTBEAT_SECONDS")
@@ -216,6 +220,14 @@ class Settings(BaseSettings):
         default='{"coverage":0.45,"throughput":0.2,"queue":0.2,"reliability":0.15}',
         alias="Agent:ADAPTIVE_BALANCED_KPI_WEIGHTS",
         validation_alias=AliasChoices("Agent:ADAPTIVE_BALANCED_KPI_WEIGHTS", "CRAWLER_ADAPTIVE_BALANCED_KPI_WEIGHTS"),
+    )
+    crawler_adaptive_enrichment_observations_enabled: bool = Field(
+        default=True,
+        alias="Agent:ADAPTIVE_ENRICHMENT_OBSERVATIONS_ENABLED",
+        validation_alias=AliasChoices(
+            "Agent:ADAPTIVE_ENRICHMENT_OBSERVATIONS_ENABLED",
+            "CRAWLER_ADAPTIVE_ENRICHMENT_OBSERVATIONS_ENABLED",
+        ),
     )
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")

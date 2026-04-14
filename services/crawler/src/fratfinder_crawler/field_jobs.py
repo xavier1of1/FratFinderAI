@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
+from fratfinder_crawler.adaptive.policy import AdaptivePolicy
 from fratfinder_crawler.candidate_sanitizer import (
     CandidateKind,
     sanitize_as_email,
@@ -23,6 +25,7 @@ from fratfinder_crawler.models import (
     CONTACT_SPECIFICITY_NATIONAL_CHAPTER,
     CONTACT_SPECIFICITY_NATIONAL_GENERIC,
     CONTACT_SPECIFICITY_SCHOOL,
+    EnrichmentObservation,
     ExtractedChapter,
     FieldJob,
     FIELD_RESOLUTION_CONFIRMED_ABSENT,
@@ -32,6 +35,7 @@ from fratfinder_crawler.models import (
     FIELD_JOB_FIND_INSTAGRAM,
     FIELD_JOB_FIND_WEBSITE,
     FIELD_JOB_TO_STATE_KEY,
+    FIELD_TO_CHAPTER_COLUMN,
     FIELD_JOB_VERIFY_SCHOOL,
     FIELD_JOB_VERIFY_WEBSITE,
     PAGE_SCOPE_CHAPTER_SITE,
@@ -239,6 +243,7 @@ _EMAIL_ROLE_MARKERS = (
     "vice president",
 )
 _GENERIC_OFFICE_EMAIL_MARKERS = {
+    "admission",
     "admissions",
     "advisor",
     "fsl",
@@ -246,9 +251,12 @@ _GENERIC_OFFICE_EMAIL_MARKERS = {
     "greek.life",
     "graduateprogram",
     "graduateprograms",
+    "ifc",
     "leadership",
     "ofsl",
+    "osfl",
     "office",
+    "operator",
     "reslife",
     "studentengagement",
     "studentaffairs",
@@ -273,6 +281,17 @@ _CHAPTER_SIGNAL_STOPWORDS = {
     "interest",
     "group",
 }
+_INSTITUTION_NAME_MARKERS = (
+    "university",
+    "college",
+    "institute",
+    "academy",
+    "school",
+    "polytechnic",
+    "state",
+    "campus",
+    "tech",
+)
 _INSTAGRAM_CONFLICT_MARKERS = {
     "tri sigma": "sigma sigma sigma",
     "sigma sigma sigma": "sigma sigma sigma",
@@ -396,6 +415,12 @@ class ActivityValidationDecision:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def _parse_document_markup(markup: str) -> BeautifulSoup:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+        return BeautifulSoup(markup, "html.parser")
+
+
 @dataclass(slots=True)
 class AuthoritativeBundle:
     website_match: CandidateMatch | None = None
@@ -445,6 +470,28 @@ def _contact_specificity_for_page_scope(page_scope: str) -> str:
     return CONTACT_SPECIFICITY_AMBIGUOUS
 
 
+def _job_supporting_page_ready(job: FieldJob) -> bool:
+    field_states = dict(job.field_states or {})
+    website_state = str(field_states.get("website_url") or "").strip().lower()
+    if job.website_url and website_state not in {"", "missing", "low_confidence"}:
+        return True
+    contact_resolution = job.payload.get("contactResolution") if isinstance(job.payload.get("contactResolution"), dict) else {}
+    supporting_page_url = str(contact_resolution.get("supportingPageUrl") or "").strip()
+    supporting_page_scope = str(contact_resolution.get("supportingPageScope") or contact_resolution.get("pageScope") or "").strip().lower()
+    if supporting_page_url and supporting_page_scope in {
+        "chapter_site",
+        "school_affiliation_page",
+        "nationals_chapter_page",
+    }:
+        return True
+    if website_state == "confirmed_absent":
+        if job.contact_email or job.instagram_url:
+            return True
+        if supporting_page_url and supporting_page_scope in {"school_affiliation_page", "nationals_chapter_page"}:
+            return True
+    return False
+
+
 class FieldJobEngine:
     def __init__(
         self,
@@ -476,6 +523,12 @@ class FieldJobEngine:
         greedy_collect_mode: str = _GREEDY_COLLECT_NONE,
         field_name: str | None = None,
         search_degraded_mode: bool = False,
+        adaptive_policy: AdaptivePolicy | None = None,
+        adaptive_runtime_mode: str | None = None,
+        adaptive_policy_mode: str = "shadow",
+        adaptive_policy_version: str | None = None,
+        provider_window_state: dict[str, Any] | None = None,
+        enrichment_observations_enabled: bool = True,
     ):
         self._repository = repository
         self._logger = logger
@@ -503,6 +556,12 @@ class FieldJobEngine:
         self._greedy_collect_mode = _normalize_greedy_collect_mode(greedy_collect_mode)
         self._field_name = field_name
         self._search_degraded_mode = bool(search_degraded_mode)
+        self._adaptive_policy = adaptive_policy
+        self._adaptive_runtime_mode = str(adaptive_runtime_mode or "shadow")
+        self._adaptive_policy_mode = str(adaptive_policy_mode or "shadow")
+        self._adaptive_policy_version = str(adaptive_policy_version or getattr(adaptive_policy, "policy_version", "") or "").strip() or None
+        self._provider_window_state = dict(provider_window_state or {})
+        self._enrichment_observations_enabled = bool(enrichment_observations_enabled)
         self._search_errors_encountered = False
         self._search_queries_attempted = 0
         self._search_queries_failed = 0
@@ -517,6 +576,9 @@ class FieldJobEngine:
         self._provenance_text_cache: dict[str, str] = {}
         self._candidate_rejection_counts: dict[str, int] = {}
         self._decision_trace: list[dict[str, str | int | float | bool | None]] = []
+        self._chapter_search_queries: list[str] = []
+        self._last_batch_metrics: dict[str, object] = {}
+        self._enrichment_observations_logged = 0
         self._nationals_entries_cache: dict[str, list[NationalsChapterEntry]] = {}
         self._nationals_collect_attempted: set[str] = set()
         self._source_record_cache: dict[str, SourceRecord | None] = {}
@@ -580,9 +642,18 @@ class FieldJobEngine:
         )
 
     def process(self, limit: int = 25) -> dict[str, int]:
-        processed = 0
-        requeued = 0
-        failed_terminal = 0
+        summary: dict[str, object] = {
+            "processed": 0,
+            "requeued": 0,
+            "failed_terminal": 0,
+            "provider_degraded_deferred": 0,
+            "dependency_wait_deferred": 0,
+            "supporting_page_resolved": 0,
+            "supporting_page_contact_resolved": 0,
+            "external_search_contact_resolved": 0,
+            "chapter_search_queries": [],
+            "enrichment_observations_logged": 0,
+        }
 
         for _ in range(limit):
             job = self._repository.claim_next_field_job(
@@ -606,6 +677,9 @@ class FieldJobEngine:
                 max_attempts=job.max_attempts,
             )
 
+            shadow_context = self._build_enrichment_policy_context(job)
+            shadow_decisions = self._score_enrichment_shadow_decisions(shadow_context)
+
             try:
                 result = self._process_single_job(job)
                 if result.review_item is not None:
@@ -617,7 +691,16 @@ class FieldJobEngine:
                     result.field_state_updates,
                     result.provenance_records,
                 )
-                processed += 1
+                summary["processed"] = int(summary["processed"]) + 1
+                self._accumulate_process_metrics(summary, job, result)
+                self._record_enrichment_observation(
+                    job,
+                    context=shadow_context,
+                    decisions=shadow_decisions,
+                    deterministic_action=self._deterministic_enrichment_action(job, context=shadow_context, result=result),
+                    outcome=self._build_enrichment_outcome(job, result=result),
+                )
+                summary["enrichment_observations_logged"] = self._enrichment_observations_logged
                 log_event(
                     self._logger,
                     "field_job_completed",
@@ -631,7 +714,7 @@ class FieldJobEngine:
                 retry_limit = self._retry_limit(job, exc)
                 if not exc.preserve_attempt and job.attempts >= retry_limit:
                     self._repository.fail_field_job_terminal(job, str(exc))
-                    failed_terminal += 1
+                    summary["failed_terminal"] = int(summary["failed_terminal"]) + 1
                     log_event(
                         self._logger,
                         "field_job_terminal_failure",
@@ -652,7 +735,20 @@ class FieldJobEngine:
                     preserve_attempt=exc.preserve_attempt,
                     payload_patch=payload_patch,
                 )
-                requeued += 1
+                summary["requeued"] = int(summary["requeued"]) + 1
+                if exc.reason_code == "provider_degraded":
+                    summary["provider_degraded_deferred"] = int(summary["provider_degraded_deferred"]) + 1
+                if exc.reason_code in {"dependency_wait", "website_required"}:
+                    summary["dependency_wait_deferred"] = int(summary["dependency_wait_deferred"]) + 1
+                self._append_chapter_search_queries(summary, self._chapter_search_queries)
+                self._record_enrichment_observation(
+                    job,
+                    context=shadow_context,
+                    decisions=shadow_decisions,
+                    deterministic_action=self._deterministic_enrichment_action(job, context=shadow_context, retry_error=exc),
+                    outcome=self._build_enrichment_outcome(job, retry_error=exc, backoff_seconds=backoff_seconds),
+                )
+                summary["enrichment_observations_logged"] = self._enrichment_observations_logged
                 log_event(
                     self._logger,
                     "field_job_requeued",
@@ -669,7 +765,15 @@ class FieldJobEngine:
                 )
             except Exception as exc:  # pragma: no cover - guardrail path
                 self._repository.fail_field_job_terminal(job, str(exc))
-                failed_terminal += 1
+                summary["failed_terminal"] = int(summary["failed_terminal"]) + 1
+                self._record_enrichment_observation(
+                    job,
+                    context=shadow_context,
+                    decisions=shadow_decisions,
+                    deterministic_action=self._deterministic_enrichment_action(job, context=shadow_context, unexpected_error=exc),
+                    outcome=self._build_enrichment_outcome(job, unexpected_error=exc),
+                )
+                summary["enrichment_observations_logged"] = self._enrichment_observations_logged
                 log_event(
                     self._logger,
                     "field_job_unexpected_failure",
@@ -679,11 +783,252 @@ class FieldJobEngine:
                     error=str(exc),
                 )
 
+        self._last_batch_metrics = dict(summary)
         return {
-            "processed": processed,
-            "requeued": requeued,
-            "failed_terminal": failed_terminal,
+            "processed": int(summary["processed"]),
+            "requeued": int(summary["requeued"]),
+            "failed_terminal": int(summary["failed_terminal"]),
         }
+
+    def consume_last_batch_metrics(self) -> dict[str, object]:
+        metrics = dict(self._last_batch_metrics or {})
+        self._last_batch_metrics = {}
+        return metrics
+
+    def _build_enrichment_policy_context(self, job: FieldJob) -> dict[str, object]:
+        contact_resolution = job.payload.get("contactResolution") if isinstance(job.payload.get("contactResolution"), dict) else {}
+        general_lane = (self._provider_window_state or {}).get("general_web_search")
+        if not isinstance(general_lane, dict):
+            general_lane = {}
+        supporting_page_url = str(contact_resolution.get("supportingPageUrl") or "").strip()
+        supporting_page_scope = str(contact_resolution.get("supportingPageScope") or contact_resolution.get("pageScope") or "").strip().lower()
+        target_field_value = {
+            FIELD_JOB_FIND_WEBSITE: job.website_url,
+            FIELD_JOB_VERIFY_WEBSITE: job.website_url,
+            FIELD_JOB_FIND_EMAIL: job.contact_email,
+            FIELD_JOB_FIND_INSTAGRAM: job.instagram_url,
+            FIELD_JOB_VERIFY_SCHOOL: job.university_name,
+        }.get(job.field_name)
+        prior_query_count = len(list(job.payload.get("provider_attempts") or [])) + int(job.payload.get("terminal_no_signal_count", 0) or 0)
+        return {
+            "field_type": job.field_name,
+            "supporting_page_present": bool(_job_supporting_page_ready(job) or supporting_page_url),
+            "supporting_page_scope": supporting_page_scope,
+            "website_prerequisite_unmet": bool(job.field_name == FIELD_JOB_FIND_EMAIL and not _job_supporting_page_ready(job)),
+            "school_validation_status": str(job.payload.get("schoolValidationStatus") or "").strip().lower(),
+            "provider_window_healthy": bool(general_lane.get("healthy", False)),
+            "provider_window_degraded": not bool(general_lane.get("healthy", False)),
+            "prior_query_count": prior_query_count,
+            "identity_complete": bool(job.chapter_name and job.university_name and job.fraternity_slug),
+            "has_candidate_website": bool(job.website_url),
+            "has_target_value": bool(target_field_value),
+            "needs_authoritative_validation": bool(job.field_name in {FIELD_JOB_VERIFY_SCHOOL, FIELD_JOB_VERIFY_WEBSITE}),
+            "timeout_risk": 1.0 if not bool(general_lane.get("healthy", False)) else 0.15,
+            "requeue_risk": 0.8 if job.queue_state == "deferred" else 0.2,
+        }
+
+    def _score_enrichment_shadow_decisions(self, context: dict[str, object]) -> list[dict[str, object]]:
+        if self._adaptive_policy is None:
+            return []
+        decisions = self._adaptive_policy.choose_action(
+            [
+                "parse_supporting_page",
+                "verify_school",
+                "verify_website",
+                "search_web",
+                "search_social",
+                "defer",
+                "stop_no_signal",
+                "review_required",
+            ],
+            context=context,
+            template_profile=None,
+            mode="adaptive_shadow",
+        )
+        return [
+            {
+                "actionType": decision.action_type,
+                "score": decision.score,
+                "predictedReward": decision.predicted_reward,
+                "scoreComponents": dict(decision.score_components or {}),
+            }
+            for decision in decisions[:4]
+        ]
+
+    def _deterministic_enrichment_action(
+        self,
+        job: FieldJob,
+        *,
+        context: dict[str, object],
+        result: FieldJobResult | None = None,
+        retry_error: "RetryableJobError" | None = None,
+        unexpected_error: Exception | None = None,
+    ) -> str:
+        if retry_error is not None:
+            if retry_error.reason_code in {"provider_degraded", "transient_network", "dependency_wait", "website_required", "provider_low_signal"}:
+                return "defer"
+            if retry_error.low_signal:
+                return "stop_no_signal"
+            return "search_social" if job.field_name == FIELD_JOB_FIND_INSTAGRAM else "search_web"
+        if unexpected_error is not None:
+            return "review_required"
+        if result is not None and result.review_item is not None:
+            return "review_required"
+        if bool(context.get("supporting_page_present")):
+            return "parse_supporting_page"
+        if job.field_name == FIELD_JOB_VERIFY_SCHOOL:
+            return "verify_school"
+        if job.field_name in {FIELD_JOB_FIND_WEBSITE, FIELD_JOB_VERIFY_WEBSITE}:
+            return "verify_website" if bool(context.get("has_candidate_website")) or bool(context.get("needs_authoritative_validation")) else "search_web"
+        if job.field_name == FIELD_JOB_FIND_INSTAGRAM:
+            return "search_social"
+        if job.field_name == FIELD_JOB_FIND_EMAIL and bool(context.get("website_prerequisite_unmet")):
+            return "defer"
+        return "search_web"
+
+    def _build_enrichment_outcome(
+        self,
+        job: FieldJob,
+        *,
+        result: FieldJobResult | None = None,
+        retry_error: "RetryableJobError" | None = None,
+        unexpected_error: Exception | None = None,
+        backoff_seconds: int | None = None,
+    ) -> dict[str, object]:
+        if retry_error is not None:
+            return {
+                "finalState": "requeued",
+                "reasonCode": retry_error.reason_code,
+                "backoffSeconds": backoff_seconds,
+                "businessSignals": {
+                    "provider_waste": retry_error.reason_code in {"provider_degraded", "transient_network", "provider_low_signal"},
+                    "repair_requeue_without_progress": retry_error.reason_code == "queued_for_entity_repair",
+                },
+            }
+        if unexpected_error is not None:
+            return {
+                "finalState": "failed_terminal",
+                "reasonCode": "unexpected_error",
+                "error": str(unexpected_error),
+                "businessSignals": {
+                    "review_only_run": True,
+                },
+            }
+        payload = dict((result.completed_payload if result is not None else {}) or {})
+        resolution = payload.get("resolutionEvidence") if isinstance(payload.get("resolutionEvidence"), dict) else {}
+        status = str(payload.get("status") or "").strip().lower()
+        field_name = str(payload.get("field") or FIELD_TO_CHAPTER_COLUMN.get(job.field_name, job.field_name) or "")
+        specificity = str(resolution.get("contactSpecificity") or "").strip()
+        safe_specificity = {
+            CONTACT_SPECIFICITY_CHAPTER,
+            CONTACT_SPECIFICITY_SCHOOL,
+            CONTACT_SPECIFICITY_NATIONAL_CHAPTER,
+        }
+        business_signals = {
+            "validated_active": False,
+            "validated_inactive": False,
+            "chapter_safe_website": False,
+            "chapter_safe_email": False,
+            "chapter_safe_instagram": False,
+            "complete_row": False,
+            "review_only_run": bool(result.review_item is not None) if result is not None else False,
+            "school_office_contact_attempt": specificity == CONTACT_SPECIFICITY_SCHOOL and field_name in {"contact_email", "instagram_url"},
+            "national_generic_contact_attempt": specificity == CONTACT_SPECIFICITY_NATIONAL_GENERIC,
+            "wrong_school_match": bool(payload.get("reasonCode") == "wrong_school_match"),
+        }
+        if status == "verified" and job.field_name == FIELD_JOB_VERIFY_SCHOOL:
+            business_signals["validated_active"] = True
+        if (result and result.chapter_updates.get("chapter_status") == "inactive") or status == "inactive":
+            business_signals["validated_inactive"] = True
+        if status == "updated" and field_name == "website_url":
+            business_signals["chapter_safe_website"] = specificity in safe_specificity
+        if status == "updated" and field_name == "contact_email":
+            business_signals["chapter_safe_email"] = specificity in safe_specificity
+        if status == "updated" and field_name == "instagram_url":
+            business_signals["chapter_safe_instagram"] = specificity in safe_specificity
+        if status == "updated":
+            completion_lookup = getattr(self._repository, "get_chapter_completion_signal", None)
+            completion = completion_lookup(job.chapter_id) if callable(completion_lookup) else {}
+            business_signals["complete_row"] = bool(completion.get("complete_row", False))
+            if not business_signals["validated_active"]:
+                business_signals["validated_active"] = bool(completion.get("validated_active", False))
+            if not business_signals["chapter_safe_email"]:
+                business_signals["chapter_safe_email"] = bool(completion.get("chapter_safe_email", False))
+            if not business_signals["chapter_safe_instagram"]:
+                business_signals["chapter_safe_instagram"] = bool(completion.get("chapter_safe_instagram", False))
+        return {
+            "finalState": "processed",
+            "status": status,
+            "reasonCode": payload.get("reasonCode"),
+            "businessSignals": business_signals,
+        }
+
+    def _record_enrichment_observation(
+        self,
+        job: FieldJob,
+        *,
+        context: dict[str, object],
+        decisions: list[dict[str, object]],
+        deterministic_action: str,
+        outcome: dict[str, object],
+    ) -> None:
+        if not self._enrichment_observations_enabled:
+            return
+        append_observation = getattr(self._repository, "append_enrichment_observation", None)
+        if not callable(append_observation):
+            return
+        observation = EnrichmentObservation(
+            id=None,
+            field_job_id=job.id,
+            chapter_id=job.chapter_id,
+            chapter_slug=job.chapter_slug,
+            fraternity_slug=job.fraternity_slug,
+            source_slug=job.source_slug,
+            field_name=job.field_name,
+            queue_state=job.queue_state,
+            runtime_mode=self._adaptive_runtime_mode,
+            policy_version=self._adaptive_policy_version,
+            policy_mode=self._adaptive_policy_mode,
+            recommended_action=str((decisions[0] or {}).get("actionType")) if decisions else None,
+            deterministic_action=deterministic_action,
+            recommended_actions=decisions,
+            context_features=context,
+            provider_window_state=dict(self._provider_window_state or {}),
+            outcome=outcome,
+        )
+        append_observation(observation)
+        self._enrichment_observations_logged += 1
+
+    def _append_chapter_search_queries(self, summary: dict[str, object], queries: list[str]) -> None:
+        bucket = summary.setdefault("chapter_search_queries", [])
+        if not isinstance(bucket, list):
+            return
+        for query in queries:
+            query_text = str(query or "").strip()
+            if query_text and query_text not in bucket:
+                bucket.append(query_text)
+
+    def _accumulate_process_metrics(self, summary: dict[str, object], job: FieldJob, result: FieldJobResult) -> None:
+        self._append_chapter_search_queries(summary, self._chapter_search_queries)
+        payload = dict(result.completed_payload or {})
+        if str(payload.get("status") or "").strip().lower() not in {"updated", "confirmed_absent"}:
+            return
+        resolution = payload.get("resolutionEvidence") if isinstance(payload.get("resolutionEvidence"), dict) else {}
+        decision_stage = str(resolution.get("decisionStage") or "").strip().lower()
+        target_field = str(payload.get("field") or FIELD_TO_CHAPTER_COLUMN.get(job.field_name, job.field_name) or "").strip().lower()
+        if target_field == "find_email":
+            target_field = "contact_email"
+        elif target_field == "find_instagram":
+            target_field = "instagram_url"
+        elif target_field == "find_website":
+            target_field = "website_url"
+        if decision_stage == "authoritative_bundle":
+            if target_field == "website_url":
+                summary["supporting_page_resolved"] = int(summary["supporting_page_resolved"]) + 1
+            elif target_field in {"contact_email", "instagram_url"}:
+                summary["supporting_page_contact_resolved"] = int(summary["supporting_page_contact_resolved"]) + 1
+        elif decision_stage == "search_candidate" and target_field in {"contact_email", "instagram_url"}:
+            summary["external_search_contact_resolved"] = int(summary["external_search_contact_resolved"]) + 1
 
     def process_claimed_job(self, job: FieldJob) -> FieldJobResult:
         return self._process_single_job(job)
@@ -700,6 +1045,7 @@ class FieldJobEngine:
         self._last_search_failure_kind = None
         self._candidate_rejection_counts = {}
         self._decision_trace = []
+        self._chapter_search_queries = []
         self._trace(
             "job_started",
             field_name=job.field_name,
@@ -881,7 +1227,11 @@ class FieldJobEngine:
         return queue_state == "deferred" and self._payload_int(job.payload.get("transient_provider_failures")) >= self._transient_short_retries and int(job.attempts or 0) > 1
 
     def _school_name_for_job(self, job: FieldJob) -> str:
-        return str(job.university_name or job.payload.get("candidateSchoolName") or "").strip()
+        for candidate in (job.university_name, job.payload.get("candidateSchoolName")):
+            normalized = _canonical_school_name(candidate)
+            if normalized:
+                return normalized
+        return ""
 
     def _school_slug_for_job(self, job: FieldJob) -> str:
         return str(_slugify(self._school_name_for_job(job)) or "")
@@ -1400,7 +1750,7 @@ class FieldJobEngine:
         base_host = (urlparse(document.url).netloc or "").lower()
         if not base_host:
             return []
-        soup = BeautifulSoup(document.html, "html.parser")
+        soup = _parse_document_markup(document.html)
         candidates: list[tuple[int, str]] = []
         seen: set[str] = set()
         for anchor in soup.select("a[href]"):
@@ -2149,12 +2499,14 @@ class FieldJobEngine:
         raise RetryableJobError(f"Website verification returned server error status {status_code}", reason_code="transient_network")
 
     def _verify_school_match(self, job: FieldJob) -> FieldJobResult:
-        chapter_school = _slugify(job.university_name)
-        candidate_school = _slugify(job.payload.get("candidateSchoolName"))
+        chapter_school_name = _canonical_school_name(job.university_name)
+        candidate_school_name = _canonical_school_name(job.payload.get("candidateSchoolName"))
+        chapter_school = _slugify(chapter_school_name)
+        candidate_school = _slugify(candidate_school_name)
         if chapter_school and candidate_school and chapter_school == candidate_school:
             return FieldJobResult(
                 chapter_updates={},
-                completed_payload={"status": "verified", "university_name": job.university_name or ""},
+                completed_payload={"status": "verified", "university_name": chapter_school_name or job.university_name or ""},
                 field_state_updates={"university_name": "found"},
             )
         if chapter_school and candidate_school and chapter_school != candidate_school:
@@ -2162,8 +2514,8 @@ class FieldJobEngine:
                 chapter_updates={},
                 completed_payload={
                     "status": "mismatch_reviewed",
-                    "stored_university_name": job.university_name or "",
-                    "candidate_school_name": str(job.payload.get("candidateSchoolName") or ""),
+                    "stored_university_name": chapter_school_name or job.university_name or "",
+                    "candidate_school_name": candidate_school_name or str(job.payload.get("candidateSchoolName") or ""),
                 },
                 review_item=ReviewItemCandidate(
                     item_type="school_match_mismatch",
@@ -2171,12 +2523,83 @@ class FieldJobEngine:
                     source_slug=job.payload.get("sourceSlug") if isinstance(job.payload.get("sourceSlug"), str) else None,
                     chapter_slug=job.chapter_slug,
                     payload={
-                        "storedUniversityName": job.university_name,
-                        "candidateSchoolName": job.payload.get("candidateSchoolName"),
+                        "storedUniversityName": chapter_school_name or job.university_name,
+                        "candidateSchoolName": candidate_school_name or job.payload.get("candidateSchoolName"),
                     },
                 ),
             )
-        raise RetryableJobError("Insufficient school data to verify school match", reason_code="dependency_wait")
+        if chapter_school and not candidate_school:
+            school_policy = self._get_or_resolve_school_policy(job)
+            if school_policy.school_policy_status == "banned":
+                self._trace("campus_policy_validation", status="banned", school=self._school_name_for_job(job))
+                return self._mark_chapter_inactive(job, target_field="university_name", decision=school_policy)
+
+            chapter_activity = self._get_or_resolve_chapter_activity(job)
+            if chapter_activity.chapter_activity_status == "confirmed_inactive":
+                self._trace("chapter_activity_validation", status="confirmed_inactive", school=self._school_name_for_job(job))
+                return self._mark_chapter_inactive(job, target_field="university_name", decision=chapter_activity)
+            if chapter_activity.chapter_activity_status == "confirmed_active":
+                self._trace("chapter_activity_validation", status="confirmed_active", school=self._school_name_for_job(job))
+                return FieldJobResult(
+                    chapter_updates={},
+                    completed_payload={
+                        "status": "verified",
+                        "university_name": job.university_name or "",
+                        "reasonCode": chapter_activity.reason_code or "chapter_active",
+                        "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                            chapter_activity,
+                            decision_stage="chapter_activity_validation",
+                        ),
+                        "decision_trace": self._build_decision_trace_summary(),
+                    },
+                    field_state_updates={"university_name": "found"},
+                )
+            if school_policy.school_policy_status == "allowed":
+                self._trace("campus_policy_validation", status="allowed", school=self._school_name_for_job(job))
+                return FieldJobResult(
+                    chapter_updates={},
+                    completed_payload={
+                        "status": "verified",
+                        "university_name": job.university_name or "",
+                        "reasonCode": school_policy.reason_code or "school_policy_allowed",
+                        "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                            school_policy,
+                            decision_stage="campus_policy_validation",
+                        ),
+                        "decision_trace": self._build_decision_trace_summary(),
+                    },
+                    field_state_updates={"university_name": "found"},
+                )
+        raise self._unresolved_validation_retry(job, "Insufficient school data to verify school match")
+
+    def _unresolved_validation_retry(self, job: FieldJob, message: str) -> RetryableJobError:
+        if self._search_skipped_due_to_degraded_mode:
+            return RetryableJobError(
+                f"{message}; search preflight degraded",
+                backoff_seconds=max(
+                    self._transient_long_cooldown_seconds,
+                    self._dependency_wait_seconds,
+                    self._base_backoff_seconds,
+                ),
+                preserve_attempt=True,
+                reason_code="provider_degraded",
+            )
+        all_queries_failed = self._search_queries_attempted > 0 and self._search_queries_failed >= self._search_queries_attempted
+        if self._provider_search_hard_blocked() or (self._search_errors_encountered and all_queries_failed):
+            return RetryableJobError(
+                f"{message}; official-school search provider or network unavailable",
+                backoff_seconds=max(self._dependency_wait_seconds, self._base_backoff_seconds),
+                preserve_attempt=True,
+                reason_code="transient_network",
+            )
+        if self._search_errors_encountered:
+            return RetryableJobError(
+                f"{message}; official-school search low signal",
+                backoff_seconds=max(self._dependency_wait_seconds, self._base_backoff_seconds),
+                preserve_attempt=True,
+                reason_code="provider_low_signal",
+            )
+        return RetryableJobError(message, reason_code="dependency_wait")
 
     def _find_email_candidate(self, job: FieldJob) -> CandidateMatch | None:
         matches: list[CandidateMatch] = []
@@ -3082,7 +3505,7 @@ class FieldJobEngine:
         fraternity = _display_name(job.fraternity_slug)
         quoted_fraternity = f'"{fraternity}"' if fraternity else ""
         chapter = job.chapter_name or _display_name(job.chapter_slug)
-        university = job.university_name or str(job.payload.get("candidateSchoolName") or "")
+        university = self._school_name_for_job(job)
         include_chapter = bool(chapter and not _is_generic_greek_letter_chapter_name(chapter))
         campus_domains = _campus_domains(job)
 
@@ -3278,6 +3701,8 @@ class FieldJobEngine:
             return list(cached_results)
 
         self._search_queries_attempted += 1
+        if query not in self._chapter_search_queries:
+            self._chapter_search_queries.append(query)
         self._last_query_provider_attempts = []
         self._last_search_failure_kind = None
         try:
@@ -3368,7 +3793,7 @@ class FieldJobEngine:
 
         final_url = str(getattr(response, "url", "") or url)
 
-        soup = BeautifulSoup(html, "html.parser")
+        soup = _parse_document_markup(html)
         links = [href.strip() for href in (node.get("href") for node in soup.select("a[href]")) if href and href.strip()]
         text = " ".join(soup.stripped_strings)
         title = soup.title.get_text(" ", strip=True) if soup.title else None
@@ -4678,7 +5103,7 @@ def _search_page_link_has_website_context(job: FieldJob, document: SearchDocumen
     if not document_url:
         return False
     candidate_normalized = _normalize_url(urljoin(document_url, candidate_url))
-    soup = BeautifulSoup(document.html, "html.parser")
+    soup = _parse_document_markup(document.html)
     for node in soup.select("a[href]"):
         href = (node.get("href") or "").strip()
         if not href:
@@ -5327,6 +5752,46 @@ def _slugify(value: object) -> str | None:
 
 
 
+def _canonical_school_name(value: object) -> str:
+    school = str(value or "").strip()
+    if not school:
+        return ""
+    for delimiter in (" - ", " | ", " / "):
+        if delimiter in school:
+            left, right = school.split(delimiter, 1)
+            normalized_left = str(left).strip()
+            normalized_right = str(right).strip()
+            if _looks_like_institution_name(normalized_left) and _looks_like_chapterish_school_suffix(normalized_right):
+                school = normalized_left
+                break
+    if " (" in school and school.endswith(")"):
+        prefix, suffix = school.rsplit(" (", 1)
+        normalized_prefix = prefix.strip()
+        normalized_suffix = suffix[:-1].strip()
+        if _looks_like_institution_name(normalized_prefix) and _looks_like_chapterish_school_suffix(normalized_suffix):
+            school = normalized_prefix
+    return school
+
+
+def _looks_like_institution_name(value: str) -> bool:
+    normalized = _normalized_match_text(value)
+    return any(marker in normalized for marker in _INSTITUTION_NAME_MARKERS)
+
+
+def _looks_like_chapterish_school_suffix(value: str) -> bool:
+    normalized = _normalized_match_text(value)
+    if not normalized:
+        return False
+    tokens = [token for token in normalized.split() if token]
+    if not tokens:
+        return False
+    if len(tokens) <= 4 and all(token in _GREEK_LETTER_TOKENS or token in _CHAPTER_SIGNAL_STOPWORDS for token in tokens):
+        return True
+    if len(tokens) <= 5 and any(token in _GREEK_LETTER_TOKENS for token in tokens):
+        return True
+    return False
+
+
 def _normalize_url(url: str) -> str:
     return url.strip().rstrip("/").lower()
 
@@ -5404,7 +5869,7 @@ def _should_follow_nationals_link(url: str, source_host: str, mode: str) -> bool
 def _extract_nationals_chapter_entries(document: SearchDocument) -> list[NationalsChapterEntry]:
     if not document.html:
         return []
-    soup = BeautifulSoup(document.html, "html.parser")
+    soup = _parse_document_markup(document.html)
     entries: list[NationalsChapterEntry] = []
     seen_signatures: set[str] = set()
 

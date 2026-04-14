@@ -24,6 +24,19 @@ _IGNORED_INSTAGRAM_SEGMENTS = {
     "default",
     "default.aspx",
 }
+_IGNORED_INSTAGRAM_HANDLE_SUFFIXES = {
+    ".htm",
+    ".html",
+    ".php",
+    ".aspx",
+    ".jsp",
+    ".pdf",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+}
 
 
 class CandidateKind(StrEnum):
@@ -104,6 +117,9 @@ def sanitize_as_instagram(value: str | None) -> str | None:
         return None
     handle = match.group(1).strip("/").split("/")[0].split("?")[0].split("#")[0].lstrip("@")
     if not handle or handle.lower() in _IGNORED_INSTAGRAM_SEGMENTS:
+        return None
+    lowered_handle = handle.lower()
+    if any(lowered_handle.endswith(suffix) for suffix in _IGNORED_INSTAGRAM_HANDLE_SUFFIXES):
         return None
     return f"https://www.instagram.com/{handle}"
 

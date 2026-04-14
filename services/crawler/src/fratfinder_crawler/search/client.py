@@ -95,6 +95,8 @@ class SearchClient:
         self._provider_failure_streak: dict[str, int] = {}
         self._provider_circuit_open_until: dict[str, float] = {}
         self._provider_last_request_at: dict[str, float] = {}
+        self._provider_attempt_totals: dict[str, int] = {}
+        self._provider_success_totals: dict[str, int] = {}
         self._last_provider_attempts: list[dict[str, object]] = []
         self._global_last_request_at: float = 0.0
         self._min_request_interval_seconds = max(0.0, float(settings.crawler_search_min_request_interval_ms) / 1000.0)
@@ -210,7 +212,8 @@ class SearchClient:
             if token not in _SUPPORTED_PROVIDERS or token in {"auto", "auto_free", "brave_api"}:
                 continue
             deduped.append(token)
-        return deduped or ["duckduckgo_html", "bing_html", "brave_html"]
+        provider_order = deduped or ["duckduckgo_html", "bing_html", "brave_html"]
+        return self._rank_providers(provider_order)
 
     def _search_with_provider_chain(self, query: str, max_results: int, providers: list[str]) -> list[SearchResult]:
         last_error: Exception | None = None
@@ -346,6 +349,31 @@ class SearchClient:
                 "fallback_taken": fallback_taken,
             }
         )
+        if status != "skipped":
+            self._provider_attempt_totals[provider] = self._provider_attempt_totals.get(provider, 0) + 1
+
+    def _rank_providers(self, providers: list[str]) -> list[str]:
+        if len(providers) <= 1:
+            return list(providers)
+
+        indexed = {provider: index for index, provider in enumerate(providers)}
+        now = time.monotonic()
+
+        def _provider_key(provider: str) -> tuple[float, float, float, int]:
+            attempts = int(self._provider_attempt_totals.get(provider, 0) or 0)
+            successes = int(self._provider_success_totals.get(provider, 0) or 0)
+            success_rate = (successes / attempts) if attempts > 0 else 0.0
+            circuit_open = self._provider_circuit_open_until.get(provider, 0.0) > now
+
+            if successes > 0:
+                return (0.0, -success_rate, -float(successes), indexed[provider])
+            if attempts == 0:
+                return (1.0, 0.0, 0.0, indexed[provider])
+            if circuit_open:
+                return (3.0, 0.0, float(attempts), indexed[provider])
+            return (2.0, 0.0, float(attempts), indexed[provider])
+
+        return sorted(providers, key=_provider_key)
 
     def _classify_failure_type(self, error: Exception) -> str:
         message = str(error).lower()
@@ -380,6 +408,7 @@ class SearchClient:
     def _record_provider_success(self, provider: str) -> None:
         self._provider_failure_streak[provider] = 0
         self._provider_circuit_open_until.pop(provider, None)
+        self._provider_success_totals[provider] = self._provider_success_totals.get(provider, 0) + 1
 
     def _record_provider_failure(self, provider: str) -> None:
         threshold = max(1, self._settings.crawler_search_circuit_breaker_failures)

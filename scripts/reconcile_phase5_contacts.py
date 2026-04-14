@@ -392,6 +392,16 @@ def _email_decision(row: dict[str, Any]) -> ContactDecision | None:
             confidence=0.9,
             normalized_value=email,
         )
+    if scope == PAGE_SCOPE_NATIONALS_CHAPTER and generic_office_email and not identity_email:
+        return ContactDecision(
+            action="clear",
+            reason_code="legacy_email_failed_chapter_specificity",
+            supporting_page_url=document.url,
+            supporting_page_scope=PAGE_SCOPE_NATIONALS_CHAPTER,
+            contact_specificity=CONTACT_SPECIFICITY_AMBIGUOUS,
+            confidence=1.0,
+            normalized_value=None,
+        )
     if scope == PAGE_SCOPE_SCHOOL_AFFILIATION and present and identity_email and relevant and not generic_office_email:
         return ContactDecision(
             action="accept",

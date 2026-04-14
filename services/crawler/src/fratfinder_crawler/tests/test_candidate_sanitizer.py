@@ -24,6 +24,7 @@ def test_sanitize_instagram_normalizes_handle_and_url():
     assert sanitize_as_instagram("https://www.instagram.com/tel") is None
     assert sanitize_as_instagram("https://www.instagram.com/node") is None
     assert sanitize_as_instagram("https://www.instagram.com/Umbraco.Cms.Core.Models.Link") is None
+    assert sanitize_as_instagram("https://www.instagram.com/Frats_DKE2.htm") is None
 
 
 def test_sanitize_candidate_reroutes_website_kind_mismatch():

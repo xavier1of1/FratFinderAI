@@ -1,0 +1,1124 @@
+﻿{
+  "captured_at": "2026-04-14T00:56:17.432184+00:00",
+  "accuracy": {
+    "complete_rows": 441,
+    "chapter_specific_contact_rows": 441,
+    "nationals_only_contact_rows": 0,
+    "inactive_validated_rows": 5,
+    "confirmed_absent_website_rows": 3,
+    "active_rows_with_chapter_specific_email": 91,
+    "active_rows_with_chapter_specific_instagram": 398,
+    "active_rows_with_any_contact": 1030,
+    "total_chapters": 2534
+  },
+  "queue": {
+    "queued_jobs": 4592,
+    "actionable_jobs": 1694,
+    "deferred_jobs": 2898,
+    "running_jobs": 0,
+    "done_jobs": 3803,
+    "failed_jobs": 386,
+    "updated_jobs": 1540,
+    "review_jobs": 352,
+    "terminal_no_signal_jobs": 550
+  },
+  "field_breakdown": [
+    {
+      "field_name": "find_email",
+      "actionable_jobs": 121,
+      "deferred_jobs": 1668,
+      "done_jobs": 791,
+      "failed_jobs": 142
+    },
+    {
+      "field_name": "find_instagram",
+      "actionable_jobs": 1007,
+      "deferred_jobs": 345,
+      "done_jobs": 966,
+      "failed_jobs": 44
+    },
+    {
+      "field_name": "find_website",
+      "actionable_jobs": 417,
+      "deferred_jobs": 286,
+      "done_jobs": 1049,
+      "failed_jobs": 117
+    },
+    {
+      "field_name": "verify_school_match",
+      "actionable_jobs": 0,
+      "deferred_jobs": 3,
+      "done_jobs": 0,
+      "failed_jobs": 0
+    },
+    {
+      "field_name": "verify_website",
+      "actionable_jobs": 149,
+      "deferred_jobs": 596,
+      "done_jobs": 997,
+      "failed_jobs": 49
+    }
+  ],
+  "national_profiles": {
+    "total_profiles": 21,
+    "with_email": 0,
+    "with_instagram": 0,
+    "with_phone": 0
+  },
+  "top_evidence_reason_codes": [
+    {
+      "reason_code": "unknown",
+      "count": 8404
+    },
+    {
+      "reason_code": "fraternity_absent_from_official_school_list",
+      "count": 63
+    },
+    {
+      "reason_code": "chapter_already_inactive",
+      "count": 51
+    }
+  ],
+  "provenance_audit": {
+    "captured_at": "2026-04-14T00:56:17.493649+00:00",
+    "accepted_rows_missing_reason_code": 1148,
+    "accepted_rows_missing_supporting_page_scope": 0,
+    "accepted_rows_matching_national_profile": 0,
+    "samples": [
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "chapter-map",
+        "fraternity_slug": "alpha-chi-rho",
+        "field_name": "website_url",
+        "field_value": "https://www.alphachirho.org/about/map/",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "2fusf",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/%2Fusf",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-beta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-beta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-delta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-delta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "contact_email",
+        "field_value": "netito102204@gmail.com",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/adglagrangecollege",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-epsilon",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-eta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "contact_email",
+        "field_value": "dametristen@gmail.com",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-eta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/mck_alphadeltagamma",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-eta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-eta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-gamma",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-gamma",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-iota",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/adgalphaiota",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-iota",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-iota",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-kappa",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/ak_alphadeltagamma",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-kappa",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-kappa",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-lambda",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-lambda",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-theta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-theta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-zeta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-zeta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "beta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/adg_slu",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "beta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/beta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "chi",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/chi",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "csu",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/csu",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "delta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/delta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/epsilon",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      }
+    ]
+  },
+  "enrichment_shadow": {
+    "captured_at": "2026-04-14T00:56:17.557216+00:00",
+    "jobs_considered": 25,
+    "authoritative_ready_jobs": 1,
+    "provider_dependent_jobs": 24,
+    "provider_window_state": {
+      "general_web_search": {
+        "lane": "general_web_search",
+        "window_started_at": "2026-04-14T00:56:17.493649+00:00",
+        "window_success_rate": 1.0,
+        "attempt_count": 0,
+        "request_error_count": 0,
+        "challenge_or_anomaly_count": 0,
+        "healthy": true,
+        "degraded_reason": "",
+        "providers": []
+      },
+      "social_search": {
+        "lane": "social_search",
+        "window_started_at": "2026-04-14T00:56:17.493649+00:00",
+        "window_success_rate": 1.0,
+        "attempt_count": 0,
+        "request_error_count": 0,
+        "challenge_or_anomaly_count": 0,
+        "healthy": true,
+        "degraded_reason": "",
+        "providers": [],
+        "source_mode": "shares_general_provider_pool"
+      },
+      "authoritative_fetch": {
+        "lane": "authoritative_fetch",
+        "window_started_at": "2026-04-14T00:56:17.493649+00:00",
+        "window_success_rate": 1.0,
+        "attempt_count": 0,
+        "request_error_count": 0,
+        "challenge_or_anomaly_count": 0,
+        "healthy": true,
+        "degraded_reason": "",
+        "source_mode": "independent_of_search_provider"
+      }
+    },
+    "recommended_actions": [
+      {
+        "actionType": "verify_school",
+        "count": 24
+      },
+      {
+        "actionType": "parse_supporting_page",
+        "count": 1
+      }
+    ],
+    "samples": [
+      {
+        "chapterSlug": "the-ohio-state-university-delta-tau-the-ohio-state-university-delta-tau",
+        "fieldName": "find_instagram",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          },
+          {
+            "actionType": "search_web",
+            "score": 1.2675
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "beta-gamma-university-of-north-dakota",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "fieldName": "find_instagram",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          },
+          {
+            "actionType": "search_web",
+            "score": 1.2675
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "wesleyan-university-gamma-phi-wesleyan-university-gamma-phi",
+        "fieldName": "find_instagram",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          },
+          {
+            "actionType": "search_web",
+            "score": 1.2675
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "alpha-phi-university-of-toronto",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "beta-upsilon-california-state-university-fresno",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "pace-university-nu-zeta-pace-university-nu-zeta",
+        "fieldName": "find_instagram",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          },
+          {
+            "actionType": "search_web",
+            "score": 1.2675
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "epsilon-williams-college",
+        "fieldName": "find_email",
+        "queueState": "actionable",
+        "recommendedAction": "parse_supporting_page",
+        "topActions": [
+          {
+            "actionType": "parse_supporting_page",
+            "score": 3.9
+          },
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          }
+        ],
+        "context": {
+          "supportingPagePresent": true,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "eta-sigma-university-of-california-irvine",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "theta-omicron-mars-hill-university",
+        "fieldName": "find_instagram",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          },
+          {
+            "actionType": "search_web",
+            "score": 1.2675
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 9
+        }
+      },
+      {
+        "chapterSlug": "gamma-alpha-university-of-tennessee-chattanooga",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "theta-bowdoin-college",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "epsilon-theta-san-jose-state-university",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "zeta-washington-lee-university",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "iota-phi-university-of-north-texas",
+        "fieldName": "find_website",
+        "queueState": "actionable",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "verify_website",
+            "score": 2.55
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": true,
+          "websitePrerequisiteUnmet": false,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      }
+    ]
+  },
+  "enrichment_replay_compare": {
+    "count": 22,
+    "agreementRate": 0.0,
+    "recommendedAuthoritativeRate": 1.0,
+    "deterministicAuthoritativeRate": 0.0,
+    "recommendedProviderSearchRate": 0.0,
+    "deterministicProviderSearchRate": 0.0,
+    "providerWasteRate": 0.3182,
+    "providerWasteDisagreementRate": 0.3182,
+    "providerWasteAuthoritativeOpportunityRate": 0.3182,
+    "providerWasteDelayOpportunityRate": 0.0,
+    "byField": [
+      {
+        "fieldName": "verify_school_match",
+        "count": 19,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.2105,
+        "recommendedAuthoritativeRate": 1.0,
+        "deterministicAuthoritativeRate": 0.0
+      },
+      {
+        "fieldName": "find_website",
+        "count": 2,
+        "agreementRate": 0.0,
+        "providerWasteRate": 1.0,
+        "recommendedAuthoritativeRate": 1.0,
+        "deterministicAuthoritativeRate": 0.0
+      },
+      {
+        "fieldName": "find_instagram",
+        "count": 1,
+        "agreementRate": 0.0,
+        "providerWasteRate": 1.0,
+        "recommendedAuthoritativeRate": 1.0,
+        "deterministicAuthoritativeRate": 0.0
+      }
+    ],
+    "bySource": [
+      {
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "count": 16,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.375
+      },
+      {
+        "sourceSlug": "theta-chi-main",
+        "count": 6,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.1667
+      }
+    ],
+    "disagreements": [
+      {
+        "transition": "defer->verify_school",
+        "count": 19,
+        "providerWasteCount": 7,
+        "authoritativeShiftCount": 19,
+        "delayShiftCount": 0,
+        "fieldBreakdown": [
+          {
+            "fieldName": "verify_school_match",
+            "count": 16
+          },
+          {
+            "fieldName": "find_website",
+            "count": 2
+          },
+          {
+            "fieldName": "find_instagram",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "transition": "review_required->verify_school",
+        "count": 3,
+        "providerWasteCount": 0,
+        "authoritativeShiftCount": 3,
+        "delayShiftCount": 0,
+        "fieldBreakdown": [
+          {
+            "fieldName": "verify_school_match",
+            "count": 3
+          }
+        ]
+      }
+    ],
+    "samples": [
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": true,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": true,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "beta-gamma-university-of-north-dakota",
+        "sourceSlug": "theta-chi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": true,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "the-ohio-state-university-delta-tau-the-ohio-state-university-delta-tau",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": true,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "beta-gamma-university-of-north-dakota",
+        "sourceSlug": "theta-chi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "the-ohio-state-university-delta-tau-the-ohio-state-university-delta-tau",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "beta-gamma-university-of-north-dakota",
+        "sourceSlug": "theta-chi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "the-ohio-state-university-delta-tau-the-ohio-state-university-delta-tau",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "review_required",
+        "finalState": "failed_terminal",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "beta-gamma-university-of-north-dakota",
+        "sourceSlug": "theta-chi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "review_required",
+        "finalState": "failed_terminal",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "the-ohio-state-university-delta-tau-the-ohio-state-university-delta-tau",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "review_required",
+        "finalState": "failed_terminal",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "beta-gamma-university-of-north-dakota",
+        "sourceSlug": "theta-chi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "the-ohio-state-university-delta-tau-the-ohio-state-university-delta-tau",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "lambda-delta-southern-methodist-university",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "beta-gamma-university-of-north-dakota",
+        "sourceSlug": "theta-chi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "the-ohio-state-university-delta-tau-the-ohio-state-university-delta-tau",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      },
+      {
+        "chapterSlug": "upsilon-omega-university-of-south-alabama",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "find_website",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": true,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": true
+      }
+    ]
+  }
+}

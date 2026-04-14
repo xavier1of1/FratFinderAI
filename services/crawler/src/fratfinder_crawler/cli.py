@@ -77,6 +77,46 @@ def build_parser() -> argparse.ArgumentParser:
     preflight_parser = subparsers.add_parser("search-preflight", help="Run search provider health probes")
     preflight_parser.add_argument("--probes", type=int, default=None, help="Number of probe queries to run")
 
+    baseline_parser = subparsers.add_parser("system-baseline", help="Capture a live baseline snapshot for accuracy, queue state, and provider health")
+    baseline_parser.add_argument("--skip-preflight", action="store_true", help="Skip search preflight in the baseline snapshot")
+    baseline_parser.add_argument("--probes", type=int, default=None, help="Number of preflight probes when search health is included")
+
+    provenance_parser = subparsers.add_parser("provenance-audit", help="Audit accepted contact provenance completeness and national-profile collisions")
+    provenance_parser.add_argument("--limit", type=int, default=50, help="Maximum number of sample rows to return")
+
+    enrichment_shadow_parser = subparsers.add_parser("enrichment-policy-shadow", help="Score queued field jobs with the enrichment shadow policy")
+    enrichment_shadow_parser.add_argument("--limit", type=int, default=50)
+    enrichment_shadow_parser.add_argument("--source-slug", default=None)
+    enrichment_shadow_parser.add_argument("--field-name", choices=FIELD_JOB_TYPES, default=None)
+    enrichment_shadow_parser.add_argument("--skip-preflight", action="store_true", help="Skip search preflight and use cached/default provider window assumptions")
+    enrichment_shadow_parser.add_argument("--probes", type=int, default=None)
+
+    enrichment_export_parser = subparsers.add_parser("enrichment-export-observations", help="Export observed enrichment shadow decisions and outcomes")
+    enrichment_export_parser.add_argument("--source-slug", default=None)
+    enrichment_export_parser.add_argument("--field-name", choices=FIELD_JOB_TYPES, default=None)
+    enrichment_export_parser.add_argument("--window-days", type=int, default=None)
+    enrichment_export_parser.add_argument("--limit", type=int, default=None)
+
+    enrichment_replay_parser = subparsers.add_parser("enrichment-replay-policy", help="Summarize enrichment shadow recommendations versus deterministic outcomes")
+    enrichment_replay_parser.add_argument("--source-slug", default=None)
+    enrichment_replay_parser.add_argument("--field-name", choices=FIELD_JOB_TYPES, default=None)
+    enrichment_replay_parser.add_argument("--window-days", type=int, default=None)
+    enrichment_replay_parser.add_argument("--limit", type=int, default=None)
+
+    enrichment_compare_parser = subparsers.add_parser("enrichment-compare-report", help="Break down RL-vs-deterministic enrichment disagreements and opportunity areas")
+    enrichment_compare_parser.add_argument("--source-slug", default=None)
+    enrichment_compare_parser.add_argument("--field-name", choices=FIELD_JOB_TYPES, default=None)
+    enrichment_compare_parser.add_argument("--window-days", type=int, default=None)
+    enrichment_compare_parser.add_argument("--limit", type=int, default=None)
+
+    enrichment_promote_parser = subparsers.add_parser("enrichment-promote-verify-school", help="Identify or enqueue verify_school jobs for the safest RL-backed opportunity class")
+    enrichment_promote_parser.add_argument("--source-slug", default=None)
+    enrichment_promote_parser.add_argument("--field-name", choices=FIELD_JOB_TYPES, default=None)
+    enrichment_promote_parser.add_argument("--limit", type=int, default=50)
+    enrichment_promote_parser.add_argument("--apply", action="store_true", help="Actually enqueue verify_school jobs instead of reporting candidates only")
+    enrichment_promote_parser.add_argument("--skip-preflight", action="store_true", help="Skip search preflight and use cached/default provider window assumptions")
+    enrichment_promote_parser.add_argument("--probes", type=int, default=None)
+
     health_parser = subparsers.add_parser("health", help="Run crawler health probes")
     health_parser.add_argument("--probe", choices=["liveness", "readiness"], default="readiness")
 
@@ -217,6 +257,69 @@ def main() -> None:
     if args.command == "search-preflight":
         result = service.search_preflight(probes=args.probes)
         print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "system-baseline":
+        result = service.system_baseline(include_preflight=not args.skip_preflight, probes=args.probes)
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "provenance-audit":
+        result = service.provenance_completeness_audit(limit=args.limit)
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "enrichment-policy-shadow":
+        result = service.enrichment_shadow_policy_report(
+            limit=args.limit,
+            source_slug=args.source_slug,
+            field_name=args.field_name,
+            include_preflight=not args.skip_preflight,
+            probes=args.probes,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "enrichment-export-observations":
+        result = service.export_enrichment_observations(
+            source_slug=args.source_slug,
+            field_name=args.field_name,
+            window_days=args.window_days,
+            limit=args.limit,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "enrichment-replay-policy":
+        result = service.enrichment_replay_policy(
+            source_slug=args.source_slug,
+            field_name=args.field_name,
+            window_days=args.window_days,
+            limit=args.limit,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "enrichment-compare-report":
+        result = service.enrichment_policy_compare_report(
+            source_slug=args.source_slug,
+            field_name=args.field_name,
+            window_days=args.window_days,
+            limit=args.limit,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "enrichment-promote-verify-school":
+        result = service.enrichment_promote_verify_school_candidates(
+            source_slug=args.source_slug,
+            field_name=args.field_name,
+            limit=args.limit,
+            apply_changes=args.apply,
+            include_preflight=not args.skip_preflight,
+            probes=args.probes,
+        )
+        print(json.dumps(result, indent=2, default=str))
         return
 
     if args.command == "health":

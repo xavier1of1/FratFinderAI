@@ -373,6 +373,27 @@ class PageObservation:
 
 
 @dataclass(slots=True)
+class EnrichmentObservation:
+    id: int | None
+    field_job_id: str | None
+    chapter_id: str
+    chapter_slug: str
+    fraternity_slug: str | None
+    source_slug: str | None
+    field_name: str
+    queue_state: str
+    runtime_mode: str
+    policy_version: str | None = None
+    policy_mode: str = "shadow"
+    recommended_action: str | None = None
+    deterministic_action: str | None = None
+    recommended_actions: list[dict[str, Any]] = field(default_factory=list)
+    context_features: dict[str, Any] = field(default_factory=dict)
+    provider_window_state: dict[str, Any] = field(default_factory=dict)
+    outcome: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class RewardEvent:
     action_type: str
     reward_value: float

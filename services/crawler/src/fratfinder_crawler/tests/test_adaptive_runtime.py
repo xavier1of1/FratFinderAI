@@ -1,8 +1,11 @@
+from dataclasses import dataclass
+
 from fratfinder_crawler.adaptive.frontier import canonicalize_url, score_frontier_item
 from fratfinder_crawler.adaptive.policy import AdaptivePolicy
 from fratfinder_crawler.adaptive.stop_conditions import evaluate_stop_conditions
 from fratfinder_crawler.adaptive.template_memory import compute_template_signature
 from fratfinder_crawler.models import PageAnalysis, TemplateProfile
+from fratfinder_crawler.orchestration.adaptive_graph import _sanitize_json_value, _to_serializable
 
 
 def _analysis(**overrides):
@@ -175,3 +178,29 @@ def test_stop_conditions_fire_on_high_yield_saturation():
     )
     assert should_stop is True
     assert reason == "high_yield_saturated"
+
+
+@dataclass
+class _SerializableFixture:
+    name: str
+    payload: dict
+
+
+def test_adaptive_graph_sanitize_json_value_removes_null_bytes_and_normalizes_tuples():
+    payload = {
+        "title": "Alpha\x00Beta",
+        "items": ("one\x00", {"nested": "two\x00"}),
+    }
+
+    sanitized = _sanitize_json_value(payload)
+
+    assert sanitized == {"title": "AlphaBeta", "items": ["one", {"nested": "two"}]}
+
+
+def test_adaptive_graph_to_serializable_handles_dataclasses_and_rejects_scalars():
+    fixture = _SerializableFixture(name="Alpha\x00Beta", payload={"items": ("x\x00", "y")})
+
+    serialized = _to_serializable(fixture)
+
+    assert serialized == {"name": "AlphaBeta", "payload": {"items": ["x", "y"]}}
+    assert _to_serializable("not-a-structured-payload") is None

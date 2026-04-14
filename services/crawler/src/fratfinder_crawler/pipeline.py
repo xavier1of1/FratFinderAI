@@ -23,7 +23,15 @@ from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.normalization import classify_chapter_validity
 from fratfinder_crawler.search import SearchClient, SearchUnavailableError
-from fratfinder_crawler.models import CrawlMetrics, EpochMetric, ExtractedChapter, FieldJob
+from fratfinder_crawler.models import (
+    FIELD_JOB_FIND_INSTAGRAM,
+    FIELD_JOB_VERIFY_SCHOOL,
+    FIELD_JOB_VERIFY_WEBSITE,
+    CrawlMetrics,
+    EpochMetric,
+    ExtractedChapter,
+    FieldJob,
+)
 from fratfinder_crawler.orchestration import (
     AdaptiveCrawlOrchestrator,
     CrawlOrchestrator,
@@ -717,6 +725,24 @@ class CrawlService:
             )
         return {"count": len(data), "observations": data}
 
+    def export_enrichment_observations(
+        self,
+        *,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        window_days: int | None = None,
+        limit: int | None = None,
+    ) -> dict[str, object]:
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            data = repository.export_enrichment_observations(
+                source_slug=source_slug,
+                field_name=field_name,
+                window_days=window_days,
+                limit=limit or self._settings.crawler_replay_export_limit,
+            )
+        return {"count": len(data), "observations": data}
+
     def crawl_policy_report(self, limit: int = 25) -> dict[str, object]:
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
@@ -754,8 +780,35 @@ class CrawlService:
                 limit=limit or self._settings.crawler_replay_export_limit,
             )
 
+        rewards_by_action: dict[str, dict[str, float]] = {}
+        reward_stage_summary: dict[str, dict[str, float]] = {}
+        terminal_components: dict[str, float] = {}
+        for event in reward_events:
+            action_type = str(event.get("action_type") or "unknown")
+            action_bucket = rewards_by_action.setdefault(action_type, {"count": 0.0, "total": 0.0})
+            action_bucket["count"] += 1.0
+            action_bucket["total"] += float(event.get("reward_value") or 0.0)
+
+            stage = str(event.get("reward_stage") or "unknown")
+            stage_bucket = reward_stage_summary.setdefault(stage, {"count": 0.0, "total": 0.0})
+            stage_bucket["count"] += 1.0
+            stage_bucket["total"] += float(event.get("reward_value") or 0.0)
+
+            if stage == "terminal":
+                components = event.get("reward_components") or {}
+                if isinstance(components, dict):
+                    for key, value in components.items():
+                        try:
+                            terminal_components[str(key)] = round(
+                                float(terminal_components.get(str(key), 0.0)) + float(value or 0.0),
+                                4,
+                            )
+                        except (TypeError, ValueError):
+                            continue
+
         replay = []
         for action, values in sorted(action_buckets.items(), key=lambda entry: (-entry[1]["records"], -entry[1]["count"])):
+            reward_bucket = rewards_by_action.get(action, {"count": 0.0, "total": 0.0})
             replay.append(
                 {
                     "actionType": action,
@@ -763,15 +816,10 @@ class CrawlService:
                     "avgRecords": round(values["records"] / max(values["count"], 1.0), 4),
                     "avgSelectedScore": round(values["avgSelectedScore"] / max(values["count"], 1.0), 4),
                     "avgRisk": round(values["avgRisk"] / max(values["count"], 1.0), 4),
+                    "avgReward": round(reward_bucket["total"] / max(reward_bucket["count"], 1.0), 4),
+                    "totalReward": round(reward_bucket["total"], 4),
                 }
             )
-
-        reward_stage_summary: dict[str, dict[str, float]] = {}
-        for event in reward_events:
-            stage = str(event.get("reward_stage") or "unknown")
-            bucket = reward_stage_summary.setdefault(stage, {"count": 0.0, "total": 0.0})
-            bucket["count"] += 1.0
-            bucket["total"] += float(event.get("reward_value") or 0.0)
 
         stage_rows = [
             {
@@ -783,7 +831,444 @@ class CrawlService:
             for stage, values in sorted(reward_stage_summary.items(), key=lambda item: -item[1]["count"])
         ]
 
-        return {"count": len(replay), "actions": replay, "rewardStages": stage_rows}
+        terminal_rows = [
+            {"component": key, "total": round(value, 4)}
+            for key, value in sorted(terminal_components.items(), key=lambda item: (-abs(item[1]), item[0]))
+        ]
+
+        return {
+            "count": len(replay),
+            "actions": replay,
+            "rewardStages": stage_rows,
+            "terminalBusinessSignals": terminal_rows,
+        }
+
+    def enrichment_replay_policy(
+        self,
+        *,
+        limit: int | None = None,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        window_days: int | None = None,
+    ) -> dict[str, object]:
+        snapshot = self.export_enrichment_observations(
+            source_slug=source_slug,
+            field_name=field_name,
+            window_days=window_days,
+            limit=limit,
+        )
+        observations = list(snapshot.get("observations") or [])
+        recommended_counts: dict[str, int] = {}
+        deterministic_counts: dict[str, int] = {}
+        disagreement_counts: dict[str, int] = {}
+        final_state_counts: dict[str, int] = {}
+        business_signal_totals: dict[str, float] = {}
+        samples: list[dict[str, object]] = []
+        agreement_count = 0
+
+        for item in observations:
+            recommended = str(item.get("recommended_action") or "unknown")
+            deterministic = str(item.get("deterministic_action") or "unknown")
+            recommended_counts[recommended] = int(recommended_counts.get(recommended, 0) or 0) + 1
+            deterministic_counts[deterministic] = int(deterministic_counts.get(deterministic, 0) or 0) + 1
+            if recommended == deterministic:
+                agreement_count += 1
+            else:
+                key = f"{deterministic}->{recommended}"
+                disagreement_counts[key] = int(disagreement_counts.get(key, 0) or 0) + 1
+
+            outcome = item.get("outcome") or {}
+            final_state = str((outcome or {}).get("finalState") or "unknown")
+            final_state_counts[final_state] = int(final_state_counts.get(final_state, 0) or 0) + 1
+            signals = (outcome or {}).get("businessSignals") or {}
+            if isinstance(signals, dict):
+                for key, value in signals.items():
+                    try:
+                        business_signal_totals[str(key)] = round(float(business_signal_totals.get(str(key), 0.0)) + float(value or 0.0), 4)
+                    except (TypeError, ValueError):
+                        continue
+
+            if len(samples) < min(max(5, int(limit or 25)), 15):
+                samples.append(
+                    {
+                        "chapterSlug": item.get("chapter_slug"),
+                        "fieldName": item.get("field_name"),
+                        "recommendedAction": recommended,
+                        "deterministicAction": deterministic,
+                        "finalState": final_state,
+                        "businessSignals": signals,
+                    }
+                )
+
+        disagreement_rows = [
+            {"transition": key, "count": value}
+            for key, value in sorted(disagreement_counts.items(), key=lambda item: (-item[1], item[0]))
+        ]
+        return {
+            "count": len(observations),
+            "agreementRate": round(agreement_count / max(len(observations), 1), 4),
+            "recommendedActions": [
+                {"actionType": key, "count": value}
+                for key, value in sorted(recommended_counts.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "deterministicActions": [
+                {"actionType": key, "count": value}
+                for key, value in sorted(deterministic_counts.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "disagreements": disagreement_rows,
+            "finalStates": [
+                {"state": key, "count": value}
+                for key, value in sorted(final_state_counts.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "businessSignals": [
+                {"signal": key, "total": round(value, 4)}
+                for key, value in sorted(business_signal_totals.items(), key=lambda item: (-abs(item[1]), item[0]))
+            ],
+            "samples": samples,
+        }
+
+    def enrichment_policy_compare_report(
+        self,
+        *,
+        limit: int | None = None,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        window_days: int | None = None,
+    ) -> dict[str, object]:
+        snapshot = self.export_enrichment_observations(
+            source_slug=source_slug,
+            field_name=field_name,
+            window_days=window_days,
+            limit=limit,
+        )
+        observations = list(snapshot.get("observations") or [])
+        authoritative_actions = {"parse_supporting_page", "verify_school", "verify_website"}
+        provider_actions = {"search_web", "search_social"}
+        delay_actions = {"defer", "stop_no_signal", "review_required"}
+
+        field_rows: dict[str, dict[str, object]] = {}
+        source_rows: dict[str, dict[str, object]] = {}
+        disagreement_rows: dict[str, dict[str, object]] = {}
+        agreement_count = 0
+        authoritative_recommended = 0
+        authoritative_deterministic = 0
+        provider_recommended = 0
+        provider_deterministic = 0
+        provider_waste_total = 0
+        provider_waste_disagreements = 0
+        provider_waste_authoritative_opportunities = 0
+        provider_waste_delay_opportunities = 0
+        disagreement_samples: list[dict[str, object]] = []
+
+        for item in observations:
+            recommended = str(item.get("recommended_action") or "unknown")
+            deterministic = str(item.get("deterministic_action") or "unknown")
+            field_key = str(item.get("field_name") or "unknown")
+            source_key = str(item.get("source_slug") or "unknown")
+            outcome = item.get("outcome") or {}
+            signals = (outcome or {}).get("businessSignals") or {}
+            final_state = str((outcome or {}).get("finalState") or "unknown")
+            provider_waste = bool((signals or {}).get("provider_waste"))
+
+            if recommended == deterministic:
+                agreement_count += 1
+
+            if recommended in authoritative_actions:
+                authoritative_recommended += 1
+            if deterministic in authoritative_actions:
+                authoritative_deterministic += 1
+            if recommended in provider_actions:
+                provider_recommended += 1
+            if deterministic in provider_actions:
+                provider_deterministic += 1
+            if provider_waste:
+                provider_waste_total += 1
+
+            field_bucket = field_rows.setdefault(
+                field_key,
+                {
+                    "fieldName": field_key,
+                    "count": 0,
+                    "agreementCount": 0,
+                    "providerWasteCount": 0,
+                    "recommendedAuthoritativeCount": 0,
+                    "deterministicAuthoritativeCount": 0,
+                },
+            )
+            field_bucket["count"] = int(field_bucket["count"]) + 1
+            if recommended == deterministic:
+                field_bucket["agreementCount"] = int(field_bucket["agreementCount"]) + 1
+            if provider_waste:
+                field_bucket["providerWasteCount"] = int(field_bucket["providerWasteCount"]) + 1
+            if recommended in authoritative_actions:
+                field_bucket["recommendedAuthoritativeCount"] = int(field_bucket["recommendedAuthoritativeCount"]) + 1
+            if deterministic in authoritative_actions:
+                field_bucket["deterministicAuthoritativeCount"] = int(field_bucket["deterministicAuthoritativeCount"]) + 1
+
+            source_bucket = source_rows.setdefault(
+                source_key,
+                {
+                    "sourceSlug": source_key,
+                    "count": 0,
+                    "agreementCount": 0,
+                    "providerWasteCount": 0,
+                },
+            )
+            source_bucket["count"] = int(source_bucket["count"]) + 1
+            if recommended == deterministic:
+                source_bucket["agreementCount"] = int(source_bucket["agreementCount"]) + 1
+            if provider_waste:
+                source_bucket["providerWasteCount"] = int(source_bucket["providerWasteCount"]) + 1
+
+            if recommended != deterministic:
+                key = f"{deterministic}->{recommended}"
+                disagreement_bucket = disagreement_rows.setdefault(
+                    key,
+                    {
+                        "transition": key,
+                        "count": 0,
+                        "fieldBreakdown": {},
+                        "providerWasteCount": 0,
+                        "authoritativeShiftCount": 0,
+                        "delayShiftCount": 0,
+                    },
+                )
+                disagreement_bucket["count"] = int(disagreement_bucket["count"]) + 1
+                field_breakdown = dict(disagreement_bucket.get("fieldBreakdown") or {})
+                field_breakdown[field_key] = int(field_breakdown.get(field_key, 0) or 0) + 1
+                disagreement_bucket["fieldBreakdown"] = field_breakdown
+                if provider_waste:
+                    disagreement_rows[key]["providerWasteCount"] = int(disagreement_bucket["providerWasteCount"]) + 1
+                    provider_waste_disagreements += 1
+                if recommended in authoritative_actions and deterministic not in authoritative_actions:
+                    disagreement_rows[key]["authoritativeShiftCount"] = int(disagreement_bucket["authoritativeShiftCount"]) + 1
+                    if provider_waste:
+                        provider_waste_authoritative_opportunities += 1
+                if recommended in delay_actions and deterministic in provider_actions:
+                    disagreement_rows[key]["delayShiftCount"] = int(disagreement_bucket["delayShiftCount"]) + 1
+                    if provider_waste:
+                        provider_waste_delay_opportunities += 1
+                if len(disagreement_samples) < min(max(5, int(limit or 25)), 20):
+                    disagreement_samples.append(
+                        {
+                            "chapterSlug": item.get("chapter_slug"),
+                            "sourceSlug": source_key,
+                            "fieldName": field_key,
+                            "recommendedAction": recommended,
+                            "deterministicAction": deterministic,
+                            "finalState": final_state,
+                            "providerWaste": provider_waste,
+                            "supportingPagePresent": bool((item.get("context_features") or {}).get("supporting_page_present")),
+                            "providerWindowHealthy": bool((item.get("context_features") or {}).get("provider_window_healthy")),
+                        }
+                    )
+
+        count = len(observations)
+        return {
+            "count": count,
+            "agreementRate": round(agreement_count / max(count, 1), 4),
+            "recommendedAuthoritativeRate": round(authoritative_recommended / max(count, 1), 4),
+            "deterministicAuthoritativeRate": round(authoritative_deterministic / max(count, 1), 4),
+            "recommendedProviderSearchRate": round(provider_recommended / max(count, 1), 4),
+            "deterministicProviderSearchRate": round(provider_deterministic / max(count, 1), 4),
+            "providerWasteRate": round(provider_waste_total / max(count, 1), 4),
+            "providerWasteDisagreementRate": round(provider_waste_disagreements / max(count, 1), 4),
+            "providerWasteAuthoritativeOpportunityRate": round(provider_waste_authoritative_opportunities / max(count, 1), 4),
+            "providerWasteDelayOpportunityRate": round(provider_waste_delay_opportunities / max(count, 1), 4),
+            "byField": [
+                {
+                    "fieldName": str(row["fieldName"]),
+                    "count": int(row["count"]),
+                    "agreementRate": round(int(row["agreementCount"]) / max(int(row["count"]), 1), 4),
+                    "providerWasteRate": round(int(row["providerWasteCount"]) / max(int(row["count"]), 1), 4),
+                    "recommendedAuthoritativeRate": round(
+                        int(row["recommendedAuthoritativeCount"]) / max(int(row["count"]), 1),
+                        4,
+                    ),
+                    "deterministicAuthoritativeRate": round(
+                        int(row["deterministicAuthoritativeCount"]) / max(int(row["count"]), 1),
+                        4,
+                    ),
+                }
+                for row in sorted(
+                    field_rows.values(),
+                    key=lambda item: (-int(item["count"]), str(item["fieldName"])),
+                )
+            ],
+            "bySource": [
+                {
+                    "sourceSlug": str(row["sourceSlug"]),
+                    "count": int(row["count"]),
+                    "agreementRate": round(int(row["agreementCount"]) / max(int(row["count"]), 1), 4),
+                    "providerWasteRate": round(int(row["providerWasteCount"]) / max(int(row["count"]), 1), 4),
+                }
+                for row in sorted(
+                    source_rows.values(),
+                    key=lambda item: (-int(item["count"]), str(item["sourceSlug"])),
+                )
+            ],
+            "disagreements": [
+                {
+                    "transition": str(row["transition"]),
+                    "count": int(row["count"]),
+                    "providerWasteCount": int(row["providerWasteCount"]),
+                    "authoritativeShiftCount": int(row["authoritativeShiftCount"]),
+                    "delayShiftCount": int(row["delayShiftCount"]),
+                    "fieldBreakdown": [
+                        {"fieldName": key, "count": value}
+                        for key, value in sorted(
+                            dict(row["fieldBreakdown"]).items(),
+                            key=lambda item: (-int(item[1]), str(item[0])),
+                        )
+                    ],
+                }
+                for row in sorted(
+                    disagreement_rows.values(),
+                    key=lambda item: (-int(item["count"]), str(item["transition"])),
+                )
+            ],
+            "samples": disagreement_samples,
+        }
+
+    def enrichment_promote_verify_school_candidates(
+        self,
+        *,
+        limit: int = 50,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        apply_changes: bool = False,
+        include_preflight: bool = True,
+        probes: int | None = None,
+        preflight_snapshot: dict[str, object] | None = None,
+        provider_window_state: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        if preflight_snapshot is None and include_preflight:
+            preflight_snapshot = self.search_preflight(probes=probes)
+
+        effective_provider_window_state = provider_window_state or _provider_window_state_from_preflight(preflight_snapshot)
+        effective_runtime_mode = self._settings.crawler_adaptive_train_default_runtime_mode or "adaptive_assisted"
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            policy = AdaptivePolicy(
+                epsilon=self._settings.crawler_adaptive_epsilon,
+                policy_version=self._settings.crawler_policy_version,
+                live_epsilon=self._settings.crawler_adaptive_live_epsilon,
+                train_epsilon=self._settings.crawler_adaptive_train_epsilon,
+                risk_timeout_weight=self._settings.crawler_adaptive_risk_timeout_weight,
+                risk_requeue_weight=self._settings.crawler_adaptive_risk_requeue_weight,
+            )
+            snapshot = repository.load_latest_policy_snapshot(
+                policy_version=policy.policy_version,
+                runtime_mode=effective_runtime_mode,
+            )
+            payload = snapshot.get("model_payload") if isinstance(snapshot, dict) else None
+            if isinstance(payload, dict):
+                policy.load_snapshot(payload)
+
+            jobs = repository.list_queued_field_jobs_for_triage(
+                limit=max(1, int(limit)),
+                source_slug=source_slug,
+                field_name=field_name,
+            )
+
+            total_jobs_considered = 0
+            candidates: list[dict[str, object]] = []
+            promoted = 0
+
+            for job in jobs:
+                if job.field_name not in {FIELD_JOB_FIND_WEBSITE, FIELD_JOB_FIND_INSTAGRAM}:
+                    continue
+                total_jobs_considered += 1
+                if _job_supporting_page_ready(job):
+                    continue
+                if not (job.chapter_name and job.university_name and job.fraternity_slug):
+                    continue
+                if repository.has_pending_field_job(job.chapter_id, FIELD_JOB_VERIFY_SCHOOL):
+                    continue
+
+                context = _build_enrichment_shadow_context(job, effective_provider_window_state)
+                provider_window_healthy = bool(context.get("provider_window_healthy"))
+                if not provider_window_healthy:
+                    cached_school_policy = repository.get_school_policy(job.university_name)
+                    cached_chapter_activity = repository.get_chapter_activity(
+                        fraternity_slug=job.fraternity_slug,
+                        school_name=job.university_name,
+                    )
+                    has_decisive_cached_school_policy = _cached_school_policy_is_decisive(cached_school_policy)
+                    has_decisive_cached_chapter_activity = _cached_chapter_activity_is_decisive(cached_chapter_activity)
+                    if not has_decisive_cached_school_policy and not has_decisive_cached_chapter_activity:
+                        continue
+                decisions = policy.choose_action(
+                    [
+                        "parse_supporting_page",
+                        "verify_school",
+                        "verify_website",
+                        "search_web",
+                        "search_social",
+                        "defer",
+                        "stop_no_signal",
+                        "review_required",
+                    ],
+                    context=context,
+                    template_profile=None,
+                    mode="adaptive_shadow",
+                )
+                if not decisions:
+                    continue
+                top_decision = decisions[0]
+                if str(top_decision.action_type) != "verify_school":
+                    continue
+
+                deterministic_action = "search_social" if job.field_name == FIELD_JOB_FIND_INSTAGRAM else "search_web"
+                if job.queue_state == "deferred":
+                    contact_resolution = job.payload.get("contactResolution") if isinstance(job.payload.get("contactResolution"), dict) else {}
+                    reason_code = str(contact_resolution.get("reasonCode") or "").strip()
+                    if reason_code in {"provider_degraded", "transient_network", "dependency_wait", "website_required", "provider_low_signal"}:
+                        deterministic_action = "defer"
+
+                if apply_changes and job.crawl_run_id is not None and job.source_slug:
+                    promoted += repository.create_field_jobs(
+                        job.chapter_id,
+                        job.crawl_run_id,
+                        job.chapter_slug,
+                        job.source_slug,
+                        [FIELD_JOB_VERIFY_SCHOOL],
+                    )
+
+                if len(candidates) < 25:
+                    candidates.append(
+                        {
+                            "chapterSlug": job.chapter_slug,
+                            "sourceSlug": job.source_slug,
+                            "fieldName": job.field_name,
+                            "queueState": job.queue_state,
+                            "recommendedAction": "verify_school",
+                            "deterministicAction": deterministic_action,
+                            "topActions": [
+                                {
+                                    "actionType": decision.action_type,
+                                    "score": round(float(decision.score), 4),
+                                }
+                                for decision in decisions[:3]
+                            ],
+                            "context": {
+                                "supportingPagePresent": bool(context.get("supporting_page_present")),
+                                "providerWindowHealthy": bool(context.get("provider_window_healthy")),
+                                "identityComplete": bool(context.get("identity_complete")),
+                                "priorQueryCount": int(context.get("prior_query_count") or 0),
+                            },
+                        }
+                    )
+
+        return {
+            "captured_at": _utc_now_iso(),
+            "applyChanges": bool(apply_changes),
+            "jobsConsidered": int(total_jobs_considered),
+            "candidateCount": len(candidates) if not apply_changes else max(len(candidates), int(promoted)),
+            "promotedVerifySchoolJobs": int(promoted),
+            "samples": candidates,
+        }
     def adaptive_replay_window(
         self,
         *,
@@ -1022,6 +1507,7 @@ class CrawlService:
         field_name: str | None,
         limit: int,
         policy_pack: dict[str, object],
+        preflight_snapshot: dict[str, object] | None = None,
     ) -> tuple[dict[str, int | bool], dict[str, int]]:
         triage_summary: dict[str, int | bool] = {
             "triaged": 0,
@@ -1124,25 +1610,41 @@ class CrawlService:
                 current_reason_code = ""
                 if isinstance(job.payload.get("contactResolution"), dict):
                     current_reason_code = str((job.payload.get("contactResolution") or {}).get("reasonCode") or "").strip()
+                next_queue_state = current_queue_state
+                queue_outcome = "keep_deferred" if current_queue_state == "deferred" else "keep_actionable"
+                scheduled_delay_seconds = 0 if current_queue_state != "deferred" else None
+                last_error = "" if current_queue_state != "deferred" else None
+                if current_queue_state == "deferred" and current_reason_code in {"provider_degraded", "dependency_wait", "website_required"}:
+                    can_reactivate = False
+                    if current_reason_code == "provider_degraded":
+                        can_reactivate = _preflight_snapshot_is_healthy(preflight_snapshot)
+                    else:
+                        can_reactivate = _job_supporting_page_ready(job)
+                    next_queue_state = "actionable" if can_reactivate else "deferred"
+                    queue_outcome = "resume_actionable" if can_reactivate else "keep_deferred"
+                    scheduled_delay_seconds = 0 if can_reactivate else None
+                    last_error = "" if can_reactivate else None
                 repository.patch_queued_field_job(
                     job.id,
                     payload_patch={
                         "queueTriage": {
-                            "outcome": "keep_deferred" if current_queue_state == "deferred" else "keep_actionable",
+                            "outcome": queue_outcome,
                             "validityClass": decision.validity_class,
                         },
                         "contactResolution": {
-                            "queueState": current_queue_state,
+                            "queueState": next_queue_state,
                             "validityClass": decision.validity_class,
-                            **({"reasonCode": current_reason_code} if current_queue_state == "deferred" and current_reason_code else {}),
+                            **({"reasonCode": current_reason_code} if next_queue_state == "deferred" and current_reason_code else {}),
                         },
                     },
                     status="queued",
-                    scheduled_delay_seconds=0 if current_queue_state != "deferred" else None,
-                    last_error="" if current_queue_state != "deferred" else None,
+                    scheduled_delay_seconds=scheduled_delay_seconds,
+                    last_error=last_error,
                     terminal_failure=False,
                 )
                 triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
+                if next_queue_state == "deferred" and current_reason_code in {"dependency_wait", "website_required"}:
+                    triage_summary["dependencyDeferred"] = int(triage_summary["dependencyDeferred"]) + 1
                 repair_summary["reconciledHistorical"] += 1
                 continue
             if decision.validity_class == "provisional_candidate":
@@ -1223,6 +1725,7 @@ class CrawlService:
     ) -> dict[str, str]:
         snippets = repository.fetch_provenance_snippets(job.chapter_id)
         repaired_university = _infer_university_name_for_job(job, snippets)
+        repair_family = _infer_repair_family(job, repaired_university=repaired_university)
         if repaired_university:
             repaired_decision = classify_chapter_validity(
                 ExtractedChapter(
@@ -1249,15 +1752,31 @@ class CrawlService:
                         "policyPack": str(policy_pack.get("name") or "default"),
                     },
                 )
-                return {"status": "promoted_to_canonical_valid", "reason": "institutional_pattern_repair"}
+                return {
+                    "status": "promoted_to_canonical_valid",
+                    "reason": "institutional_pattern_repair",
+                    "repair_family": repair_family,
+                }
 
         current_decision = _classify_field_job_identity(job)
         if current_decision.validity_class == "invalid_non_chapter":
-            return {"status": "confirmed_invalid", "reason": current_decision.invalid_reason or "identity_semantically_invalid"}
+            return {
+                "status": "confirmed_invalid",
+                "reason": current_decision.invalid_reason or "identity_semantically_invalid",
+                "repair_family": repair_family,
+            }
 
         if repaired_university:
-            return {"status": "downgraded_to_provisional", "reason": "repair_not_canonical"}
-        return {"status": "repair_exhausted", "reason": "identity_semantically_incomplete"}
+            return {
+                "status": "downgraded_to_provisional",
+                "reason": "repair_not_canonical",
+                "repair_family": repair_family,
+            }
+        return {
+            "status": "repair_exhausted",
+            "reason": "identity_semantically_incomplete",
+            "repair_family": repair_family,
+        }
 
     def _build_chapter_repair_payload(self, job: FieldJob, *, policy_pack: dict[str, object]) -> dict[str, object]:
         return {
@@ -1272,6 +1791,7 @@ class CrawlService:
             "sourceBaseUrl": job.source_base_url,
             "sourceListUrl": job.payload.get("sourceListUrl") if isinstance(job.payload.get("sourceListUrl"), str) else None,
             "policyPack": str(policy_pack.get("name") or "default"),
+            "repairFamily": _infer_repair_family(job),
         }
 
     def _process_chapter_repair_queue(
@@ -1290,6 +1810,10 @@ class CrawlService:
             "confirmedInvalid": 0,
             "repairExhausted": 0,
             "reconciledHistorical": 0,
+            "statePrefixResolver": 0,
+            "schoolNameNormalizer": 0,
+            "chapterDesignationRepair": 0,
+            "duplicateIdentityMerge": 0,
         }
         for _ in range(max(0, limit)):
             repair_job = repository.claim_next_chapter_repair_job(self._settings.crawler_field_job_worker_id, source_slug=source_slug)
@@ -1314,6 +1838,7 @@ class CrawlService:
                 university_name=repair_job.university_name,
             )
             outcome = self._repair_chapter_identity(repository, synthetic_job, policy_pack=policy_pack)
+            repair_family = str(outcome.get("repair_family") or synthetic_job.payload.get("repairFamily") or _infer_repair_family(synthetic_job)).strip() or "chapter_designation_repair"
             related_jobs = repository.list_queued_field_jobs_for_chapter(repair_job.chapter_id)
             affected_count = max(1, len(related_jobs))
 
@@ -1336,9 +1861,11 @@ class CrawlService:
                                 "outcome": "defer_email_without_website" if defer_email_for_missing_website else "keep_actionable",
                                 "validityClass": "canonical_valid",
                                 "repairOutcome": outcome["status"],
+                                "repairFamily": repair_family,
                             },
                             "chapterRepair": {
                                 "state": "promoted_to_canonical_valid",
+                                "family": repair_family,
                             },
                             "contactResolution": {
                                 "queueState": "deferred" if defer_email_for_missing_website else "actionable",
@@ -1361,6 +1888,7 @@ class CrawlService:
                     result_payload=outcome,
                 )
                 summary["promotedToCanonical"] += affected_count
+                _increment_repair_family_summary(summary, repair_family, affected_count)
                 continue
 
             if outcome["status"] == "confirmed_invalid":
@@ -1373,9 +1901,11 @@ class CrawlService:
                                 "validityClass": "invalid_non_chapter",
                                 "invalidReason": outcome.get("reason") or "identity_semantically_invalid",
                                 "repairOutcome": outcome["status"],
+                                "repairFamily": repair_family,
                             },
                             "chapterRepair": {
                                 "state": "confirmed_invalid",
+                                "family": repair_family,
                             },
                             "contactResolution": {
                                 "queueState": "blocked_invalid",
@@ -1398,6 +1928,7 @@ class CrawlService:
                     result_payload=outcome,
                 )
                 summary["confirmedInvalid"] += affected_count
+                _increment_repair_family_summary(summary, repair_family, affected_count)
                 continue
 
             next_state = "downgraded_to_provisional" if outcome["status"] == "downgraded_to_provisional" else "repair_exhausted"
@@ -1411,9 +1942,11 @@ class CrawlService:
                             "validityClass": "repairable_candidate",
                             "repairReason": outcome.get("reason") or "identity_semantically_incomplete",
                             "repairOutcome": next_state,
+                            "repairFamily": repair_family,
                         },
                         "chapterRepair": {
                             "state": next_state,
+                            "family": repair_family,
                         },
                         "contactResolution": {
                             "queueState": "deferred",
@@ -1435,6 +1968,7 @@ class CrawlService:
                 summary["downgradedToProvisional"] += affected_count
             else:
                 summary["repairExhausted"] += affected_count
+            _increment_repair_family_summary(summary, repair_family, affected_count)
 
         return summary
 
@@ -1455,6 +1989,7 @@ class CrawlService:
         degraded_mode = False
         preflight_enabled = self._settings.crawler_search_preflight_enabled if run_preflight is None else run_preflight
         preflight_snapshot: dict[str, object] | None = None
+        before_metrics = None
 
         stale_jobs_recovered = 0
         stale_graph_runs_recovered = 0
@@ -1464,6 +1999,7 @@ class CrawlService:
             "deferredLongCooldown": 0,
             "repairQueued": 0,
             "actionableRetained": 0,
+            "dependencyDeferred": 0,
             "sourceInvaliditySaturated": False,
         }
         repair_summary: dict[str, int] = {
@@ -1479,6 +2015,7 @@ class CrawlService:
 
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
+            before_metrics = repository.get_accuracy_recovery_metrics()
             stale_jobs_recovered = repository.reconcile_stale_field_jobs(
                 self._settings.crawler_field_job_stale_claim_minutes
             )
@@ -1486,24 +2023,6 @@ class CrawlService:
                 stale_graph_runs_recovered = repository.reconcile_stale_field_job_graph_runs(
                     self._settings.crawler_field_job_graph_run_stale_minutes
                 )
-            triage_summary, repair_summary = self._reconcile_field_job_queue(
-                repository,
-                source_slug=source_slug,
-                field_name=field_name,
-                # On large all-source runs, cheap semantic triage should sweep much
-                # further ahead than the immediate worker batch so obvious junk rows
-                # are canceled before they consume claim slots.
-                limit=max(limit * 30, 2_000) if source_slug is None else max(limit * 20, 1_000),
-                policy_pack=policy_pack,
-            )
-            queued_repair_summary = self._process_chapter_repair_queue(
-                repository,
-                source_slug=source_slug,
-                limit=max(1, min(limit, max(1, effective_workers))),
-                policy_pack=policy_pack,
-            )
-            for key, value in queued_repair_summary.items():
-                repair_summary[key] = int(repair_summary.get(key, 0) or 0) + int(value or 0)
 
         if stale_jobs_recovered or stale_graph_runs_recovered:
             log_event(
@@ -1515,8 +2034,6 @@ class CrawlService:
                 stale_graph_run_minutes=self._settings.crawler_field_job_graph_run_stale_minutes,
                 source_slug=source_slug,
                 field_name=field_name,
-                triage_summary=triage_summary,
-                repair_summary=repair_summary,
             )
 
         if preflight_enabled and self._settings.crawler_search_enabled:
@@ -1524,7 +2041,29 @@ class CrawlService:
             healthy = bool(preflight_snapshot.get("healthy", False))
             if not healthy:
                 if require_healthy_search:
-                    result = {"processed": 0, "requeued": 0, "failed_terminal": 0, "runtime_fallback_count": 0, "runtime_mode_used": effective_runtime_mode}
+                    aggregate = {
+                        "processed": 0,
+                        "requeued": 0,
+                        "failed_terminal": 0,
+                        "runtime_fallback_count": 0,
+                        "runtime_mode_used": effective_runtime_mode,
+                        "provider_degraded_deferred": 0,
+                        "dependency_wait_deferred": 0,
+                        "supporting_page_resolved": 0,
+                        "supporting_page_contact_resolved": 0,
+                        "external_search_contact_resolved": 0,
+                        "enrichment_observations_logged": 0,
+                        "mid_batch_provider_rechecks": 0,
+                        "mid_batch_provider_reorders": 0,
+                        "preflight_probe_queries": _probe_queries_from_preflight(preflight_snapshot),
+                        "chapter_search_queries": [],
+                    }
+                    aggregate.update(_field_job_batch_delta_payload(before_metrics, before_metrics, processed=0))
+                    aggregate["stale_jobs_recovered"] = stale_jobs_recovered
+                    aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
+                    aggregate["queue_triage"] = triage_summary
+                    aggregate["chapter_repair"] = repair_summary
+                    aggregate["policy_pack"] = str(policy_pack.get("name") or "default")
                     log_event(
                         LOGGER,
                         "field_job_batch_skipped_provider_degraded",
@@ -1536,24 +2075,56 @@ class CrawlService:
                         graph_durability=effective_graph_durability,
                         preflight=preflight_snapshot,
                     )
-                    return result
+                    return aggregate
                 degraded_mode = True
                 effective_workers = max(1, min(effective_workers, self._settings.crawler_search_degraded_worker_cap))
         if policy_pack.get("worker_cap") is not None:
             effective_workers = max(1, min(effective_workers, int(policy_pack["worker_cap"])))
 
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            triage_summary, repair_summary = self._reconcile_field_job_queue(
+                repository,
+                source_slug=source_slug,
+                field_name=field_name,
+                limit=max(limit * 30, 2_000) if source_slug is None else max(limit * 20, 1_000),
+                policy_pack=policy_pack,
+                preflight_snapshot=preflight_snapshot,
+            )
+            queued_repair_summary = self._process_chapter_repair_queue(
+                repository,
+                source_slug=source_slug,
+                limit=max(1, min(limit, max(1, effective_workers))),
+                policy_pack=policy_pack,
+            )
+            for key, value in queued_repair_summary.items():
+                repair_summary[key] = int(repair_summary.get(key, 0) or 0) + int(value or 0)
+
         worker_limits = _distribute_limit(limit, effective_workers)
         if not worker_limits:
-            result = {
+            aggregate = {
                 "processed": 0,
                 "requeued": 0,
                 "failed_terminal": 0,
                 "runtime_fallback_count": 0,
                 "runtime_mode_used": effective_runtime_mode,
+                "provider_degraded_deferred": 0,
+                "dependency_wait_deferred": 0,
+                "supporting_page_resolved": 0,
+                "supporting_page_contact_resolved": 0,
+                "external_search_contact_resolved": 0,
+                "enrichment_observations_logged": 0,
+                "mid_batch_provider_rechecks": 0,
+                "mid_batch_provider_reorders": 0,
+                "preflight_probe_queries": _probe_queries_from_preflight(preflight_snapshot),
+                "chapter_search_queries": [],
                 "queue_triage": triage_summary,
                 "chapter_repair": repair_summary,
                 "policy_pack": str(policy_pack.get("name") or "default"),
             }
+            aggregate.update(_field_job_batch_delta_payload(before_metrics, before_metrics, processed=0))
+            aggregate["stale_jobs_recovered"] = stale_jobs_recovered
+            aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
             log_event(
                 LOGGER,
                 "field_job_batch_finished",
@@ -1565,9 +2136,9 @@ class CrawlService:
                 runtime_mode=effective_runtime_mode,
                 graph_durability=effective_graph_durability,
                 preflight=preflight_snapshot,
-                **result,
+                **aggregate,
             )
-            return result
+            return aggregate
 
         supervisor = FieldJobSupervisorGraphRuntime(
             worker_limits=worker_limits,
@@ -1576,14 +2147,37 @@ class CrawlService:
             source_slug=source_slug,
             field_name=field_name,
             degraded_mode=degraded_mode,
-            chunk_processor=self._process_field_job_chunk,
+            chunk_processor=lambda limit, source_slug, field_name, worker_index, total_workers, degraded_mode, runtime_mode, graph_durability: self._process_field_job_chunk(
+                limit,
+                source_slug,
+                field_name,
+                worker_index,
+                total_workers,
+                degraded_mode=degraded_mode,
+                runtime_mode=runtime_mode,
+                graph_durability=graph_durability,
+                preflight_snapshot=preflight_snapshot,
+            ),
         )
         aggregate = supervisor.run()
+
+        with get_connection(self._settings) as connection:
+            after_metrics = CrawlerRepository(connection).get_accuracy_recovery_metrics()
+
+        aggregate["preflight_probe_queries"] = _merge_unique_texts(
+            _probe_queries_from_preflight(preflight_snapshot),
+            aggregate.get("preflight_probe_queries") or [],
+        )
+        aggregate.update(_field_job_batch_delta_payload(before_metrics, after_metrics, processed=int(aggregate.get("processed", 0) or 0)))
         aggregate["stale_jobs_recovered"] = stale_jobs_recovered
         aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
         aggregate["queue_triage"] = triage_summary
         aggregate["chapter_repair"] = repair_summary
         aggregate["policy_pack"] = str(policy_pack.get("name") or "default")
+        aggregate["provider_window_state"] = aggregate.get("provider_window_state") or _provider_window_state_from_preflight(
+            preflight_snapshot,
+            degraded_mode=degraded_mode,
+        )
 
         log_event(
             LOGGER,
@@ -1610,111 +2204,240 @@ class CrawlService:
         degraded_mode: bool = False,
         runtime_mode: str = "legacy",
         graph_durability: str = "sync",
+        preflight_snapshot: dict[str, object] | None = None,
     ) -> dict[str, object]:
         policy_pack = self._resolve_field_job_policy_pack(source_slug)
-        search_settings = self._settings
-        max_search_pages = self._settings.crawler_search_max_pages_per_job
-        dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
-        email_max_queries = self._settings.crawler_search_email_max_queries
-        instagram_max_queries = self._settings.crawler_search_instagram_max_queries
-        if policy_pack.get("max_search_pages") is not None:
-            max_search_pages = min(max_search_pages, int(policy_pack["max_search_pages"]))
-        if policy_pack.get("email_max_queries") is not None:
-            email_max_queries = min(email_max_queries, int(policy_pack["email_max_queries"]))
-        if policy_pack.get("instagram_max_queries") is not None:
-            instagram_max_queries = min(instagram_max_queries, int(policy_pack["instagram_max_queries"]))
-        if degraded_mode:
-            search_settings = self._settings.model_copy(
-                update={"crawler_search_max_results": self._settings.crawler_search_degraded_max_results}
-            )
-            max_search_pages = max(1, self._settings.crawler_search_degraded_max_pages_per_job)
-            dependency_wait_seconds = max(
-                self._settings.crawler_search_degraded_dependency_wait_seconds,
-                self._settings.crawler_search_dependency_wait_seconds,
-            )
-            email_max_queries = max(1, self._settings.crawler_search_degraded_email_max_queries)
-            instagram_max_queries = max(1, self._settings.crawler_search_degraded_instagram_max_queries)
+        current_search_settings = _search_settings_from_preflight(self._settings, preflight_snapshot)
+        current_degraded_mode = degraded_mode
+        current_provider_window_state = _provider_window_state_from_preflight(preflight_snapshot, degraded_mode=current_degraded_mode)
+        aggregate: dict[str, object] = {
+            "processed": 0,
+            "requeued": 0,
+            "failed_terminal": 0,
+            "runtime_fallback_count": 0,
+            "runtime_mode_used": runtime_mode,
+            "provider_degraded_deferred": 0,
+            "dependency_wait_deferred": 0,
+            "supporting_page_resolved": 0,
+            "supporting_page_contact_resolved": 0,
+            "external_search_contact_resolved": 0,
+            "enrichment_observations_logged": 0,
+            "mid_batch_provider_rechecks": 0,
+            "mid_batch_provider_reorders": 0,
+            "preflight_probe_queries": [],
+            "chapter_search_queries": [],
+            "provider_window_state": current_provider_window_state,
+        }
+        remaining = max(0, int(limit))
+        if remaining <= 0:
+            return aggregate
+
+        recheck_enabled = bool(
+            self._settings.crawler_search_enabled
+            and self._settings.crawler_search_mid_batch_recheck_enabled
+            and remaining > 0
+        )
+        jobs_per_recheck = max(1, int(self._settings.crawler_search_mid_batch_recheck_every_jobs or 25))
+        seconds_per_recheck = max(1, int(self._settings.crawler_search_mid_batch_recheck_every_seconds or 90))
+        min_success_rate = float(self._settings.crawler_search_mid_batch_min_success_rate or 0.25)
+        handled_since_recheck = 0
+        window_started = time.monotonic()
 
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
             worker_id = _worker_id(self._settings.crawler_field_job_worker_id, worker_index, total_workers)
-            engine = FieldJobEngine(
-                repository=repository,
-                logger=LOGGER,
-                worker_id=worker_id,
-                base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
-                source_slug=source_slug,
-                field_name=field_name,
-                search_client=SearchClient(search_settings),
-                search_provider=self._settings.crawler_search_provider,
-                max_search_pages=max_search_pages,
-                negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
-                dependency_wait_seconds=dependency_wait_seconds,
-                require_confident_website_for_email=self._settings.crawler_search_require_confident_website_for_email,
-                email_escape_on_provider_block=self._settings.crawler_search_email_escape_on_provider_block,
-                email_escape_min_website_failures=self._settings.crawler_search_email_escape_min_website_failures,
-                transient_short_retries=self._settings.crawler_search_transient_short_retries,
-                transient_long_cooldown_seconds=self._settings.crawler_search_transient_long_cooldown_seconds,
-                min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
-                email_max_queries=email_max_queries,
-                instagram_max_queries=instagram_max_queries,
-                enable_school_initials=self._settings.crawler_search_enable_school_initials,
-                min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
-                enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
-                instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
-                instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
-                greedy_collect_mode=self._settings.crawler_greedy_collect,
-                search_degraded_mode=degraded_mode,
-            )
-            if runtime_mode == "legacy":
-                result = engine.process(limit=limit)
-                result["runtime_fallback_count"] = 0
-                result["runtime_mode_used"] = "legacy"
-                return result
-            if not repository.field_job_graph_tables_ready():
-                log_event(
-                    LOGGER,
-                    "field_job_graph_runtime_fallback_missing_tables",
-                    level=logging.WARNING,
-                    runtime_mode=runtime_mode,
+
+            while remaining > 0:
+                segment_limit = min(remaining, jobs_per_recheck) if recheck_enabled and not current_degraded_mode else remaining
+                max_search_pages = self._settings.crawler_search_max_pages_per_job
+                dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
+                email_max_queries = min(self._settings.crawler_search_email_max_queries, 3)
+                instagram_max_queries = min(self._settings.crawler_search_instagram_max_queries, 3)
+                if policy_pack.get("max_search_pages") is not None:
+                    max_search_pages = min(max_search_pages, int(policy_pack["max_search_pages"]))
+                if policy_pack.get("email_max_queries") is not None:
+                    email_max_queries = min(email_max_queries, int(policy_pack["email_max_queries"]))
+                if policy_pack.get("instagram_max_queries") is not None:
+                    instagram_max_queries = min(instagram_max_queries, int(policy_pack["instagram_max_queries"]))
+                if current_degraded_mode:
+                    current_search_settings = current_search_settings.model_copy(
+                        update={"crawler_search_max_results": current_search_settings.crawler_search_degraded_max_results}
+                    )
+                    max_search_pages = max(1, self._settings.crawler_search_degraded_max_pages_per_job)
+                    dependency_wait_seconds = max(
+                        self._settings.crawler_search_degraded_dependency_wait_seconds,
+                        self._settings.crawler_search_dependency_wait_seconds,
+                    )
+                    email_max_queries = min(max(1, self._settings.crawler_search_degraded_email_max_queries), 3)
+                    instagram_max_queries = min(max(1, self._settings.crawler_search_degraded_instagram_max_queries), 3)
+
+                adaptive_policy: AdaptivePolicy | None = None
+                if self._settings.crawler_adaptive_enrichment_observations_enabled:
+                    adaptive_policy = AdaptivePolicy(
+                        epsilon=self._settings.crawler_adaptive_epsilon,
+                        policy_version=self._settings.crawler_policy_version,
+                        live_epsilon=self._settings.crawler_adaptive_live_epsilon,
+                        train_epsilon=self._settings.crawler_adaptive_train_epsilon,
+                        risk_timeout_weight=self._settings.crawler_adaptive_risk_timeout_weight,
+                        risk_requeue_weight=self._settings.crawler_adaptive_risk_requeue_weight,
+                    )
+                    snapshot = repository.load_latest_policy_snapshot(
+                        policy_version=adaptive_policy.policy_version,
+                        runtime_mode=self._settings.crawler_adaptive_train_default_runtime_mode or "adaptive_assisted",
+                    )
+                    payload = snapshot.get("model_payload") if isinstance(snapshot, dict) else None
+                    if isinstance(payload, dict):
+                        adaptive_policy.load_snapshot(payload)
+
+                engine = FieldJobEngine(
+                    repository=repository,
+                    logger=LOGGER,
                     worker_id=worker_id,
+                    base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
                     source_slug=source_slug,
                     field_name=field_name,
-                    error="field-job graph tables are unavailable",
+                    search_client=SearchClient(current_search_settings),
+                    search_provider=self._settings.crawler_search_provider,
+                    max_search_pages=max_search_pages,
+                    negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
+                    dependency_wait_seconds=dependency_wait_seconds,
+                    require_confident_website_for_email=self._settings.crawler_search_require_confident_website_for_email,
+                    email_escape_on_provider_block=self._settings.crawler_search_email_escape_on_provider_block,
+                    email_escape_min_website_failures=self._settings.crawler_search_email_escape_min_website_failures,
+                    transient_short_retries=self._settings.crawler_search_transient_short_retries,
+                    transient_long_cooldown_seconds=self._settings.crawler_search_transient_long_cooldown_seconds,
+                    min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
+                    email_max_queries=email_max_queries,
+                    instagram_max_queries=instagram_max_queries,
+                    enable_school_initials=self._settings.crawler_search_enable_school_initials,
+                    min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
+                    enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
+                    instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
+                    instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
+                    greedy_collect_mode=self._settings.crawler_greedy_collect,
+                    search_degraded_mode=current_degraded_mode,
+                    adaptive_policy=adaptive_policy,
+                    adaptive_runtime_mode=runtime_mode,
+                    adaptive_policy_mode="shadow",
+                    adaptive_policy_version=self._settings.crawler_policy_version,
+                    provider_window_state=current_provider_window_state,
+                    enrichment_observations_enabled=self._settings.crawler_adaptive_enrichment_observations_enabled,
                 )
-                result = engine.process(limit=limit)
-                result["runtime_fallback_count"] = 1
-                result["runtime_mode_used"] = "legacy"
-                return result
-            graph_runtime = FieldJobGraphRuntime(
-                repository=repository,
-                engine=engine,
-                worker_id=worker_id,
+                result = self._run_field_job_runtime(
+                    repository=repository,
+                    engine=engine,
+                    worker_id=worker_id,
+                    runtime_mode=runtime_mode,
+                    graph_durability=graph_durability,
+                    source_slug=source_slug,
+                    field_name=field_name,
+                    limit=segment_limit,
+                )
+                result.update(engine.consume_last_batch_metrics())
+                aggregate = _merge_field_job_chunk_results(aggregate, result)
+                handled = int(result.get("processed", 0) or 0) + int(result.get("requeued", 0) or 0) + int(result.get("failed_terminal", 0) or 0)
+                if handled <= 0:
+                    break
+                remaining -= handled
+                handled_since_recheck += handled
+                if current_degraded_mode or not recheck_enabled or remaining <= 0:
+                    continue
+                if handled_since_recheck < jobs_per_recheck and (time.monotonic() - window_started) < seconds_per_recheck:
+                    continue
+
+                recheck_snapshot = self.search_preflight()
+                aggregate["mid_batch_provider_rechecks"] = int(aggregate.get("mid_batch_provider_rechecks", 0) or 0) + 1
+                aggregate["preflight_probe_queries"] = _merge_unique_texts(
+                    aggregate.get("preflight_probe_queries") or [],
+                    _probe_queries_from_preflight(recheck_snapshot),
+                )
+                reordered_settings = _reorder_search_settings_from_window(
+                    current_search_settings,
+                    recheck_snapshot,
+                    min_success_rate=min_success_rate,
+                )
+                previous_order = _provider_order_from_settings(current_search_settings)
+                next_order = _provider_order_from_settings(reordered_settings)
+                if previous_order != next_order:
+                    aggregate["mid_batch_provider_reorders"] = int(aggregate.get("mid_batch_provider_reorders", 0) or 0) + 1
+                current_search_settings = reordered_settings
+                if _all_attempted_providers_below_threshold(
+                    recheck_snapshot,
+                    current_search_settings,
+                    min_success_rate=min_success_rate,
+                ):
+                    current_degraded_mode = True
+                current_provider_window_state = _provider_window_state_from_preflight(
+                    recheck_snapshot,
+                    degraded_mode=current_degraded_mode,
+                )
+                aggregate["provider_window_state"] = current_provider_window_state
+                handled_since_recheck = 0
+                window_started = time.monotonic()
+
+        return aggregate
+
+    def _run_field_job_runtime(
+        self,
+        *,
+        repository: CrawlerRepository,
+        engine: FieldJobEngine,
+        worker_id: str,
+        runtime_mode: str,
+        graph_durability: str,
+        source_slug: str | None,
+        field_name: str | None,
+        limit: int,
+    ) -> dict[str, object]:
+        if runtime_mode == "legacy":
+            result = engine.process(limit=limit)
+            result["runtime_fallback_count"] = 0
+            result["runtime_mode_used"] = "legacy"
+            return result
+        if not repository.field_job_graph_tables_ready():
+            log_event(
+                LOGGER,
+                "field_job_graph_runtime_fallback_missing_tables",
+                level=logging.WARNING,
                 runtime_mode=runtime_mode,
-                graph_durability=graph_durability,
+                worker_id=worker_id,
                 source_slug=source_slug,
                 field_name=field_name,
+                error="field-job graph tables are unavailable",
             )
-            try:
-                result = graph_runtime.process(limit=limit)
-                result["runtime_fallback_count"] = 0
-                result["runtime_mode_used"] = runtime_mode
-                return result
-            except Exception as exc:  # pragma: no cover - runtime guardrail
-                log_event(
-                    LOGGER,
-                    "field_job_graph_runtime_fallback_exception",
-                    level=logging.WARNING,
-                    runtime_mode=runtime_mode,
-                    worker_id=worker_id,
-                    source_slug=source_slug,
-                    field_name=field_name,
-                    error=str(exc),
-                )
-                result = engine.process(limit=limit)
-                result["runtime_fallback_count"] = 1
-                result["runtime_mode_used"] = "legacy"
-                return result
+            result = engine.process(limit=limit)
+            result["runtime_fallback_count"] = 1
+            result["runtime_mode_used"] = "legacy"
+            return result
+        graph_runtime = FieldJobGraphRuntime(
+            repository=repository,
+            engine=engine,
+            worker_id=worker_id,
+            runtime_mode=runtime_mode,
+            graph_durability=graph_durability,
+            source_slug=source_slug,
+            field_name=field_name,
+        )
+        try:
+            result = graph_runtime.process(limit=limit)
+            result["runtime_fallback_count"] = 0
+            result["runtime_mode_used"] = runtime_mode
+            return result
+        except Exception as exc:  # pragma: no cover - runtime guardrail
+            log_event(
+                LOGGER,
+                "field_job_graph_runtime_fallback_exception",
+                level=logging.WARNING,
+                runtime_mode=runtime_mode,
+                worker_id=worker_id,
+                source_slug=source_slug,
+                field_name=field_name,
+                error=str(exc),
+            )
+            result = engine.process(limit=limit)
+            result["runtime_fallback_count"] = 1
+            result["runtime_mode_used"] = "legacy"
+            return result
 
     def search_preflight(self, probes: int | None = None) -> dict[str, object]:
         if not self._settings.crawler_search_enabled:
@@ -1800,6 +2523,7 @@ class CrawlService:
             bucket["success_rate"] = round(float(bucket["successes"]) / attempts, 4)
 
         provider_mode = self._settings.crawler_search_provider.lower()
+        provider_window_success_rate = _provider_window_success_rate(provider_health)
         primary_provider_success = any(
             int(provider_health.get(provider, {}).get("successes", 0)) > 0
             for provider in ("searxng_json", "tavily_api", "serper_api")
@@ -1808,17 +2532,402 @@ class CrawlService:
         if provider_mode in {"auto_free", "searxng_json", "tavily_api", "serper_api"}:
             if any(provider in provider_health for provider in ("searxng_json", "tavily_api", "serper_api")):
                 healthy = healthy and primary_provider_success
+        provider_window_min_success_rate = min(0.25, float(self._settings.crawler_search_preflight_min_success_rate))
+        if provider_health:
+            healthy = healthy and provider_window_success_rate >= provider_window_min_success_rate
+        captured_at = _utc_now_iso()
         snapshot = {
+            "captured_at": captured_at,
             "healthy": healthy,
             "success_rate": round(success_rate, 4),
+            "provider_window_success_rate": provider_window_success_rate,
             "successes": successes,
             "probes": probe_count,
             "min_success_rate": self._settings.crawler_search_preflight_min_success_rate,
             "provider_health": provider_health,
             "probe_outcomes": probe_outcomes,
         }
+        if not healthy:
+            if provider_health and provider_window_success_rate < provider_window_min_success_rate:
+                snapshot["reason"] = "provider_window_success_below_threshold"
+            elif provider_mode in {"auto_free", "searxng_json", "tavily_api", "serper_api"} and not primary_provider_success:
+                snapshot["reason"] = "primary_provider_success_missing"
+            else:
+                snapshot["reason"] = "probe_success_below_threshold"
+        snapshot["provider_window_state"] = _provider_window_state_from_preflight(snapshot)
         log_event(LOGGER, "search_preflight_completed", **snapshot)
         return snapshot
+
+    def system_baseline(self, *, include_preflight: bool = True, probes: int | None = None) -> dict[str, object]:
+        preflight_snapshot = self.search_preflight(probes=probes) if include_preflight else None
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            accuracy = _accuracy_recovery_metrics_payload(repository.get_accuracy_recovery_metrics())
+            national_profiles = repository.list_national_profiles(limit=1000)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                      COUNT(*) FILTER (WHERE status = 'queued')::int AS queued_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'actionable')::int AS actionable_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'deferred')::int AS deferred_jobs,
+                      COUNT(*) FILTER (WHERE status = 'running')::int AS running_jobs,
+                      COUNT(*) FILTER (WHERE status = 'done')::int AS done_jobs,
+                      COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_jobs,
+                      COUNT(*) FILTER (WHERE status = 'done' AND COALESCE(terminal_outcome, '') = 'updated')::int AS updated_jobs,
+                      COUNT(*) FILTER (WHERE status = 'done' AND COALESCE(terminal_outcome, '') = 'review_required')::int AS review_jobs,
+                      COUNT(*) FILTER (WHERE status = 'done' AND COALESCE(terminal_outcome, '') = 'terminal_no_signal')::int AS terminal_no_signal_jobs
+                    FROM field_jobs
+                    """
+                )
+                queue = dict(cursor.fetchone() or {})
+                cursor.execute(
+                    """
+                    SELECT
+                      field_name,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'actionable')::int AS actionable_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'deferred')::int AS deferred_jobs,
+                      COUNT(*) FILTER (WHERE status = 'done')::int AS done_jobs,
+                      COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_jobs
+                    FROM field_jobs
+                    WHERE field_name IN ('find_website', 'verify_website', 'find_instagram', 'find_email', 'verify_school_match')
+                    GROUP BY 1
+                    ORDER BY 1
+                    """
+                )
+                field_breakdown = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    SELECT
+                      COALESCE(metadata ->> 'reasonCode', 'unknown') AS reason_code,
+                      COUNT(*)::int AS count
+                    FROM chapter_evidence
+                    GROUP BY 1
+                    ORDER BY 2 DESC, 1 ASC
+                    LIMIT 12
+                    """
+                )
+                reason_rows = [dict(row) for row in cursor.fetchall()]
+
+        baseline = {
+            "captured_at": _utc_now_iso(),
+            "accuracy": accuracy,
+            "queue": queue,
+            "field_breakdown": field_breakdown,
+            "national_profiles": {
+                "total_profiles": len(national_profiles),
+                "with_email": sum(1 for item in national_profiles if item.contact_email),
+                "with_instagram": sum(1 for item in national_profiles if item.instagram_url),
+                "with_phone": sum(1 for item in national_profiles if item.phone),
+            },
+            "top_evidence_reason_codes": reason_rows,
+            "provenance_audit": self.provenance_completeness_audit(limit=25),
+            "enrichment_shadow": self.enrichment_shadow_policy_report(
+                limit=25,
+                include_preflight=False,
+                preflight_snapshot=preflight_snapshot,
+            ),
+            "enrichment_replay_compare": self.enrichment_policy_compare_report(limit=25),
+        }
+        if preflight_snapshot is not None:
+            baseline["search_preflight"] = preflight_snapshot
+        return baseline
+
+    def provenance_completeness_audit(self, *, limit: int = 50) -> dict[str, object]:
+        with get_connection(self._settings) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    WITH flagged AS (
+                        SELECT
+                            c.slug AS chapter_slug,
+                            f.slug AS fraternity_slug,
+                            'website_url'::text AS field_name,
+                            c.website_url::text AS field_value,
+                            COALESCE(c.contact_provenance -> 'website_url' ->> 'reasonCode', '') AS reason_code,
+                            COALESCE(c.contact_provenance -> 'website_url' ->> 'supportingPageScope', '') AS supporting_page_scope,
+                            NULL::text AS national_value,
+                            FALSE AS national_profile_collision,
+                            CASE
+                                WHEN c.website_url IS NOT NULL AND BTRIM(c.website_url) <> '' AND COALESCE(c.contact_provenance -> 'website_url' ->> 'reasonCode', '') = ''
+                                    THEN 'missing_reason_code'
+                                WHEN c.website_url IS NOT NULL AND BTRIM(c.website_url) <> '' AND COALESCE(c.contact_provenance -> 'website_url' ->> 'supportingPageScope', '') = ''
+                                    THEN 'missing_supporting_page_scope'
+                                ELSE NULL
+                            END AS issue
+                        FROM chapters c
+                        JOIN fraternities f ON f.id = c.fraternity_id
+                        UNION ALL
+                        SELECT
+                            c.slug AS chapter_slug,
+                            f.slug AS fraternity_slug,
+                            'contact_email'::text AS field_name,
+                            c.contact_email::text AS field_value,
+                            COALESCE(c.contact_provenance -> 'contact_email' ->> 'reasonCode', '') AS reason_code,
+                            COALESCE(c.contact_provenance -> 'contact_email' ->> 'supportingPageScope', '') AS supporting_page_scope,
+                            np.contact_email::text AS national_value,
+                            (
+                                np.contact_email IS NOT NULL
+                                AND c.contact_email IS NOT NULL
+                                AND LOWER(np.contact_email) = LOWER(c.contact_email)
+                                AND COALESCE(c.contact_provenance -> 'contact_email' ->> 'supportingPageScope', '') NOT IN ('chapter_site', 'school_affiliation_page', 'nationals_chapter_page')
+                            ) AS national_profile_collision,
+                            CASE
+                                WHEN c.contact_email IS NOT NULL AND BTRIM(c.contact_email) <> '' AND COALESCE(c.contact_provenance -> 'contact_email' ->> 'reasonCode', '') = ''
+                                    THEN 'missing_reason_code'
+                                WHEN c.contact_email IS NOT NULL AND BTRIM(c.contact_email) <> '' AND COALESCE(c.contact_provenance -> 'contact_email' ->> 'supportingPageScope', '') = ''
+                                    THEN 'missing_supporting_page_scope'
+                                WHEN np.contact_email IS NOT NULL
+                                    AND c.contact_email IS NOT NULL
+                                    AND LOWER(np.contact_email) = LOWER(c.contact_email)
+                                    AND COALESCE(c.contact_provenance -> 'contact_email' ->> 'supportingPageScope', '') NOT IN ('chapter_site', 'school_affiliation_page', 'nationals_chapter_page')
+                                    THEN 'matches_national_profile'
+                                ELSE NULL
+                            END AS issue
+                        FROM chapters c
+                        JOIN fraternities f ON f.id = c.fraternity_id
+                        LEFT JOIN national_profiles np ON np.fraternity_slug = f.slug
+                        UNION ALL
+                        SELECT
+                            c.slug AS chapter_slug,
+                            f.slug AS fraternity_slug,
+                            'instagram_url'::text AS field_name,
+                            c.instagram_url::text AS field_value,
+                            COALESCE(c.contact_provenance -> 'instagram_url' ->> 'reasonCode', '') AS reason_code,
+                            COALESCE(c.contact_provenance -> 'instagram_url' ->> 'supportingPageScope', '') AS supporting_page_scope,
+                            np.instagram_url::text AS national_value,
+                            (
+                                np.instagram_url IS NOT NULL
+                                AND c.instagram_url IS NOT NULL
+                                AND LOWER(np.instagram_url) = LOWER(c.instagram_url)
+                                AND COALESCE(c.contact_provenance -> 'instagram_url' ->> 'supportingPageScope', '') NOT IN ('chapter_site', 'school_affiliation_page', 'nationals_chapter_page')
+                            ) AS national_profile_collision,
+                            CASE
+                                WHEN c.instagram_url IS NOT NULL AND BTRIM(c.instagram_url) <> '' AND COALESCE(c.contact_provenance -> 'instagram_url' ->> 'reasonCode', '') = ''
+                                    THEN 'missing_reason_code'
+                                WHEN c.instagram_url IS NOT NULL AND BTRIM(c.instagram_url) <> '' AND COALESCE(c.contact_provenance -> 'instagram_url' ->> 'supportingPageScope', '') = ''
+                                    THEN 'missing_supporting_page_scope'
+                                WHEN np.instagram_url IS NOT NULL
+                                    AND c.instagram_url IS NOT NULL
+                                    AND LOWER(np.instagram_url) = LOWER(c.instagram_url)
+                                    AND COALESCE(c.contact_provenance -> 'instagram_url' ->> 'supportingPageScope', '') NOT IN ('chapter_site', 'school_affiliation_page', 'nationals_chapter_page')
+                                    THEN 'matches_national_profile'
+                                ELSE NULL
+                            END AS issue
+                        FROM chapters c
+                        JOIN fraternities f ON f.id = c.fraternity_id
+                        LEFT JOIN national_profiles np ON np.fraternity_slug = f.slug
+                    )
+                    SELECT issue, COUNT(*)::int AS count
+                    FROM flagged
+                    WHERE issue IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY 2 DESC, 1 ASC
+                    """
+                )
+                counts = {str(row["issue"]): int(row["count"]) for row in cursor.fetchall()}
+                cursor.execute(
+                    """
+                    WITH flagged AS (
+                        SELECT
+                            c.slug AS chapter_slug,
+                            f.slug AS fraternity_slug,
+                            'website_url'::text AS field_name,
+                            c.website_url::text AS field_value,
+                            COALESCE(c.contact_provenance -> 'website_url' ->> 'reasonCode', '') AS reason_code,
+                            COALESCE(c.contact_provenance -> 'website_url' ->> 'supportingPageScope', '') AS supporting_page_scope,
+                            NULL::text AS national_value,
+                            CASE
+                                WHEN c.website_url IS NOT NULL AND BTRIM(c.website_url) <> '' AND COALESCE(c.contact_provenance -> 'website_url' ->> 'reasonCode', '') = ''
+                                    THEN 'missing_reason_code'
+                                WHEN c.website_url IS NOT NULL AND BTRIM(c.website_url) <> '' AND COALESCE(c.contact_provenance -> 'website_url' ->> 'supportingPageScope', '') = ''
+                                    THEN 'missing_supporting_page_scope'
+                                ELSE NULL
+                            END AS issue
+                        FROM chapters c
+                        JOIN fraternities f ON f.id = c.fraternity_id
+                        UNION ALL
+                        SELECT
+                            c.slug AS chapter_slug,
+                            f.slug AS fraternity_slug,
+                            'contact_email'::text AS field_name,
+                            c.contact_email::text AS field_value,
+                            COALESCE(c.contact_provenance -> 'contact_email' ->> 'reasonCode', '') AS reason_code,
+                            COALESCE(c.contact_provenance -> 'contact_email' ->> 'supportingPageScope', '') AS supporting_page_scope,
+                            np.contact_email::text AS national_value,
+                            CASE
+                                WHEN c.contact_email IS NOT NULL AND BTRIM(c.contact_email) <> '' AND COALESCE(c.contact_provenance -> 'contact_email' ->> 'reasonCode', '') = ''
+                                    THEN 'missing_reason_code'
+                                WHEN c.contact_email IS NOT NULL AND BTRIM(c.contact_email) <> '' AND COALESCE(c.contact_provenance -> 'contact_email' ->> 'supportingPageScope', '') = ''
+                                    THEN 'missing_supporting_page_scope'
+                                WHEN np.contact_email IS NOT NULL
+                                    AND c.contact_email IS NOT NULL
+                                    AND LOWER(np.contact_email) = LOWER(c.contact_email)
+                                    AND COALESCE(c.contact_provenance -> 'contact_email' ->> 'supportingPageScope', '') NOT IN ('chapter_site', 'school_affiliation_page', 'nationals_chapter_page')
+                                    THEN 'matches_national_profile'
+                                ELSE NULL
+                            END AS issue
+                        FROM chapters c
+                        JOIN fraternities f ON f.id = c.fraternity_id
+                        LEFT JOIN national_profiles np ON np.fraternity_slug = f.slug
+                        UNION ALL
+                        SELECT
+                            c.slug AS chapter_slug,
+                            f.slug AS fraternity_slug,
+                            'instagram_url'::text AS field_name,
+                            c.instagram_url::text AS field_value,
+                            COALESCE(c.contact_provenance -> 'instagram_url' ->> 'reasonCode', '') AS reason_code,
+                            COALESCE(c.contact_provenance -> 'instagram_url' ->> 'supportingPageScope', '') AS supporting_page_scope,
+                            np.instagram_url::text AS national_value,
+                            CASE
+                                WHEN c.instagram_url IS NOT NULL AND BTRIM(c.instagram_url) <> '' AND COALESCE(c.contact_provenance -> 'instagram_url' ->> 'reasonCode', '') = ''
+                                    THEN 'missing_reason_code'
+                                WHEN c.instagram_url IS NOT NULL AND BTRIM(c.instagram_url) <> '' AND COALESCE(c.contact_provenance -> 'instagram_url' ->> 'supportingPageScope', '') = ''
+                                    THEN 'missing_supporting_page_scope'
+                                WHEN np.instagram_url IS NOT NULL
+                                    AND c.instagram_url IS NOT NULL
+                                    AND LOWER(np.instagram_url) = LOWER(c.instagram_url)
+                                    AND COALESCE(c.contact_provenance -> 'instagram_url' ->> 'supportingPageScope', '') NOT IN ('chapter_site', 'school_affiliation_page', 'nationals_chapter_page')
+                                    THEN 'matches_national_profile'
+                                ELSE NULL
+                            END AS issue
+                        FROM chapters c
+                        JOIN fraternities f ON f.id = c.fraternity_id
+                        LEFT JOIN national_profiles np ON np.fraternity_slug = f.slug
+                    )
+                    SELECT
+                        issue,
+                        chapter_slug,
+                        fraternity_slug,
+                        field_name,
+                        field_value,
+                        NULLIF(reason_code, '') AS reason_code,
+                        NULLIF(supporting_page_scope, '') AS supporting_page_scope,
+                        national_value
+                    FROM flagged
+                    WHERE issue IS NOT NULL
+                    ORDER BY issue ASC, fraternity_slug ASC, chapter_slug ASC, field_name ASC
+                    LIMIT %(limit)s
+                    """,
+                    {"limit": max(1, int(limit))},
+                )
+                samples = [dict(row) for row in cursor.fetchall()]
+
+        return {
+            "captured_at": _utc_now_iso(),
+            "accepted_rows_missing_reason_code": int(counts.get("missing_reason_code", 0) or 0),
+            "accepted_rows_missing_supporting_page_scope": int(counts.get("missing_supporting_page_scope", 0) or 0),
+            "accepted_rows_matching_national_profile": int(counts.get("matches_national_profile", 0) or 0),
+            "samples": samples,
+        }
+
+    def enrichment_shadow_policy_report(
+        self,
+        *,
+        limit: int = 50,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        include_preflight: bool = True,
+        probes: int | None = None,
+        preflight_snapshot: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        if preflight_snapshot is None and include_preflight:
+            preflight_snapshot = self.search_preflight(probes=probes)
+
+        provider_window_state = _provider_window_state_from_preflight(preflight_snapshot)
+        effective_runtime_mode = self._settings.crawler_adaptive_train_default_runtime_mode or "adaptive_assisted"
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            policy = AdaptivePolicy(
+                epsilon=self._settings.crawler_adaptive_epsilon,
+                policy_version=self._settings.crawler_policy_version,
+                live_epsilon=self._settings.crawler_adaptive_live_epsilon,
+                train_epsilon=self._settings.crawler_adaptive_train_epsilon,
+                risk_timeout_weight=self._settings.crawler_adaptive_risk_timeout_weight,
+                risk_requeue_weight=self._settings.crawler_adaptive_risk_requeue_weight,
+            )
+            snapshot = repository.load_latest_policy_snapshot(
+                policy_version=policy.policy_version,
+                runtime_mode=effective_runtime_mode,
+            )
+            payload = snapshot.get("model_payload") if isinstance(snapshot, dict) else None
+            if isinstance(payload, dict):
+                policy.load_snapshot(payload)
+            jobs = repository.list_queued_field_jobs_for_triage(
+                limit=max(1, int(limit)),
+                source_slug=source_slug,
+                field_name=field_name,
+            )
+
+        recommended_actions: dict[str, int] = {}
+        samples: list[dict[str, object]] = []
+        authoritative_ready = 0
+        provider_dependent = 0
+
+        for job in jobs:
+            context = _build_enrichment_shadow_context(job, provider_window_state)
+            if bool(context.get("supporting_page_present")):
+                authoritative_ready += 1
+            else:
+                provider_dependent += 1
+            decisions = policy.choose_action(
+                [
+                    "parse_supporting_page",
+                    "verify_school",
+                    "verify_website",
+                    "search_web",
+                    "search_social",
+                    "defer",
+                    "stop_no_signal",
+                    "review_required",
+                ],
+                context=context,
+                template_profile=None,
+                mode="adaptive_shadow",
+            )
+            if not decisions:
+                continue
+            selected = decisions[0]
+            recommended_actions[selected.action_type] = int(recommended_actions.get(selected.action_type, 0) or 0) + 1
+            if len(samples) < min(max(5, int(limit)), 15):
+                samples.append(
+                    {
+                        "chapterSlug": job.chapter_slug,
+                        "fieldName": job.field_name,
+                        "queueState": job.queue_state,
+                        "recommendedAction": selected.action_type,
+                        "topActions": [
+                            {
+                                "actionType": decision.action_type,
+                                "score": decision.score,
+                            }
+                            for decision in decisions[:3]
+                        ],
+                        "context": {
+                            "supportingPagePresent": context.get("supporting_page_present"),
+                            "supportingPageScope": context.get("supporting_page_scope"),
+                            "providerWindowHealthy": context.get("provider_window_healthy"),
+                            "websitePrerequisiteUnmet": context.get("website_prerequisite_unmet"),
+                            "identityComplete": context.get("identity_complete"),
+                            "priorQueryCount": context.get("prior_query_count"),
+                        },
+                    }
+                )
+
+        ranked_actions = [
+            {"actionType": action_type, "count": count}
+            for action_type, count in sorted(recommended_actions.items(), key=lambda item: (-item[1], item[0]))
+        ]
+        return {
+            "captured_at": _utc_now_iso(),
+            "jobs_considered": len(jobs),
+            "authoritative_ready_jobs": authoritative_ready,
+            "provider_dependent_jobs": provider_dependent,
+            "provider_window_state": provider_window_state,
+            "recommended_actions": ranked_actions,
+            "samples": samples,
+        }
 
     def discover_source(self, fraternity_name: str) -> dict[str, object]:
         search_client = SearchClient(self._settings)
@@ -2146,6 +3255,452 @@ _SEARCH_PREFLIGHT_QUERIES = (
 )
 
 
+def _search_settings_from_preflight(settings: Settings, preflight_snapshot: dict[str, object] | None) -> Settings:
+    provider = (settings.crawler_search_provider or "").strip().lower()
+    if provider not in {"auto", "auto_free"}:
+        return settings
+
+    provider_health = (preflight_snapshot or {}).get("provider_health")
+    if not isinstance(provider_health, dict) or not provider_health:
+        return settings
+
+    base_order: list[str] = []
+    raw_order = (settings.crawler_search_provider_order_free or "").strip()
+    if raw_order:
+        for token in (part.strip().lower() for part in raw_order.split(",")):
+            if token and token not in base_order:
+                base_order.append(token)
+    if not base_order:
+        base_order = ["searxng_json", "serper_api", "tavily_api", "duckduckgo_html", "bing_html", "brave_html"]
+
+    successful: list[tuple[str, float, int, int, int]] = []
+    neutral: list[str] = []
+    degraded: list[str] = []
+
+    for index, provider_name in enumerate(base_order):
+        payload = provider_health.get(provider_name)
+        if not isinstance(payload, dict):
+            neutral.append(provider_name)
+            continue
+        attempts = int(payload.get("attempts", 0) or 0)
+        successes = int(payload.get("successes", 0) or 0)
+        request_error = int(payload.get("request_error", 0) or 0)
+        unavailable = int(payload.get("unavailable", 0) or 0)
+        success_rate = float(payload.get("success_rate", 0.0) or 0.0)
+
+        if successes > 0:
+            successful.append((provider_name, success_rate, successes, attempts, index))
+        elif attempts > 0 and (request_error + unavailable) >= attempts:
+            degraded.append(provider_name)
+        else:
+            neutral.append(provider_name)
+
+    if not successful:
+        return settings
+
+    ranked = [
+        provider_name
+        for provider_name, _, _, _, _ in sorted(
+            successful,
+            key=lambda item: (-item[1], -item[2], item[3], item[4]),
+        )
+    ]
+    new_order = ",".join(ranked + neutral + degraded)
+    if new_order == raw_order:
+        return settings
+    return settings.model_copy(update={"crawler_search_provider_order_free": new_order})
+
+
+
+
+def _probe_queries_from_preflight(preflight_snapshot: dict[str, object] | None) -> list[str]:
+    queries: list[str] = []
+    for item in (preflight_snapshot or {}).get("probe_outcomes") or []:
+        if not isinstance(item, dict):
+            continue
+        query = str(item.get("query") or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    return queries
+
+
+def _provider_window_success_rate(provider_health: dict[str, dict[str, object]] | None) -> float:
+    if not isinstance(provider_health, dict) or not provider_health:
+        return 1.0
+    attempts = 0
+    successes = 0
+    for payload in provider_health.values():
+        if not isinstance(payload, dict):
+            continue
+        attempts += int(payload.get("attempts", 0) or 0)
+        successes += int(payload.get("successes", 0) or 0)
+    if attempts <= 0:
+        return 1.0
+    return round(successes / attempts, 4)
+
+
+def _merge_unique_texts(*groups: list[str] | tuple[str, ...] | None) -> list[str]:
+    merged: list[str] = []
+    for group in groups:
+        for value in group or []:
+            text = str(value or "").strip()
+            if text and text not in merged:
+                merged.append(text)
+    return merged
+
+
+def _accuracy_recovery_metrics_payload(metrics) -> dict[str, int]:
+    if metrics is None:
+        return {
+            "complete_rows": 0,
+            "chapter_specific_contact_rows": 0,
+            "nationals_only_contact_rows": 0,
+            "inactive_validated_rows": 0,
+            "confirmed_absent_website_rows": 0,
+            "active_rows_with_chapter_specific_email": 0,
+            "active_rows_with_chapter_specific_instagram": 0,
+            "active_rows_with_any_contact": 0,
+            "total_chapters": 0,
+        }
+    return {
+        "complete_rows": int(getattr(metrics, "complete_rows", 0) or 0),
+        "chapter_specific_contact_rows": int(getattr(metrics, "chapter_specific_contact_rows", 0) or 0),
+        "nationals_only_contact_rows": int(getattr(metrics, "nationals_only_contact_rows", 0) or 0),
+        "inactive_validated_rows": int(getattr(metrics, "inactive_validated_rows", 0) or 0),
+        "confirmed_absent_website_rows": int(getattr(metrics, "confirmed_absent_website_rows", 0) or 0),
+        "active_rows_with_chapter_specific_email": int(getattr(metrics, "active_rows_with_chapter_specific_email", 0) or 0),
+        "active_rows_with_chapter_specific_instagram": int(getattr(metrics, "active_rows_with_chapter_specific_instagram", 0) or 0),
+        "active_rows_with_any_contact": int(getattr(metrics, "active_rows_with_any_contact", 0) or 0),
+        "total_chapters": int(getattr(metrics, "total_chapters", 0) or 0),
+    }
+
+
+def _field_job_batch_delta_payload(before_metrics, after_metrics, *, processed: int) -> dict[str, object]:
+    before_payload = _accuracy_recovery_metrics_payload(before_metrics)
+    after_payload = _accuracy_recovery_metrics_payload(after_metrics)
+    new_complete_rows = max(0, after_payload["complete_rows"] - before_payload["complete_rows"])
+    new_inactive_validated_rows = max(0, after_payload["inactive_validated_rows"] - before_payload["inactive_validated_rows"])
+    new_confirmed_absent_website_rows = max(0, after_payload["confirmed_absent_website_rows"] - before_payload["confirmed_absent_website_rows"])
+    productive_numerator = new_complete_rows + new_inactive_validated_rows + new_confirmed_absent_website_rows
+    return {
+        "accuracy_recovery_before": before_payload,
+        "accuracy_recovery_after": after_payload,
+        "new_complete_rows": new_complete_rows,
+        "new_inactive_validated_rows": new_inactive_validated_rows,
+        "new_confirmed_absent_website_rows": new_confirmed_absent_website_rows,
+        "productive_yield": round(productive_numerator / processed, 4) if processed > 0 else 0.0,
+    }
+
+
+def _provider_order_from_settings(settings: Settings) -> list[str]:
+    raw_order = str(getattr(settings, "crawler_search_provider_order_free", "") or "").strip()
+    base_order: list[str] = []
+    if raw_order:
+        for token in (part.strip().lower() for part in raw_order.split(",")):
+            if token and token not in base_order:
+                base_order.append(token)
+    if not base_order:
+        base_order = ["searxng_json", "serper_api", "tavily_api", "duckduckgo_html", "bing_html", "brave_html"]
+    return base_order
+
+
+def _all_attempted_providers_below_threshold(
+    preflight_snapshot: dict[str, object] | None,
+    settings: Settings,
+    *,
+    min_success_rate: float,
+) -> bool:
+    provider_health = (preflight_snapshot or {}).get("provider_health")
+    if not isinstance(provider_health, dict) or not provider_health:
+        return False
+    attempted_rates: list[float] = []
+    for provider_name in _provider_order_from_settings(settings):
+        payload = provider_health.get(provider_name)
+        if not isinstance(payload, dict):
+            continue
+        attempts = int(payload.get("attempts", 0) or 0)
+        if attempts < 4:
+            continue
+        attempted_rates.append(float(payload.get("success_rate", 0.0) or 0.0))
+    return bool(attempted_rates) and all(rate < min_success_rate for rate in attempted_rates)
+
+
+def _reorder_search_settings_from_window(
+    settings: Settings,
+    preflight_snapshot: dict[str, object] | None,
+    *,
+    min_success_rate: float,
+) -> Settings:
+    provider = (settings.crawler_search_provider or "").strip().lower()
+    if provider not in {"auto", "auto_free"}:
+        return settings
+    provider_health = (preflight_snapshot or {}).get("provider_health")
+    if not isinstance(provider_health, dict) or not provider_health:
+        return settings
+    base_order = _provider_order_from_settings(settings)
+    ranked: list[tuple[str, float, int]] = []
+    stable: list[str] = []
+    demoted: list[str] = []
+    for index, provider_name in enumerate(base_order):
+        payload = provider_health.get(provider_name)
+        if not isinstance(payload, dict):
+            stable.append(provider_name)
+            continue
+        attempts = int(payload.get("attempts", 0) or 0)
+        success_rate = float(payload.get("success_rate", 0.0) or 0.0)
+        if attempts >= 4 and success_rate >= min_success_rate:
+            ranked.append((provider_name, success_rate, index))
+            continue
+        if index < 2 and attempts >= 4 and success_rate < min_success_rate:
+            demoted.append(provider_name)
+            continue
+        stable.append(provider_name)
+    ranked_names = [name for name, _, _ in sorted(ranked, key=lambda item: (-item[1], item[2]))]
+    new_order = ranked_names + [name for name in stable if name not in ranked_names] + [name for name in demoted if name not in ranked_names]
+    normalized = ",".join(dict.fromkeys(new_order or base_order))
+    if normalized == str(getattr(settings, "crawler_search_provider_order_free", "") or ""):
+        return settings
+    return settings.model_copy(update={"crawler_search_provider_order_free": normalized})
+
+
+def _merge_field_job_chunk_results(aggregate: dict[str, object], result: dict[str, object]) -> dict[str, object]:
+    merged = dict(aggregate)
+    for key in (
+        "processed",
+        "requeued",
+        "failed_terminal",
+        "runtime_fallback_count",
+        "provider_degraded_deferred",
+        "dependency_wait_deferred",
+        "supporting_page_resolved",
+        "supporting_page_contact_resolved",
+        "external_search_contact_resolved",
+        "enrichment_observations_logged",
+        "mid_batch_provider_rechecks",
+        "mid_batch_provider_reorders",
+    ):
+        merged[key] = int(merged.get(key, 0) or 0) + int(result.get(key, 0) or 0)
+    merged["runtime_mode_used"] = str(result.get("runtime_mode_used") or merged.get("runtime_mode_used") or "legacy")
+    merged["preflight_probe_queries"] = _merge_unique_texts(merged.get("preflight_probe_queries") or [], result.get("preflight_probe_queries") or [])
+    merged["chapter_search_queries"] = _merge_unique_texts(merged.get("chapter_search_queries") or [], result.get("chapter_search_queries") or [])
+    if isinstance(result.get("provider_window_state"), dict):
+        merged["provider_window_state"] = dict(result["provider_window_state"])
+    return merged
+
+
+def _preflight_snapshot_is_healthy(preflight_snapshot: dict[str, object] | None) -> bool:
+    if preflight_snapshot is None:
+        return False
+    return bool(preflight_snapshot.get("healthy", False))
+
+
+def _provider_window_state_from_preflight(
+    preflight_snapshot: dict[str, object] | None,
+    *,
+    degraded_mode: bool = False,
+) -> dict[str, object]:
+    provider_health = (preflight_snapshot or {}).get("provider_health")
+    captured_at = str((preflight_snapshot or {}).get("captured_at") or _utc_now_iso())
+    if not isinstance(provider_health, dict):
+        healthy = not degraded_mode
+        degraded_reason = "degraded_mode_enabled" if degraded_mode else "no_preflight_snapshot"
+        general = {
+            "lane": "general_web_search",
+            "window_started_at": captured_at,
+            "window_success_rate": 1.0 if healthy else 0.0,
+            "attempt_count": 0,
+            "request_error_count": 0,
+            "challenge_or_anomaly_count": 0,
+            "healthy": healthy,
+            "degraded_reason": degraded_reason if not healthy else "",
+            "providers": [],
+        }
+        return {
+            "general_web_search": general,
+            "social_search": {
+                **general,
+                "lane": "social_search",
+                "healthy": healthy,
+                "degraded_reason": degraded_reason if not healthy else "",
+                "source_mode": "shares_general_provider_pool",
+            },
+            "authoritative_fetch": {
+                "lane": "authoritative_fetch",
+                "window_started_at": captured_at,
+                "window_success_rate": 1.0,
+                "attempt_count": 0,
+                "request_error_count": 0,
+                "challenge_or_anomaly_count": 0,
+                "healthy": True,
+                "degraded_reason": "",
+                "source_mode": "independent_of_search_provider",
+            },
+        }
+
+    attempt_count = 0
+    success_count = 0
+    request_error_count = 0
+    challenge_or_anomaly_count = 0
+    providers: list[dict[str, object]] = []
+    for provider_name, payload in provider_health.items():
+        if not isinstance(payload, dict):
+            continue
+        attempts = int(payload.get("attempts", 0) or 0)
+        successes = int(payload.get("successes", 0) or 0)
+        request_errors = int(payload.get("request_error", 0) or 0)
+        unavailable = int(payload.get("unavailable", 0) or 0)
+        challenge_guess = 0
+        for key in payload.keys():
+            if "challenge" in str(key).lower() or "anomaly" in str(key).lower():
+                challenge_guess += int(payload.get(key, 0) or 0)
+        attempt_count += attempts
+        success_count += successes
+        request_error_count += request_errors
+        challenge_or_anomaly_count += challenge_guess
+        providers.append(
+            {
+                "provider": str(provider_name),
+                "attempt_count": attempts,
+                "success_count": successes,
+                "request_error_count": request_errors,
+                "challenge_or_anomaly_count": challenge_guess,
+                "unavailable_count": unavailable,
+                "window_success_rate": round(float(payload.get("success_rate", 0.0) or 0.0), 4),
+            }
+        )
+    healthy = bool((preflight_snapshot or {}).get("healthy", False)) and not degraded_mode
+    window_success_rate = round(success_count / attempt_count, 4) if attempt_count > 0 else (1.0 if healthy else 0.0)
+    degraded_reason = ""
+    if not healthy:
+        degraded_reason = "degraded_mode_enabled" if degraded_mode else str((preflight_snapshot or {}).get("reason") or "provider_success_below_threshold")
+    general = {
+        "lane": "general_web_search",
+        "window_started_at": captured_at,
+        "window_success_rate": window_success_rate,
+        "attempt_count": attempt_count,
+        "request_error_count": request_error_count,
+        "challenge_or_anomaly_count": challenge_or_anomaly_count,
+        "healthy": healthy,
+        "degraded_reason": degraded_reason,
+        "providers": providers,
+    }
+    return {
+        "general_web_search": general,
+        "social_search": {
+            **general,
+            "lane": "social_search",
+            "source_mode": "shares_general_provider_pool",
+        },
+        "authoritative_fetch": {
+            "lane": "authoritative_fetch",
+            "window_started_at": captured_at,
+            "window_success_rate": 1.0,
+            "attempt_count": 0,
+            "request_error_count": 0,
+            "challenge_or_anomaly_count": 0,
+            "healthy": True,
+            "degraded_reason": "",
+            "source_mode": "independent_of_search_provider",
+        },
+    }
+
+
+def _cached_school_policy_is_decisive(record: object) -> bool:
+    status = str(getattr(record, "greek_life_status", "") or "").strip().lower()
+    source_type = str(getattr(record, "evidence_source_type", "") or "").strip().lower()
+    if source_type != "official_school":
+        return False
+    return status in {"allowed", "banned"}
+
+
+def _cached_chapter_activity_is_decisive(record: object) -> bool:
+    status = str(getattr(record, "chapter_activity_status", "") or "").strip().lower()
+    source_type = str(getattr(record, "evidence_source_type", "") or "").strip().lower()
+    if source_type != "official_school":
+        return False
+    return status in {"confirmed_active", "confirmed_inactive"}
+
+
+def _job_supporting_page_ready(job: FieldJob) -> bool:
+    field_states = dict(job.field_states or {})
+    website_state = str(field_states.get("website_url") or "").strip().lower()
+    if job.website_url and website_state not in {"", "missing", "low_confidence"}:
+        return True
+    contact_resolution = job.payload.get("contactResolution") if isinstance(job.payload.get("contactResolution"), dict) else {}
+    supporting_page_url = str(contact_resolution.get("supportingPageUrl") or "").strip()
+    supporting_page_scope = str(contact_resolution.get("supportingPageScope") or contact_resolution.get("pageScope") or "").strip().lower()
+    if supporting_page_url and supporting_page_scope in {
+        "chapter_site",
+        "school_affiliation_page",
+        "nationals_chapter_page",
+    }:
+        return True
+    if website_state == "confirmed_absent":
+        if job.contact_email or job.instagram_url:
+            return True
+        if supporting_page_url and supporting_page_scope in {"school_affiliation_page", "nationals_chapter_page"}:
+            return True
+    return False
+
+
+def _build_enrichment_shadow_context(job: FieldJob, provider_window_state: dict[str, object] | None) -> dict[str, object]:
+    contact_resolution = job.payload.get("contactResolution") if isinstance(job.payload.get("contactResolution"), dict) else {}
+    general_lane = (provider_window_state or {}).get("general_web_search")
+    if not isinstance(general_lane, dict):
+        general_lane = {}
+    supporting_page_url = str(contact_resolution.get("supportingPageUrl") or "").strip()
+    supporting_page_scope = str(contact_resolution.get("supportingPageScope") or contact_resolution.get("pageScope") or "").strip().lower()
+    target_field_value = {
+        FIELD_JOB_FIND_WEBSITE: job.website_url,
+        FIELD_JOB_VERIFY_WEBSITE: job.website_url,
+        FIELD_JOB_FIND_EMAIL: job.contact_email,
+        FIELD_JOB_FIND_INSTAGRAM: job.instagram_url,
+        FIELD_JOB_VERIFY_SCHOOL: job.university_name,
+    }.get(job.field_name)
+    prior_query_count = len(list(job.payload.get("provider_attempts") or [])) + int(job.payload.get("terminal_no_signal_count", 0) or 0)
+    return {
+        "field_type": job.field_name,
+        "supporting_page_present": bool(_job_supporting_page_ready(job) or supporting_page_url),
+        "supporting_page_scope": supporting_page_scope,
+        "website_prerequisite_unmet": bool(job.field_name == FIELD_JOB_FIND_EMAIL and not _job_supporting_page_ready(job)),
+        "school_validation_status": str(job.payload.get("schoolValidationStatus") or "").strip().lower(),
+        "provider_window_healthy": bool(general_lane.get("healthy", False)),
+        "provider_window_degraded": not bool(general_lane.get("healthy", False)),
+        "prior_query_count": prior_query_count,
+        "identity_complete": bool(job.chapter_name and job.university_name and job.fraternity_slug),
+        "has_candidate_website": bool(job.website_url),
+        "has_target_value": bool(target_field_value),
+        "needs_authoritative_validation": bool(job.field_name in {FIELD_JOB_VERIFY_SCHOOL, FIELD_JOB_VERIFY_WEBSITE}),
+        "timeout_risk": 1.0 if not bool(general_lane.get("healthy", False)) else 0.15,
+        "requeue_risk": 0.8 if job.queue_state == "deferred" else 0.2,
+    }
+
+
+def _infer_repair_family(job: FieldJob, *, repaired_university: str | None = None) -> str:
+    chapter_name = str(job.chapter_name or "").strip()
+    chapter_slug = str(job.chapter_slug or "").strip().lower()
+    university_name = str(repaired_university or job.university_name or "").strip()
+    if not university_name:
+        return "school_name_normalizer"
+    if re.match(r"^(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)\b", chapter_name.lower()):
+        return "state_prefix_resolver"
+    if any(token in chapter_slug for token in ("unknown", "--", "chapter-", "-main-")) or re.search(r"\d{3,}", chapter_name):
+        return "chapter_designation_repair"
+    return "duplicate_identity_merge"
+
+
+def _increment_repair_family_summary(summary: dict[str, int], repair_family: str, amount: int) -> None:
+    mapping = {
+        "state_prefix_resolver": "statePrefixResolver",
+        "school_name_normalizer": "schoolNameNormalizer",
+        "chapter_designation_repair": "chapterDesignationRepair",
+        "duplicate_identity_merge": "duplicateIdentityMerge",
+    }
+    key = mapping.get(repair_family)
+    if key is None:
+        return
+    summary[key] = int(summary.get(key, 0) or 0) + int(amount or 0)
+
 def _slugify(value: str) -> str:
     return "-".join(token for token in "".join(ch if ch.isalnum() else " " for ch in value.lower()).split())
 
@@ -2219,12 +3774,15 @@ def _probe_url(url: str, settings: Settings) -> tuple[int | None, str | None, st
         return None, fallback_url, str(exc)
 
 
+_CAPITALIZED_SCHOOL_WORD = r"[A-Z][A-Za-z&.'-]*"
+_CAPITALIZED_SCHOOL_PHRASE = rf"{_CAPITALIZED_SCHOOL_WORD}(?: {_CAPITALIZED_SCHOOL_WORD}){{0,7}}"
+
 _REPAIR_SCHOOL_PATTERNS = (
-    re.compile(r"\b(University of [A-Z][A-Za-z&.' -]{2,80})\b"),
-    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} State University)\b"),
-    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} University)\b"),
-    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} College)\b"),
-    re.compile(r"\b([A-Z][A-Za-z&.' -]{2,80} Institute(?: of [A-Z][A-Za-z&.' -]{2,80})?)\b"),
+    re.compile(rf"\b(University of {_CAPITALIZED_SCHOOL_PHRASE})\b"),
+    re.compile(rf"\b({_CAPITALIZED_SCHOOL_PHRASE} State University)\b"),
+    re.compile(rf"\b({_CAPITALIZED_SCHOOL_PHRASE} University)\b"),
+    re.compile(rf"\b({_CAPITALIZED_SCHOOL_PHRASE} College)\b"),
+    re.compile(rf"\b({_CAPITALIZED_SCHOOL_PHRASE} Institute(?: of {_CAPITALIZED_SCHOOL_PHRASE})?)\b"),
 )
 
 

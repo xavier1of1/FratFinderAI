@@ -19,6 +19,17 @@ BASE_ACTION_PRIORS = {
     "stop_branch": -1.0,
 }
 
+ENRICHMENT_ACTION_PRIORS = {
+    "parse_supporting_page": 1.9,
+    "verify_school": 1.4,
+    "verify_website": 1.2,
+    "search_web": 0.45,
+    "search_social": 0.3,
+    "defer": 0.55,
+    "stop_no_signal": -0.55,
+    "review_required": -0.8,
+}
+
 EXTRACTION_ACTIONS = {
     "extract_locator_api",
     "extract_script_json",
@@ -36,10 +47,23 @@ NAVIGATION_ACTIONS = {
     "review_branch",
 }
 
+ENRICHMENT_ACTIONS = {
+    "parse_supporting_page",
+    "verify_school",
+    "verify_website",
+    "search_web",
+    "search_social",
+    "defer",
+    "stop_no_signal",
+    "review_required",
+}
+
 RISKY_ACTIONS = {
     "expand_internal_links",
     "expand_map_children",
     "extract_locator_api",
+    "search_web",
+    "search_social",
 }
 
 
@@ -68,6 +92,7 @@ class AdaptivePolicy:
         self._risk_requeue_weight = max(0.0, risk_requeue_weight)
         self._navigation_stats: dict[str, dict[str, float]] = {}
         self._extraction_stats: dict[str, dict[str, float]] = {}
+        self._enrichment_stats: dict[str, dict[str, float]] = {}
 
     @property
     def policy_version(self) -> str:
@@ -132,10 +157,12 @@ class AdaptivePolicy:
 
         nav = self._restore_action_map(payload.get("navigationActions"))
         ext = self._restore_action_map(payload.get("extractionActions"))
-        if not nav and not ext:
+        enrichment = self._restore_action_map(payload.get("enrichmentActions"))
+        if not nav and not ext and not enrichment:
             return False
         self._navigation_stats = nav
         self._extraction_stats = ext
+        self._enrichment_stats = enrichment
         return True
 
     def snapshot(self) -> dict[str, Any]:
@@ -147,6 +174,7 @@ class AdaptivePolicy:
             "riskRequeueWeight": self._risk_requeue_weight,
             "navigationActions": self._snapshot_bucket(self._navigation_stats),
             "extractionActions": self._snapshot_bucket(self._extraction_stats),
+            "enrichmentActions": self._snapshot_bucket(self._enrichment_stats),
         }
 
     def _snapshot_bucket(self, bucket: dict[str, dict[str, float]]) -> dict[str, dict[str, float | int]]:
@@ -179,6 +207,8 @@ class AdaptivePolicy:
         context: dict[str, Any],
         template_profile: TemplateProfile | None,
     ) -> PolicyDecision:
+        if action in ENRICHMENT_ACTIONS:
+            return self._score_enrichment_action(action, context=context)
         prior = BASE_ACTION_PRIORS.get(action, 0.0)
         page_type = str(context.get("page_type") or "")
         probable_role = str(context.get("probable_page_role") or "")
@@ -245,6 +275,76 @@ class AdaptivePolicy:
             },
         )
 
+    def _score_enrichment_action(self, action: str, *, context: dict[str, Any]) -> PolicyDecision:
+        prior = ENRICHMENT_ACTION_PRIORS.get(action, 0.0)
+        field_type = str(context.get("field_type") or "")
+        supporting_page_present = bool(context.get("supporting_page_present", False))
+        supporting_page_scope = str(context.get("supporting_page_scope") or "")
+        website_prerequisite_unmet = bool(context.get("website_prerequisite_unmet", False))
+        school_validation_status = str(context.get("school_validation_status") or "")
+        provider_window_healthy = bool(context.get("provider_window_healthy", False))
+        provider_window_degraded = bool(context.get("provider_window_degraded", False))
+        prior_query_count = int(context.get("prior_query_count", 0) or 0)
+        identity_complete = bool(context.get("identity_complete", False))
+        has_candidate_website = bool(context.get("has_candidate_website", False))
+        has_target_value = bool(context.get("has_target_value", False))
+        needs_authoritative_validation = bool(context.get("needs_authoritative_validation", False))
+        timeout_risk = float(context.get("timeout_risk", 0.0) or 0.0)
+        requeue_risk = float(context.get("requeue_risk", 0.0) or 0.0)
+
+        structural_bonus = 0.0
+        if action == "parse_supporting_page" and supporting_page_present:
+            structural_bonus += 2.0
+            if supporting_page_scope in {"chapter_site", "school_affiliation_page", "nationals_chapter_page"}:
+                structural_bonus += 0.45
+        if action == "verify_school" and (
+            field_type == "verify_school"
+            or school_validation_status in {"unknown", ""}
+            or needs_authoritative_validation
+        ):
+            structural_bonus += 1.5
+        if action == "verify_website" and (field_type in {"verify_website", "find_website"} or has_candidate_website):
+            structural_bonus += 1.35
+        if action == "search_web" and provider_window_healthy and not supporting_page_present:
+            structural_bonus += 1.0
+        if action == "search_social" and provider_window_healthy and field_type == "find_instagram":
+            structural_bonus += 0.95
+        if action == "defer" and (provider_window_degraded or website_prerequisite_unmet or not identity_complete):
+            structural_bonus += 1.45
+        if action == "stop_no_signal" and prior_query_count >= 3 and not supporting_page_present and not provider_window_healthy:
+            structural_bonus += 0.85
+        if action == "review_required" and not identity_complete and has_target_value:
+            structural_bonus += 0.7
+
+        action_stats = self._bucket_for_action(action).get(action, {"count": 0.0, "reward_sum": 0.0})
+        observed_avg = action_stats["reward_sum"] / max(action_stats["count"], 1.0)
+        observed_bonus = observed_avg * 0.2 if action_stats["count"] else 0.0
+
+        risk_penalty = self._risk_penalty(action, timeout_risk=timeout_risk, requeue_risk=requeue_risk)
+        score_components = {
+            "prior": prior,
+            "structural_bonus": structural_bonus,
+            "observed_bonus": observed_bonus,
+            "risk_penalty": risk_penalty,
+        }
+        predicted_reward = round(sum(score_components.values()), 4)
+        return PolicyDecision(
+            action_type=action,
+            score=predicted_reward,
+            score_components=score_components,
+            predicted_reward=predicted_reward,
+            context={
+                "fieldType": field_type,
+                "supportingPagePresent": supporting_page_present,
+                "supportingPageScope": supporting_page_scope,
+                "providerWindowHealthy": provider_window_healthy,
+                "providerWindowDegraded": provider_window_degraded,
+                "websitePrerequisiteUnmet": website_prerequisite_unmet,
+                "priorQueryCount": prior_query_count,
+                "identityComplete": identity_complete,
+            },
+        )
+
     def _risk_penalty(self, action: str, *, timeout_risk: float, requeue_risk: float) -> float:
         if action not in RISKY_ACTIONS:
             return 0.0
@@ -253,6 +353,8 @@ class AdaptivePolicy:
         return -(timeout_term + requeue_term)
 
     def _bucket_for_action(self, action: str) -> dict[str, dict[str, float]]:
+        if action in ENRICHMENT_ACTIONS:
+            return self._enrichment_stats
         if action in EXTRACTION_ACTIONS:
             return self._extraction_stats
         if action in NAVIGATION_ACTIONS:

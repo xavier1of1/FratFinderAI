@@ -280,7 +280,7 @@ pnpm test
 Crawler tests only:
 
 ```bash
-pytest services/crawler/src/fratfinder_crawler/tests
+python -m pytest services/crawler/src/fratfinder_crawler/tests --cov=fratfinder_crawler --cov-report=term-missing --cov-fail-under=70
 ```
 
 Contracts tests only:

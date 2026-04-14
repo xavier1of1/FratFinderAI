@@ -551,6 +551,197 @@ def test_request_graph_completes_when_only_deferred_queue_remains():
     assert request_repository.request.progress["contactResolution"]["terminalNoSignal"] == 1
 
 
+def test_request_graph_completes_with_small_residual_queue_when_provider_is_degraded():
+    request = replace(_request(), config={"fieldJobWorkers": 2, "fieldJobLimitPerCycle": 20, "maxEnrichmentCycles": 1, "pauseMs": 0})
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 4, "running": 0, "done": 6, "failed": 0, "queued_actionable": 4, "queued_deferred": 0, "done_updated": 3},
+        {"field": "find_email", "queued": 4, "running": 0, "done": 7, "failed": 0, "queued_actionable": 4, "queued_deferred": 0, "done_updated": 1},
+        {"field": "find_instagram", "queued": 4, "running": 0, "done": 8, "failed": 0, "queued_actionable": 4, "queued_deferred": 0, "done_provider_degraded": 2, "done_updated": 2},
+    ]
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 779,
+            "status": "succeeded",
+            "pages_processed": 8,
+            "records_seen": 15,
+            "records_upserted": 10,
+            "review_items_created": 0,
+            "field_jobs_created": 12,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    def process_field_jobs(**_: object) -> dict[str, int]:
+        return {
+            "processed": 0,
+            "requeued": 12,
+            "failed_terminal": 0,
+            "runtime_mode_used": "langgraph_primary",
+        }
+
+    runtime = _build_runtime(
+        request_repository,
+        _FakeCrawlerRepository(),
+        run_crawl=run_crawl,
+        process_field_jobs=process_field_jobs,
+        search_preflight=lambda: {
+            "healthy": False,
+            "success_rate": 0.0,
+            "provider_health": {
+                "searxng_json": {"attempts": 4, "success_rate": 0.0},
+            },
+        },
+    )
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert summary["terminalReason"] == "completed_deferred_provider_recovery"
+    assert summary["queueRemaining"] == 12
+    assert request_repository.request.stage == "completed"
+    assert request_repository.request.status == "succeeded"
+    assert request_repository.request.progress["analytics"]["enrichment"]["completionMode"] == "deferred_provider_residual"
+    assert request_repository.request.progress["analytics"]["enrichment"]["residualActionableAtCompletion"] == 12
+
+
+def test_request_graph_still_fails_when_residual_queue_is_too_large_even_if_provider_is_degraded():
+    request = replace(_request(), config={"fieldJobWorkers": 2, "fieldJobLimitPerCycle": 20, "maxEnrichmentCycles": 1, "pauseMs": 0})
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 20, "running": 0, "done": 2, "failed": 0, "queued_actionable": 20, "queued_deferred": 0},
+        {"field": "find_email", "queued": 20, "running": 0, "done": 1, "failed": 0, "queued_actionable": 20, "queued_deferred": 0},
+        {"field": "find_instagram", "queued": 20, "running": 0, "done": 1, "failed": 0, "queued_actionable": 20, "queued_deferred": 0},
+    ]
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 780,
+            "status": "succeeded",
+            "pages_processed": 4,
+            "records_seen": 5,
+            "records_upserted": 4,
+            "review_items_created": 0,
+            "field_jobs_created": 60,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    runtime = _build_runtime(
+        request_repository,
+        _FakeCrawlerRepository(),
+        run_crawl=run_crawl,
+        process_field_jobs=lambda **_: {"processed": 0, "requeued": 60, "failed_terminal": 0, "runtime_mode_used": "langgraph_primary"},
+        search_preflight=lambda: {
+            "healthy": False,
+            "success_rate": 0.0,
+            "provider_health": {
+                "searxng_json": {"attempts": 4, "success_rate": 0.0},
+            },
+        },
+    )
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "failed"
+    assert summary["terminalReason"] == "budget_exhausted"
+    assert request_repository.request.stage == "failed"
+
+
+def test_request_graph_completes_early_when_small_residual_queue_stalls_under_provider_degradation():
+    request = replace(_request(), config={"fieldJobWorkers": 2, "fieldJobLimitPerCycle": 20, "maxEnrichmentCycles": 16, "pauseMs": 0})
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 4, "running": 0, "done": 6, "failed": 0, "queued_actionable": 4},
+        {"field": "find_email", "queued": 4, "running": 0, "done": 5, "failed": 0, "queued_actionable": 4},
+        {"field": "find_instagram", "queued": 4, "running": 0, "done": 4, "failed": 0, "queued_actionable": 4, "done_provider_degraded": 1},
+    ]
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 781,
+            "status": "succeeded",
+            "pages_processed": 6,
+            "records_seen": 9,
+            "records_upserted": 7,
+            "review_items_created": 0,
+            "field_jobs_created": 12,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    def process_field_jobs(**_: object) -> dict[str, int]:
+        return {
+            "processed": 0,
+            "requeued": 12,
+            "failed_terminal": 0,
+            "runtime_mode_used": "langgraph_primary",
+        }
+
+    runtime = _build_runtime(
+        request_repository,
+        _FakeCrawlerRepository(),
+        run_crawl=run_crawl,
+        process_field_jobs=process_field_jobs,
+        search_preflight=lambda: {
+            "healthy": False,
+            "success_rate": 0.0,
+            "provider_health": {
+                "searxng_json": {"attempts": 4, "success_rate": 0.0},
+            },
+        },
+    )
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert summary["terminalReason"] == "completed_deferred_provider_recovery"
+    assert summary["queueRemaining"] == 12
+    assert request_repository.request.stage == "completed"
+    assert request_repository.request.progress["analytics"]["enrichment"]["completionMode"] == "deferred_provider_residual"
+
+
+def test_request_graph_completes_early_when_small_residual_queue_stalls_even_if_preflight_is_nominal():
+    request = replace(_request(), config={"fieldJobWorkers": 2, "fieldJobLimitPerCycle": 20, "maxEnrichmentCycles": 16, "pauseMs": 0})
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 5, "running": 0, "done": 6, "failed": 0, "queued_actionable": 5},
+        {"field": "find_email", "queued": 5, "running": 0, "done": 5, "failed": 0, "queued_actionable": 5},
+        {"field": "find_instagram", "queued": 4, "running": 0, "done": 4, "failed": 0, "queued_actionable": 4},
+    ]
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 782,
+            "status": "succeeded",
+            "pages_processed": 6,
+            "records_seen": 9,
+            "records_upserted": 7,
+            "review_items_created": 0,
+            "field_jobs_created": 12,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    runtime = _build_runtime(
+        request_repository,
+        _FakeCrawlerRepository(),
+        run_crawl=run_crawl,
+        process_field_jobs=lambda **_: {
+            "processed": 0,
+            "requeued": 14,
+            "failed_terminal": 0,
+            "runtime_mode_used": "langgraph_primary",
+        },
+        search_preflight=lambda: {
+            "healthy": True,
+            "success_rate": 1.0,
+            "provider_health": {
+                "bing_html": {"attempts": 4, "success_rate": 1.0},
+            },
+        },
+    )
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert summary["terminalReason"] == "completed_deferred_provider_recovery"
+    assert summary["queueRemaining"] == 14
+
+
 def test_request_graph_retries_zero_record_v3_crawl_with_alternate_policy():
     request = _request()
     request_repository = _FakeRequestRepository(request)

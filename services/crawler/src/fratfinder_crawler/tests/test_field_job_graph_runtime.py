@@ -33,6 +33,7 @@ class _FakeRepository:
     def __init__(self, jobs: list[FieldJob]):
         self.jobs = list(jobs)
         self.finished_runs: list[dict[str, object]] = []
+        self.claim_args: list[dict[str, object]] = []
 
     def start_field_job_graph_run(self, **kwargs):
         _ = kwargs
@@ -58,7 +59,14 @@ class _FakeRepository:
         _ = kwargs
 
     def claim_next_field_job(self, worker_id, source_slug=None, field_name=None, require_confident_website_for_email=False):
-        _ = worker_id, source_slug, field_name, require_confident_website_for_email
+        self.claim_args.append(
+            {
+                "worker_id": worker_id,
+                "source_slug": source_slug,
+                "field_name": field_name,
+                "require_confident_website_for_email": require_confident_website_for_email,
+            }
+        )
         return self.jobs.pop(0) if self.jobs else None
 
     def create_field_job_review_item(self, job, review_item):
@@ -121,3 +129,29 @@ def test_field_job_graph_runtime_marks_progressed_when_job_completes():
     assert repository.finished_runs[0]["status"] == "succeeded"
     assert repository.finished_runs[0]["summary"]["businessStatus"] == "progressed"
     assert repository.finished_runs[0]["summary"]["businessProgressCount"] == 1
+
+
+def test_field_job_graph_runtime_defaults_email_confidence_gate_to_false_when_engine_lacks_flag():
+    repository = _FakeRepository([_job()])
+    engine = SimpleNamespace(
+        process_claimed_job=lambda job: FieldJobResult(
+            chapter_updates={"website_url": "https://example.org/chapter"},
+            completed_payload={"status": "updated", "website_url": "https://example.org/chapter"},
+            field_state_updates={"website_url": "found"},
+        ),
+        _base_backoff_seconds=30,
+    )
+    runtime = FieldJobGraphRuntime(
+        repository=repository,
+        engine=engine,
+        worker_id="worker-1",
+        runtime_mode="langgraph_primary",
+        graph_durability="sync",
+        source_slug=None,
+        field_name=None,
+    )
+
+    result = runtime.process(limit=1)
+
+    assert result["processed"] == 1
+    assert repository.claim_args[0]["require_confident_website_for_email"] is False

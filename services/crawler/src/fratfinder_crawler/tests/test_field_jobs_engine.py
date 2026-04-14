@@ -7,13 +7,16 @@ from types import SimpleNamespace
 import pytest
 import requests
 
+from fratfinder_crawler.adaptive.policy import AdaptivePolicy
 from fratfinder_crawler.field_jobs import (
+    ActivityValidationDecision,
     CandidateMatch,
     FieldJobEngine,
     NationalsChapterEntry,
     RetryableJobError,
     SearchDocument,
     _email_local_part_has_identity,
+    _email_local_part_looks_generic_office,
     _fraternity_matches,
     _instagram_looks_relevant_to_job,
     _nationals_entry_match_score,
@@ -55,6 +58,7 @@ class FakeRepository:
         self.chapter_activities: dict[tuple[str, str], ChapterActivityRecord] = {}
         self.inactive_applied: list[dict[str, object]] = []
         self.completed_siblings: list[dict[str, object]] = []
+        self.enrichment_observations: list[object] = []
 
     def claim_next_field_job(self, worker_id: str, source_slug: str | None = None, field_name: str | None = None, require_confident_website_for_email: bool = False) -> FieldJob | None:
         self.claimed_source_slugs.append(source_slug)
@@ -77,6 +81,7 @@ class FakeRepository:
 
     def has_recent_transient_website_failures(self, chapter_id: str, min_failures: int = 2) -> bool:
         return False
+
 
     def complete_field_job(
         self,
@@ -216,6 +221,26 @@ class FakeRepository:
         self.completed_siblings.append(dict(kwargs))
         field_names = list(kwargs.get("field_names") or [])
         return len(field_names)
+
+    def append_enrichment_observation(self, observation):
+        self.enrichment_observations.append(observation)
+        return len(self.enrichment_observations)
+
+    def get_chapter_completion_signal(self, chapter_id: str):
+        _ = chapter_id
+        return {
+            "validated_active": True,
+            "chapter_safe_email": False,
+            "chapter_safe_instagram": False,
+            "complete_row": False,
+        }
+
+
+def test_generic_office_email_markers_cover_school_office_aliases():
+    assert _email_local_part_looks_generic_office("ifc@truman.edu")
+    assert _email_local_part_looks_generic_office("osfl@iu.edu")
+    assert _email_local_part_looks_generic_office("operator@wichita.edu")
+    assert _email_local_part_looks_generic_office("admission@william.jewell.edu")
 
 
 class FakeSearchClient:
@@ -1172,6 +1197,79 @@ def test_verify_school_match_creates_review_item_on_clear_mismatch():
     assert repo.completed[0][1] == {}
 
 
+def test_verify_school_match_uses_authoritative_activity_when_candidate_school_missing():
+    job = replace(
+        _job("verify_school_match", university_name="Ohio State University"),
+        payload={"sourceSlug": "sigma-chi-main"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    engine._get_or_resolve_school_policy = lambda _job: ActivityValidationDecision(school_policy_status="unknown")
+    engine._get_or_resolve_chapter_activity = lambda _job: ActivityValidationDecision(
+        chapter_activity_status="confirmed_active",
+        evidence_url="https://osu.edu/greek-life/chapters",
+        evidence_source_type="official_school",
+        reason_code="chapter_active",
+        source_snippet="Sigma Chi is listed as an active fraternity.",
+        confidence=0.98,
+        metadata={"decision": "confirmed_active"},
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][2]["university_name"] == "found"
+
+
+def test_verify_school_match_marks_inactive_when_authoritative_policy_banned():
+    job = replace(
+        _job("verify_school_match", university_name="Norwich University"),
+        payload={"sourceSlug": "theta-chi-main"},
+        fraternity_slug="theta-chi",
+        source_slug="theta-chi-main",
+        chapter_name="Alpha Chapter",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    engine._get_or_resolve_school_policy = lambda _job: ActivityValidationDecision(
+        school_policy_status="banned",
+        evidence_url="https://archives.norwich.edu/example.pdf",
+        evidence_source_type="official_school",
+        reason_code="school_policy_banned",
+        source_snippet="Fraternities are no longer fraternities by any definition.",
+        confidence=0.99,
+        metadata={"decision": "banned"},
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.inactive_applied[0]["reason_code"] == "school_policy_banned"
+
+
+def test_verify_school_match_uses_transient_network_when_authoritative_search_failed():
+    job = replace(
+        _job("verify_school_match", university_name="Southern Methodist University"),
+        payload={"sourceSlug": "delta-kappa-epsilon-main"},
+        fraternity_slug="delta-kappa-epsilon",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    engine._get_or_resolve_school_policy = lambda _job: ActivityValidationDecision(school_policy_status="unknown")
+    engine._get_or_resolve_chapter_activity = lambda _job: ActivityValidationDecision(chapter_activity_status="unknown")
+    engine._search_errors_encountered = True
+    engine._search_queries_attempted = 2
+    engine._search_queries_failed = 2
+    engine._last_search_failure_kind = "unavailable"
+    engine._search_fanout_aborted = True
+
+    with pytest.raises(RetryableJobError) as exc_info:
+        engine._verify_school_match(job)
+
+    assert exc_info.value.reason_code == "transient_network"
+    assert exc_info.value.preserve_attempt is True
+
+
 
 def test_field_job_engine_finds_obfuscated_email_from_chapter_website_html():
     job = _job("find_email", website_url="https://chapter.example.edu")
@@ -1590,6 +1688,25 @@ def test_build_search_queries_deemphasizes_greek_letter_chapter_names():
     assert '"sigma chi" "Willamette University" fraternity site:.edu -"sigma aldrich" -sigmaaldrich -millipore -merck' in school_queries
     assert '"sigma chi" Willamette University chapter website -"sigma aldrich" -sigmaaldrich -millipore -merck' in fallback_queries
     assert all("Delta Zeta Willamette University" not in query for query in school_queries + fallback_queries)
+
+
+def test_build_search_queries_normalizes_polluted_school_names_before_validation_search():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker", search_provider="bing_html")
+    job = replace(
+        _job(
+            "verify_school_match",
+            university_name="The Ohio State University - Delta Tau",
+            chapter_name="The Ohio State University - Delta Tau",
+        ),
+        fraternity_slug="delta-kappa-epsilon",
+        payload={"sourceSlug": "delta-kappa-epsilon-main"},
+    )
+
+    queries = engine._build_search_queries(job, target="campus_policy")
+
+    assert any('"The Ohio State University" fraternities banned site:.edu' in query for query in queries)
+    assert all("Delta Tau" not in query for query in queries)
 
 
 def test_bing_negative_terms_only_apply_to_sigma_fraternities():
@@ -3569,5 +3686,38 @@ def test_empty_search_results_are_not_cached_by_default():
     assert search_client.calls[first_query] == 2
     assert result == {"processed": 1, "requeued": 1, "failed_terminal": 0}
     assert any(update.get("instagram_url") == "https://www.instagram.com/demosigmachi" for _, update, _, _ in repo.completed)
+
+
+def test_engine_logs_enrichment_observation_with_shadow_recommendation():
+    job = replace(
+        _job("find_email", university_name="Demo University"),
+        chapter_id="chapter-obs",
+        chapter_slug="chapter-observation",
+        chapter_name="Alpha Beta",
+        fraternity_slug="alpha-main",
+        website_url="https://chapter.example.edu",
+        field_states={"website_url": "found"},
+        payload={"contactResolution": {"supportingPageUrl": "https://chapter.example.edu", "supportingPageScope": "chapter_site"}},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-obs": ["Reach us at chapter@example.edu"]})
+    policy = AdaptivePolicy(live_epsilon=0.0, train_epsilon=0.0)
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        adaptive_policy=policy,
+        adaptive_runtime_mode="langgraph_primary",
+        adaptive_policy_version="adaptive-v1",
+        provider_window_state={"general_web_search": {"healthy": True}},
+    )
+
+    result = engine.process(limit=1)
+
+    assert result["processed"] == 1
+    assert len(repo.enrichment_observations) == 1
+    observation = repo.enrichment_observations[0]
+    assert observation.recommended_action == "parse_supporting_page"
+    assert observation.deterministic_action == "parse_supporting_page"
+    assert observation.outcome["finalState"] == "processed"
 
 

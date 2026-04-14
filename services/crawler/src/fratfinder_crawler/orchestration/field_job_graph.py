@@ -28,6 +28,8 @@ class FieldJobGraphState(TypedDict, total=False):
     action: str
     terminal_reason: str
     error: str
+    shadow_context: dict[str, Any]
+    shadow_decisions: list[dict[str, Any]]
 
     resolution_result: FieldJobResult
     retry_error_message: str
@@ -44,6 +46,7 @@ class FieldJobGraphState(TypedDict, total=False):
     processed_delta: int
     requeued_delta: int
     failed_terminal_delta: int
+    enrichment_observations_logged_delta: int
 
 
 class FieldJobGraphRuntime:
@@ -77,7 +80,7 @@ class FieldJobGraphRuntime:
             metadata={"graphDurability": self._graph_durability},
         )
 
-        aggregate = {"processed": 0, "requeued": 0, "failed_terminal": 0}
+        aggregate = {"processed": 0, "requeued": 0, "failed_terminal": 0, "enrichment_observations_logged": 0}
         status = "succeeded"
         error_message: str | None = None
 
@@ -97,6 +100,7 @@ class FieldJobGraphRuntime:
                 aggregate["processed"] += int(final_state.get("processed_delta", 0) or 0)
                 aggregate["requeued"] += int(final_state.get("requeued_delta", 0) or 0)
                 aggregate["failed_terminal"] += int(final_state.get("failed_terminal_delta", 0) or 0)
+                aggregate["enrichment_observations_logged"] += int(final_state.get("enrichment_observations_logged_delta", 0) or 0)
 
                 if final_state.get("terminal_reason") == "no_job":
                     break
@@ -126,6 +130,7 @@ class FieldJobGraphRuntime:
                     "processed": aggregate["processed"],
                     "requeued": aggregate["requeued"],
                     "failedTerminal": aggregate["failed_terminal"],
+                    "enrichmentObservationsLogged": aggregate["enrichment_observations_logged"],
                     "graphDurability": self._graph_durability,
                     "businessProgressCount": business_progress_count,
                     "businessStatus": business_status,
@@ -133,7 +138,15 @@ class FieldJobGraphRuntime:
                 error_message=error_message,
             )
 
-        return aggregate
+        self._engine._last_batch_metrics = {
+            **dict(getattr(self._engine, "_last_batch_metrics", {}) or {}),
+            "enrichment_observations_logged": int(aggregate.get("enrichment_observations_logged", 0) or 0),
+        }
+        return {
+            "processed": int(aggregate["processed"]),
+            "requeued": int(aggregate["requeued"]),
+            "failed_terminal": int(aggregate["failed_terminal"]),
+        }
 
     def _build_graph(self):
         graph = StateGraph(FieldJobGraphState)
@@ -256,7 +269,7 @@ class FieldJobGraphRuntime:
             self._worker_id,
             source_slug=self._source_slug,
             field_name=self._field_name,
-            require_confident_website_for_email=self._engine.require_confident_website_for_email,
+            require_confident_website_for_email=bool(getattr(self._engine, "require_confident_website_for_email", False)),
         )
         if job is None:
             return {"terminal_reason": "no_job", "action": "none"}
@@ -272,7 +285,17 @@ class FieldJobGraphRuntime:
             attempts=job.attempts,
             max_attempts=job.max_attempts,
         )
-        return {"job": job, "terminal_reason": None, "error": None}
+        build_shadow_context = getattr(self._engine, "_build_enrichment_policy_context", None)
+        score_shadow_decisions = getattr(self._engine, "_score_enrichment_shadow_decisions", None)
+        shadow_context = build_shadow_context(job) if callable(build_shadow_context) else {}
+        shadow_decisions = score_shadow_decisions(shadow_context) if callable(score_shadow_decisions) else []
+        return {
+            "job": job,
+            "terminal_reason": None,
+            "error": None,
+            "shadow_context": shadow_context,
+            "shadow_decisions": shadow_decisions,
+        }
 
     def _evaluate_preconditions(self, state: FieldJobGraphState) -> dict[str, Any]:
         if state.get("job") is None:
@@ -405,6 +428,7 @@ class FieldJobGraphRuntime:
         processed_delta = 0
         requeued_delta = 0
         failed_terminal_delta = 0
+        enrichment_observations_logged_delta = 0
 
         if action == "complete":
             result = state["resolution_result"]
@@ -417,6 +441,22 @@ class FieldJobGraphRuntime:
                 result.field_state_updates,
                 result.provenance_records,
             )
+            record_observation = getattr(self._engine, "_record_enrichment_observation", None)
+            deterministic_action_fn = getattr(self._engine, "_deterministic_enrichment_action", None)
+            outcome_builder = getattr(self._engine, "_build_enrichment_outcome", None)
+            if callable(record_observation) and callable(deterministic_action_fn) and callable(outcome_builder):
+                record_observation(
+                    job,
+                    context=dict(state.get("shadow_context") or {}),
+                    decisions=list(state.get("shadow_decisions") or []),
+                    deterministic_action=deterministic_action_fn(
+                        job,
+                        context=dict(state.get("shadow_context") or {}),
+                        result=result,
+                    ),
+                    outcome=outcome_builder(job, result=result),
+                )
+                enrichment_observations_logged_delta = 1
             processed_delta = 1
         elif action == "requeue":
             backoff_seconds = int(state.get("decision_metadata", {}).get("backoffSeconds") or self._engine._base_backoff_seconds)
@@ -427,16 +467,61 @@ class FieldJobGraphRuntime:
                 preserve_attempt=bool(state.get("retry_preserve_attempt", False)),
                 payload_patch=state.get("payload_patch") or {},
             )
+            retry_exc = RetryableJobError(
+                str(state.get("retry_error_message") or "retryable failure"),
+                backoff_seconds=backoff_seconds,
+                preserve_attempt=bool(state.get("retry_preserve_attempt", False)),
+                low_signal=bool(state.get("retry_low_signal", False)),
+                reason_code=str(state.get("retry_reason_code") or "retryable"),
+            )
+            record_observation = getattr(self._engine, "_record_enrichment_observation", None)
+            deterministic_action_fn = getattr(self._engine, "_deterministic_enrichment_action", None)
+            outcome_builder = getattr(self._engine, "_build_enrichment_outcome", None)
+            if callable(record_observation) and callable(deterministic_action_fn) and callable(outcome_builder):
+                record_observation(
+                    job,
+                    context=dict(state.get("shadow_context") or {}),
+                    decisions=list(state.get("shadow_decisions") or []),
+                    deterministic_action=deterministic_action_fn(
+                        job,
+                        context=dict(state.get("shadow_context") or {}),
+                        retry_error=retry_exc,
+                    ),
+                    outcome=outcome_builder(
+                        job,
+                        retry_error=retry_exc,
+                        backoff_seconds=backoff_seconds,
+                    ),
+                )
+                enrichment_observations_logged_delta = 1
             requeued_delta = 1
         elif action == "fail_terminal":
             error_message = str(state.get("retry_error_message") or state.get("unexpected_error") or state.get("error") or "terminal failure")
             self._repository.fail_field_job_terminal(job, error_message)
+            record_observation = getattr(self._engine, "_record_enrichment_observation", None)
+            deterministic_action_fn = getattr(self._engine, "_deterministic_enrichment_action", None)
+            outcome_builder = getattr(self._engine, "_build_enrichment_outcome", None)
+            if callable(record_observation) and callable(deterministic_action_fn) and callable(outcome_builder):
+                terminal_exc = Exception(error_message)
+                record_observation(
+                    job,
+                    context=dict(state.get("shadow_context") or {}),
+                    decisions=list(state.get("shadow_decisions") or []),
+                    deterministic_action=deterministic_action_fn(
+                        job,
+                        context=dict(state.get("shadow_context") or {}),
+                        unexpected_error=terminal_exc,
+                    ),
+                    outcome=outcome_builder(job, unexpected_error=terminal_exc),
+                )
+                enrichment_observations_logged_delta = 1
             failed_terminal_delta = 1
 
         return {
             "processed_delta": processed_delta,
             "requeued_delta": requeued_delta,
             "failed_terminal_delta": failed_terminal_delta,
+            "enrichment_observations_logged_delta": enrichment_observations_logged_delta,
             "terminal_reason": "job_terminalized",
         }
 
@@ -445,6 +530,7 @@ class FieldJobGraphRuntime:
             "processed_delta": int(state.get("processed_delta", 0) or 0),
             "requeued_delta": int(state.get("requeued_delta", 0) or 0),
             "failed_terminal_delta": int(state.get("failed_terminal_delta", 0) or 0),
+            "enrichment_observations_logged_delta": int(state.get("enrichment_observations_logged_delta", 0) or 0),
         }
 
     def _extract_confidence(self, result: FieldJobResult) -> float | None:

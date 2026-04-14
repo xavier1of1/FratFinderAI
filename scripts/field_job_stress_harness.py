@@ -324,6 +324,97 @@ def adjust_workers(current_workers: int, delta: dict[str, Any], max_workers: int
     return current_workers
 
 
+def _batch_provider_window_success_rate(batch_result: dict[str, Any]) -> float:
+    provider_window_state = batch_result.get("provider_window_state")
+    if not isinstance(provider_window_state, dict):
+        return 1.0
+    general_lane = provider_window_state.get("general_web_search")
+    if not isinstance(general_lane, dict):
+        return 1.0
+    try:
+        return float(general_lane.get("window_success_rate", 1.0) or 0.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def should_run_authoritative_recovery(batch_result: dict[str, Any], delta: dict[str, Any], *, limit: int) -> bool:
+    processed = int(batch_result.get("processed") or 0)
+    requeued = int(batch_result.get("requeued") or 0)
+    provider_success = _batch_provider_window_success_rate(batch_result)
+    outcomes = delta.get("outcomes") or []
+    networkish = 0
+    for row in outcomes:
+        if not isinstance(row, dict):
+            continue
+        outcome = str(row.get("outcome") or "").lower()
+        count = int(row.get("count") or 0)
+        if "search provider or network unavailable" in outcome or "transient_network" in outcome:
+            networkish += count
+
+    if processed <= 2 and requeued >= max(1, math.floor(limit * 0.9)) and provider_success < 0.2:
+        return True
+    if processed == 0 and networkish >= max(10, math.floor(limit * 0.5)):
+        return True
+    return False
+
+
+def adaptive_recovery_promotion_limit(
+    *,
+    base_limit: int,
+    batch_limit: int,
+    degraded_streak: int,
+    provider_success: float,
+) -> int:
+    effective_base = max(1, int(base_limit))
+    effective_batch_limit = max(1, int(batch_limit))
+    streak_scale = min(max(1, int(degraded_streak)), 4)
+    if provider_success <= 0.1:
+        streak_scale = min(4, streak_scale + 1)
+    return min(effective_batch_limit, effective_base * streak_scale)
+
+
+def run_authoritative_recovery(
+    *,
+    promotion_limit: int,
+    workers: int,
+    preflight_snapshot: dict[str, Any] | None = None,
+    provider_window_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    settings = get_settings()
+    service = CrawlService(settings)
+    promotion = service.enrichment_promote_verify_school_candidates(
+        limit=promotion_limit,
+        include_preflight=False,
+        preflight_snapshot=preflight_snapshot,
+        provider_window_state=provider_window_state,
+        apply_changes=True,
+    )
+    promoted = int(promotion.get("promotedVerifySchoolJobs") or 0)
+    processing: dict[str, Any] = {
+        "processed": 0,
+        "requeued": 0,
+        "failed_terminal": 0,
+        "runtime_mode_used": "legacy",
+    }
+    if promoted > 0:
+        processing = service.process_field_jobs(
+            limit=promoted,
+            source_slug=None,
+            field_name="verify_school_match",
+            workers=max(1, workers),
+            require_healthy_search=False,
+            run_preflight=False,
+            runtime_mode="legacy",
+            graph_durability="sync",
+        )
+    return {
+        "type": "authoritative_recovery",
+        "timestamp": iso_now(),
+        "promotion": promotion,
+        "processing": processing,
+    }
+
+
 def run_batch(limit: int, workers: int, graph_durability: str, run_preflight: bool) -> dict[str, Any]:
     settings = get_settings()
     service = CrawlService(settings)
@@ -404,6 +495,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-enqueue", action="store_true")
     parser.add_argument("--run-preflight", action="store_true")
     parser.add_argument("--report-path", default=None)
+    parser.add_argument("--disable-authoritative-recovery", action="store_true")
+    parser.add_argument("--recovery-promotion-limit", type=int, default=48)
+    parser.add_argument("--recovery-workers", type=int, default=3)
     return parser.parse_args()
 
 
@@ -427,6 +521,7 @@ def main() -> int:
 
     workers = max(2, min(args.workers, args.max_workers))
     last_snapshot_at: datetime | None = None
+    degraded_streak = 0
 
     for batch_index in range(1, args.batches + 1):
         batch_result = run_batch(
@@ -440,6 +535,32 @@ def main() -> int:
         progress = format_progress_line(batch_index, run_id, workers, args.limit, batch_result, delta, summary)
         append_jsonl(report_path, progress)
         print(json.dumps(progress, default=str))
+
+        provider_success = _batch_provider_window_success_rate(batch_result)
+        if provider_success < 0.2:
+            degraded_streak += 1
+        else:
+            degraded_streak = 0
+
+        if not args.disable_authoritative_recovery and should_run_authoritative_recovery(batch_result, delta, limit=args.limit):
+            promotion_limit = adaptive_recovery_promotion_limit(
+                base_limit=args.recovery_promotion_limit,
+                batch_limit=args.limit,
+                degraded_streak=degraded_streak,
+                provider_success=provider_success,
+            )
+            recovery = run_authoritative_recovery(
+                promotion_limit=promotion_limit,
+                workers=max(1, args.recovery_workers),
+                preflight_snapshot=batch_result.get("preflight") if isinstance(batch_result.get("preflight"), dict) else None,
+                provider_window_state=batch_result.get("provider_window_state") if isinstance(batch_result.get("provider_window_state"), dict) else None,
+            )
+            recovery["run_id"] = run_id
+            recovery["batch_index"] = batch_index
+            recovery["degraded_streak"] = degraded_streak
+            recovery["recovery_promotion_limit"] = promotion_limit
+            append_jsonl(report_path, recovery)
+            print(json.dumps(recovery, default=str))
 
         last_snapshot_at = now_utc()
         workers = adjust_workers(workers, delta, max_workers=max(2, args.max_workers))

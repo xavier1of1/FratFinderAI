@@ -1,0 +1,5 @@
+$ErrorActionPreference = 'Stop'
+Set-Location 'd:\VSC Programs\FratFinderAI'
+$runId = 'stress-20260414-rl-train-wave2'
+python scripts/field_job_stress_harness.py --run-id $runId --workers 8 --max-workers 12 --limit 240 --batches 6 --priority 975 --graph-durability sync --run-preflight --report-path "docs/reports/stress/$runId.jsonl"
+python -m fratfinder_crawler.cli adaptive-train-loop --rounds 2 --epochs-per-round 3 --runtime-mode adaptive_assisted --train-sources "delta-kappa-epsilon-main,theta-chi-main,sigma-chi-main,chi-psi-main" --eval-sources "pi-kappa-alpha-main,sigma-alpha-epsilon-main,alpha-tau-omega-main,lambda-chi-alpha-main" --report-dir docs/reports --eval-enrichment-limit-per-source 120 --eval-enrichment-workers 4

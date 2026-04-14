@@ -1126,10 +1126,36 @@ class AdaptiveCrawlOrchestrator:
             status=status,
             stop_reason=state.get("stop_reason"),
             queue_efficiency=queue_efficiency,
+            records_upserted=metrics.records_upserted,
+            canonical_created=canonical_created,
+            provisional_created=provisional_created,
+            inline_enriched=inline_enriched,
+            blocked_invalid=invalid_blocked,
+            blocked_repairable=repairable_blocked,
+            review_items_created=metrics.review_items_created,
+            source_invalidity_saturated=bool(extraction_metadata["chapter_validity"].get("sourceInvaliditySaturated")),
         )
         if session_id:
             self._repository.append_reward_event(session_id, None, terminal_event)
         self._policy.observe(terminal_event.action_type, terminal_event.reward_value)
+
+        latest_observation_id = state.get("persisted_observation_id")
+        observation_index = dict(state.get("observation_index") or {})
+        if session_id and latest_observation_id is not None and terminal_event.reward_value != 0:
+            terminal_ancestors = self._ancestor_actions(int(latest_observation_id), observation_index)
+            terminal_credit_events = build_delayed_credit_events(
+                ancestor_actions=terminal_ancestors,
+                base_reward=terminal_event.reward_value,
+                gamma=self._settings.crawler_adaptive_reward_gamma,
+                attributed_observation_id=None,
+                max_hops=self._settings.crawler_adaptive_trace_hops,
+            )
+            for hop, event in enumerate(terminal_credit_events, start=1):
+                ancestor_observation_id = terminal_ancestors[hop - 1][0] if hop - 1 < len(terminal_ancestors) else None
+                if ancestor_observation_id is None:
+                    continue
+                self._repository.append_reward_event(session_id, ancestor_observation_id, event)
+                self._policy.observe(event.action_type, event.reward_value)
 
         return {"metrics": metrics, "final_status": status, "stop_reason": state.get("stop_reason")}
 

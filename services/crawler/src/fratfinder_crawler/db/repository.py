@@ -29,6 +29,7 @@ from fratfinder_crawler.models import (
     DECISION_OUTCOME_REVIEW_REQUIRED,
     EpochMetric,
     ExistingSourceCandidate,
+    EnrichmentObservation,
     FIELD_RESOLUTION_CONFIRMED_ABSENT,
     FIELD_RESOLUTION_DEFERRED,
     FIELD_RESOLUTION_INACTIVE,
@@ -2227,11 +2228,12 @@ class CrawlerRepository:
                         END ASC,
                         fj.scheduled_at ASC,
                         CASE fj.field_name
-                            WHEN 'find_website' THEN 0
+                            WHEN 'verify_school' THEN 0
                             WHEN 'verify_website' THEN 1
-                            WHEN 'find_email' THEN 2
+                            WHEN 'find_website' THEN 2
                             WHEN 'find_instagram' THEN 3
-                            ELSE 4
+                            WHEN 'find_email' THEN 4
+                            ELSE 5
                         END ASC,
                         fj.id ASC
                     FOR UPDATE SKIP LOCKED
@@ -3677,6 +3679,54 @@ class CrawlerRepository:
         self._connection.commit()
         return int(row["id"])
 
+    def append_enrichment_observation(self, observation: EnrichmentObservation) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawl_enrichment_observations (
+                    field_job_id,
+                    chapter_id,
+                    chapter_slug,
+                    fraternity_slug,
+                    source_slug,
+                    field_name,
+                    queue_state,
+                    runtime_mode,
+                    policy_version,
+                    policy_mode,
+                    recommended_action,
+                    deterministic_action,
+                    recommended_actions,
+                    context_features,
+                    provider_window_state,
+                    outcome
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    observation.field_job_id,
+                    observation.chapter_id,
+                    observation.chapter_slug,
+                    observation.fraternity_slug,
+                    observation.source_slug,
+                    observation.field_name,
+                    observation.queue_state,
+                    observation.runtime_mode,
+                    observation.policy_version,
+                    observation.policy_mode,
+                    observation.recommended_action,
+                    observation.deterministic_action,
+                    Jsonb(observation.recommended_actions),
+                    Jsonb(observation.context_features),
+                    Jsonb(observation.provider_window_state),
+                    Jsonb(observation.outcome),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return int(row["id"])
+
     def append_reward_event(self, crawl_session_id: str, page_observation_id: int | None, event: RewardEvent) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -3992,6 +4042,60 @@ class CrawlerRepository:
             )
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+    def export_enrichment_observations(
+        self,
+        *,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        window_days: int | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        filters = []
+        params: list[Any] = []
+        if source_slug is not None:
+            params.append(source_slug)
+            filters.append("ceo.source_slug = %s")
+        if field_name is not None:
+            params.append(field_name)
+            filters.append("ceo.field_name = %s")
+        if window_days is not None:
+            params.append(max(1, int(window_days)))
+            filters.append("ceo.created_at >= NOW() - (%s * INTERVAL '1 day')")
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(max(1, limit))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    ceo.id,
+                    ceo.field_job_id,
+                    ceo.chapter_id,
+                    ceo.chapter_slug,
+                    ceo.fraternity_slug,
+                    ceo.source_slug,
+                    ceo.field_name,
+                    ceo.queue_state,
+                    ceo.runtime_mode,
+                    ceo.policy_version,
+                    ceo.policy_mode,
+                    ceo.recommended_action,
+                    ceo.deterministic_action,
+                    ceo.recommended_actions,
+                    ceo.context_features,
+                    ceo.provider_window_state,
+                    ceo.outcome,
+                    ceo.created_at
+                FROM crawl_enrichment_observations ceo
+                {where_clause}
+                ORDER BY ceo.created_at DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
     def build_policy_report(self, limit: int = 25) -> dict[str, Any]:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -4175,6 +4279,48 @@ class CrawlerRepository:
             "email": int(row["email"] or 0),
             "instagram": int(row["instagram"] or 0),
             "all_three": int(row["all_three"] or 0),
+        }
+
+    def get_chapter_completion_signal(self, chapter_id: str) -> dict[str, bool]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    chapter_status,
+                    contact_email,
+                    instagram_url,
+                    COALESCE(contact_provenance -> 'contact_email' ->> 'contactProvenanceType', '') AS email_specificity,
+                    COALESCE(contact_provenance -> 'instagram_url' ->> 'contactProvenanceType', '') AS instagram_specificity
+                FROM chapters
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (chapter_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return {
+                "validated_active": False,
+                "chapter_safe_email": False,
+                "chapter_safe_instagram": False,
+                "complete_row": False,
+            }
+        email_safe = bool(row["contact_email"]) and str(row["email_specificity"] or "") in {
+            CONTACT_SPECIFICITY_CHAPTER,
+            CONTACT_SPECIFICITY_SCHOOL,
+            CONTACT_SPECIFICITY_NATIONAL_CHAPTER,
+        }
+        instagram_safe = bool(row["instagram_url"]) and str(row["instagram_specificity"] or "") in {
+            CONTACT_SPECIFICITY_CHAPTER,
+            CONTACT_SPECIFICITY_SCHOOL,
+            CONTACT_SPECIFICITY_NATIONAL_CHAPTER,
+        }
+        validated_active = str(row["chapter_status"] or "").strip().lower() == "active"
+        return {
+            "validated_active": validated_active,
+            "chapter_safe_email": email_safe,
+            "chapter_safe_instagram": instagram_safe,
+            "complete_row": bool(validated_active and (email_safe or instagram_safe)),
         }
 
     def insert_epoch_metric(self, metric: EpochMetric) -> int:

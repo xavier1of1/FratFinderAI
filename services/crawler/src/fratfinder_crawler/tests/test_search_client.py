@@ -609,3 +609,47 @@ def test_bing_circuit_open_still_allows_free_provider_fallback():
     assert results[0].provider == "duckduckgo_html"
     assert calls[0].startswith("https://www.bing.com")
     assert calls[1].startswith("https://lite.duckduckgo.com")
+
+
+def test_auto_free_reorders_toward_successful_provider_after_failures():
+    calls: list[str] = []
+
+    def requester(url, params=None, timeout=None, verify=None, headers=None, json=None):
+        calls.append(url)
+        if "localhost:8888/search" in url:
+            raise requests.ConnectionError("searx unavailable")
+        if "google.serper.dev" in url:
+            raise requests.ConnectionError("serper unavailable")
+        if "api.tavily.com" in url:
+            raise requests.ConnectionError("tavily unavailable")
+        if "bing.com" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text="""<html><body><ol><li class="b_algo"><h2><a href="https://example.org/chapter">Sigma Chi at Demo University</a></h2><div class="b_caption"><p>Official chapter website</p></div></li></ol></body></html>""",
+                raise_for_status=lambda: None,
+            )
+        raise AssertionError(f"Unexpected URL call: {url}")
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="auto_free",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_SERPER_API_KEY="test-key",
+            CRAWLER_SEARCH_TAVILY_API_KEY="test-key",
+            CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,serper_api,tavily_api,bing_html",
+        ),
+        get_requester=requester,
+        post_requester=requester,
+    )
+
+    first = client.search("sigma chi demo university website")
+    second = client.search("sigma chi demo university instagram")
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert first[0].provider == "bing_html"
+    assert second[0].provider == "bing_html"
+    assert calls[0] == "http://localhost:8888/search"
+    assert calls[3].startswith("https://www.bing.com")
+    assert calls[4].startswith("https://www.bing.com")

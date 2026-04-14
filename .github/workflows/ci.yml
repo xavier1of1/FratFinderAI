@@ -30,4 +30,4 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e "services/crawler[dev]"
-      - run: pytest services/crawler/src/fratfinder_crawler/tests
+      - run: python -m pytest services/crawler/src/fratfinder_crawler/tests --cov=fratfinder_crawler --cov-report=term-missing --cov-fail-under=70

@@ -61,13 +61,27 @@ class FieldJobSupervisorGraphRuntime:
             "degraded_mode": self._degraded_mode,
         }
         result = self._graph.invoke(state)
-        return {
+        aggregate = {
             "processed": int(result.get("processed", 0) or 0),
             "requeued": int(result.get("requeued", 0) or 0),
             "failed_terminal": int(result.get("failed_terminal", 0) or 0),
             "runtime_fallback_count": int(result.get("runtime_fallback_count", 0) or 0),
             "runtime_mode_used": str(result.get("runtime_mode_used") or self._runtime_mode),
         }
+        for key in (
+            "provider_degraded_deferred",
+            "dependency_wait_deferred",
+            "supporting_page_resolved",
+            "supporting_page_contact_resolved",
+            "external_search_contact_resolved",
+            "enrichment_observations_logged",
+            "mid_batch_provider_rechecks",
+            "mid_batch_provider_reorders",
+        ):
+            aggregate[key] = int(result.get(key, 0) or 0)
+        for key in ("preflight_probe_queries", "chapter_search_queries"):
+            aggregate[key] = list(result.get(key) or [])
+        return aggregate
 
     def _build_graph(self):
         graph = StateGraph(FieldJobSupervisorState)
@@ -147,12 +161,39 @@ class FieldJobSupervisorGraphRuntime:
         requeued = 0
         failed_terminal = 0
         runtime_fallback_count = 0
+        provider_degraded_deferred = 0
+        dependency_wait_deferred = 0
+        supporting_page_resolved = 0
+        supporting_page_contact_resolved = 0
+        external_search_contact_resolved = 0
+        enrichment_observations_logged = 0
+        mid_batch_provider_rechecks = 0
+        mid_batch_provider_reorders = 0
+        preflight_probe_queries: list[str] = []
+        chapter_search_queries: list[str] = []
+        provider_window_state: dict[str, Any] = {}
         runtime_modes: set[str] = set()
         for result in state.get("chunk_results") or []:
             processed += int(result.get("processed", 0) or 0)
             requeued += int(result.get("requeued", 0) or 0)
             failed_terminal += int(result.get("failed_terminal", 0) or 0)
             runtime_fallback_count += int(result.get("runtime_fallback_count", 0) or 0)
+            provider_degraded_deferred += int(result.get("provider_degraded_deferred", 0) or 0)
+            dependency_wait_deferred += int(result.get("dependency_wait_deferred", 0) or 0)
+            supporting_page_resolved += int(result.get("supporting_page_resolved", 0) or 0)
+            supporting_page_contact_resolved += int(result.get("supporting_page_contact_resolved", 0) or 0)
+            external_search_contact_resolved += int(result.get("external_search_contact_resolved", 0) or 0)
+            enrichment_observations_logged += int(result.get("enrichment_observations_logged", 0) or 0)
+            mid_batch_provider_rechecks += int(result.get("mid_batch_provider_rechecks", 0) or 0)
+            mid_batch_provider_reorders += int(result.get("mid_batch_provider_reorders", 0) or 0)
+            for query in result.get("preflight_probe_queries") or []:
+                if query not in preflight_probe_queries:
+                    preflight_probe_queries.append(str(query))
+            for query in result.get("chapter_search_queries") or []:
+                if query not in chapter_search_queries:
+                    chapter_search_queries.append(str(query))
+            if isinstance(result.get("provider_window_state"), dict):
+                provider_window_state = dict(result["provider_window_state"])
             runtime_modes.add(str(result.get("runtime_mode_used") or state.get("runtime_mode") or "legacy"))
 
         log_event(
@@ -166,6 +207,15 @@ class FieldJobSupervisorGraphRuntime:
             failed_terminal=failed_terminal,
             runtime_fallback_count=runtime_fallback_count,
             runtime_mode_used=(next(iter(runtime_modes)) if len(runtime_modes) == 1 else "mixed"),
+            provider_degraded_deferred=provider_degraded_deferred,
+            dependency_wait_deferred=dependency_wait_deferred,
+            supporting_page_resolved=supporting_page_resolved,
+            supporting_page_contact_resolved=supporting_page_contact_resolved,
+            external_search_contact_resolved=external_search_contact_resolved,
+            enrichment_observations_logged=enrichment_observations_logged,
+            mid_batch_provider_rechecks=mid_batch_provider_rechecks,
+            mid_batch_provider_reorders=mid_batch_provider_reorders,
+            provider_window_state=provider_window_state,
         )
         return {
             "processed": processed,
@@ -173,13 +223,39 @@ class FieldJobSupervisorGraphRuntime:
             "failed_terminal": failed_terminal,
             "runtime_fallback_count": runtime_fallback_count,
             "runtime_mode_used": next(iter(runtime_modes)) if len(runtime_modes) == 1 else "mixed",
+            "provider_degraded_deferred": provider_degraded_deferred,
+            "dependency_wait_deferred": dependency_wait_deferred,
+            "supporting_page_resolved": supporting_page_resolved,
+            "supporting_page_contact_resolved": supporting_page_contact_resolved,
+            "external_search_contact_resolved": external_search_contact_resolved,
+            "enrichment_observations_logged": enrichment_observations_logged,
+            "mid_batch_provider_rechecks": mid_batch_provider_rechecks,
+            "mid_batch_provider_reorders": mid_batch_provider_reorders,
+            "preflight_probe_queries": preflight_probe_queries,
+            "chapter_search_queries": chapter_search_queries,
+            "provider_window_state": provider_window_state,
         }
 
     def _finalize(self, state: FieldJobSupervisorState) -> dict[str, Any]:
-        return {
+        result = {
             "processed": int(state.get("processed", 0) or 0),
             "requeued": int(state.get("requeued", 0) or 0),
             "failed_terminal": int(state.get("failed_terminal", 0) or 0),
             "runtime_fallback_count": int(state.get("runtime_fallback_count", 0) or 0),
             "runtime_mode_used": str(state.get("runtime_mode_used") or state.get("runtime_mode") or "legacy"),
         }
+        for key in (
+            "provider_degraded_deferred",
+            "dependency_wait_deferred",
+            "supporting_page_resolved",
+            "supporting_page_contact_resolved",
+            "external_search_contact_resolved",
+            "enrichment_observations_logged",
+            "mid_batch_provider_rechecks",
+            "mid_batch_provider_reorders",
+        ):
+            result[key] = int(state.get(key, 0) or 0)
+        result["preflight_probe_queries"] = list(state.get("preflight_probe_queries") or [])
+        result["chapter_search_queries"] = list(state.get("chapter_search_queries") or [])
+        result["provider_window_state"] = dict(state.get("provider_window_state") or {})
+        return result

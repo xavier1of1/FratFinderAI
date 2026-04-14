@@ -20,7 +20,20 @@ def test_supervisor_returns_zero_when_no_chunks():
 
     result = runtime.run()
 
-    assert result == {"processed": 0, "requeued": 0, "failed_terminal": 0, "runtime_fallback_count": 0, "runtime_mode_used": "legacy"}
+    assert result["processed"] == 0
+    assert result["requeued"] == 0
+    assert result["failed_terminal"] == 0
+    assert result["runtime_fallback_count"] == 0
+    assert result["runtime_mode_used"] == "legacy"
+    assert result["provider_degraded_deferred"] == 0
+    assert result["dependency_wait_deferred"] == 0
+    assert result["supporting_page_resolved"] == 0
+    assert result["supporting_page_contact_resolved"] == 0
+    assert result["external_search_contact_resolved"] == 0
+    assert result["mid_batch_provider_rechecks"] == 0
+    assert result["mid_batch_provider_reorders"] == 0
+    assert result["preflight_probe_queries"] == []
+    assert result["chapter_search_queries"] == []
     assert calls == []
 
 
@@ -58,7 +71,20 @@ def test_supervisor_aggregates_chunk_results():
 
     result = runtime.run()
 
-    assert result == {"processed": 3, "requeued": 3, "failed_terminal": 0, "runtime_fallback_count": 0, "runtime_mode_used": "langgraph_shadow"}
+    assert result["processed"] == 3
+    assert result["requeued"] == 3
+    assert result["failed_terminal"] == 0
+    assert result["runtime_fallback_count"] == 0
+    assert result["runtime_mode_used"] == "langgraph_shadow"
+    assert result["provider_degraded_deferred"] == 0
+    assert result["dependency_wait_deferred"] == 0
+    assert result["supporting_page_resolved"] == 0
+    assert result["supporting_page_contact_resolved"] == 0
+    assert result["external_search_contact_resolved"] == 0
+    assert result["mid_batch_provider_rechecks"] == 0
+    assert result["mid_batch_provider_reorders"] == 0
+    assert result["preflight_probe_queries"] == []
+    assert result["chapter_search_queries"] == []
     assert len(calls) == 2
     assert sorted(call["worker_index"] for call in calls) == [1, 2]
     assert all(call["total_workers"] == 2 for call in calls)

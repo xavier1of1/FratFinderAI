@@ -1,0 +1,2433 @@
+{
+  "capturedAt": "2026-04-10T04:51:53.519788+00:00",
+  "snapshotIndex": 24,
+  "requests": [
+    {
+      "id": "9acdaa2c-016c-439b-a492-f699e094e17d",
+      "fraternity_name": "Alpha Tau Omega",
+      "fraternity_slug": "alpha-tau-omega",
+      "source_slug": "alpha-tau-omega-main",
+      "source_url": "https://ato.org/home-2/ato-map/",
+      "status": "succeeded",
+      "stage": "completed",
+      "started_at": "2026-04-10T02:47:27.940459+00:00",
+      "finished_at": "2026-04-10T03:16:52.007963+00:00",
+      "updated_at": "2026-04-10T03:16:52.041876+00:00",
+      "last_error": "",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 12
+        },
+        "fields": {
+          "find_email": {
+            "done": 13,
+            "failed": 0,
+            "queued": 99,
+            "running": 0,
+            "doneUpdated": 10,
+            "queuedDeferred": 99,
+            "queuedActionable": 0,
+            "doneReviewRequired": 2,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 1
+          },
+          "find_website": {
+            "done": 68,
+            "failed": 0,
+            "queued": 59,
+            "running": 0,
+            "doneUpdated": 25,
+            "queuedDeferred": 59,
+            "queuedActionable": 0,
+            "doneReviewRequired": 12,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 28
+          },
+          "find_instagram": {
+            "done": 61,
+            "failed": 0,
+            "queued": 51,
+            "running": 0,
+            "doneUpdated": 35,
+            "queuedDeferred": 51,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 26
+          }
+        },
+        "totals": {
+          "done": 142,
+          "failed": 0,
+          "queued": 209,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 285,
+          "status": "succeeded",
+          "recordsSeen": 126,
+          "pagesProcessed": 3,
+          "recordsUpserted": 11,
+          "fieldJobsCreated": 2,
+          "reviewItemsCreated": 115
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 140,
+              "invalidCancelled": 0,
+              "actionableRetained": 19,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": true,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 4,
+            "chapterRepair": {
+              "queued": 140,
+              "running": 6,
+              "repairExhausted": 12,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 0,
+              "reconciledHistorical": 165,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 1.0,
+            "requeuedTotal": 5,
+            "budgetStrategy": "v3_steady",
+            "processedTotal": 17,
+            "queueRemaining": 0,
+            "cyclesCompleted": 1,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 0,
+            "failedTerminalTotal": 0,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 6,
+            "adaptiveMaxEnrichmentCycles": 32,
+            "effectiveFieldJobLimitPerCycle": 60
+          },
+          "sourceQuality": {
+            "score": 0.69,
+            "isWeak": false,
+            "reasons": [
+              "positive:map",
+              "deeper_path"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 0,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 0
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://ato.org/home-2/ato-map/",
+          "candidates": [
+            {
+              "url": "https://ato.org/home-2/ato-map/",
+              "rank": 1,
+              "score": 0.95,
+              "title": "Alpha Tau Omega verified source",
+              "snippet": "Verified source registry (nic_bootstrap); http_status=200",
+              "provider": "verified_registry"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": null,
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "ato",
+              "input_name": "Alpha Tau Omega",
+              "normalized_name": "Alpha Tau Omega",
+              "normalized_slug": "alpha-tau-omega"
+            },
+            {
+              "slug": "alpha-tau-omega",
+              "step": "checked_verified_registry",
+              "found": true,
+              "is_active": true,
+              "confidence": 0.95,
+              "http_status": 200,
+              "national_url": "https://ato.org/home-2/ato-map/",
+              "candidate_valid": true,
+              "candidate_reasons": []
+            },
+            {
+              "slug": "alpha-tau-omega",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://ato.org/home-2/ato-map/",
+              "confidence": 0.9,
+              "parser_key": "directory_v1",
+              "source_slug": "alpha-tau-omega-main",
+              "source_type": "html_directory",
+              "candidate_valid": true,
+              "last_run_status": "succeeded",
+              "last_success_at": "2026-04-05T02:54:20.530948+00:00",
+              "candidate_reasons": []
+            },
+            {
+              "url": "https://ato.org/home-2/ato-map/",
+              "step": "selected_verified_registry_candidate",
+              "confidence": 0.95,
+              "health_rank": 3
+            }
+          ],
+          "sourceConfidence": 0.95,
+          "sourceProvenance": "verified_registry"
+        },
+        "provisional": {
+          "rejected": 0,
+          "evaluated": true,
+          "remaining": 0,
+          "autoPromoted": 0,
+          "reviewRequired": 0
+        },
+        "queueTriage": {
+          "repairQueued": 0,
+          "invalidCancelled": 0,
+          "actionableRetained": 0,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 0,
+          "running": 0,
+          "repairExhausted": 0,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 0,
+          "reconciledHistorical": 0,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "canonical_ready",
+          "candidatesRejected": 15,
+          "candidatesExtracted": 126,
+          "rejectionReasonCounts": {
+            "expansion_or_installment_row": 15
+          },
+          "chapterSearchWallTimeMs": 285,
+          "nationalTargetsFollowed": 126,
+          "canonicalChaptersCreated": 11,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 15,
+          "repairableCount": 100,
+          "contactAdmission": {
+            "blocked_invalid": 15,
+            "admitted_canonical": 11,
+            "blocked_repairable": 100
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {
+            "identity_semantically_incomplete": 100
+          },
+          "canonicalValidCount": 11,
+          "invalidReasonCounts": {
+            "expansion_or_installment_row": 15
+          },
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 5,
+          "processed": 142,
+          "autoWritten": 70,
+          "writesByField": {
+            "find_email": 10,
+            "find_website": 25,
+            "find_instagram": 35
+          },
+          "blockedInvalid": 15,
+          "queuedDeferred": 209,
+          "reviewRequired": 14,
+          "providerDegraded": 0,
+          "queuedActionable": 0,
+          "terminalNoSignal": 55,
+          "blockedRepairable": 100,
+          "actionableRemaining": 0,
+          "reconciledHistorical": 0,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "cf6cabdc-eb83-4c28-9f14-cc8305cab464",
+      "fraternity_name": "Chi Psi",
+      "fraternity_slug": "chi-psi",
+      "source_slug": "chi-psi-main",
+      "source_url": "https://chipsi.org/where-we-are/",
+      "status": "failed",
+      "stage": "failed",
+      "started_at": "2026-04-10T02:47:27.895193+00:00",
+      "finished_at": "2026-04-10T03:26:21.370408+00:00",
+      "updated_at": "2026-04-10T03:26:21.370408+00:00",
+      "last_error": "Enrichment cycle budget exhausted before queue drained",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 10
+        },
+        "fields": {
+          "find_email": {
+            "done": 6,
+            "failed": 0,
+            "queued": 97,
+            "running": 0,
+            "doneUpdated": 3,
+            "queuedDeferred": 97,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 0
+          },
+          "find_website": {
+            "done": 21,
+            "failed": 0,
+            "queued": 26,
+            "running": 0,
+            "doneUpdated": 0,
+            "queuedDeferred": 26,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 20
+          },
+          "find_instagram": {
+            "done": 35,
+            "failed": 0,
+            "queued": 68,
+            "running": 0,
+            "doneUpdated": 17,
+            "queuedDeferred": 66,
+            "queuedActionable": 2,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 16
+          }
+        },
+        "totals": {
+          "done": 62,
+          "failed": 0,
+          "queued": 191,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 284,
+          "status": "succeeded",
+          "recordsSeen": 32,
+          "pagesProcessed": 3,
+          "recordsUpserted": 32,
+          "fieldJobsCreated": 2,
+          "reviewItemsCreated": 3
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 103,
+              "invalidCancelled": 0,
+              "actionableRetained": 410,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 50,
+            "chapterRepair": {
+              "queued": 103,
+              "running": 18,
+              "repairExhausted": 0,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 40,
+              "reconciledHistorical": 587,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 0.96,
+            "requeuedTotal": 100,
+            "budgetStrategy": "v3_degraded",
+            "processedTotal": 50,
+            "queueRemaining": 2,
+            "cyclesCompleted": 6,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 1,
+            "failedTerminalTotal": 0,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 3,
+            "adaptiveMaxEnrichmentCycles": 6,
+            "effectiveFieldJobLimitPerCycle": 25
+          },
+          "sourceQuality": {
+            "score": 0.55,
+            "isWeak": false,
+            "reasons": [],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 0,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 0
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://chipsi.org/where-we-are/",
+          "candidates": [
+            {
+              "url": "https://chipsi.org/where-we-are/",
+              "rank": 1,
+              "score": 0.9,
+              "title": "Chi Psi existing configured source (chi-psi-main)",
+              "snippet": "Existing source with last_run_status=succeeded; parser_key=directory_v1",
+              "provider": "existing_source"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": null,
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "cp",
+              "input_name": "Chi Psi",
+              "normalized_name": "Chi Psi",
+              "normalized_slug": "chi-psi"
+            },
+            {
+              "slug": "chi-psi",
+              "step": "checked_verified_registry",
+              "found": true,
+              "is_active": true,
+              "confidence": 0.85,
+              "http_status": 200,
+              "national_url": "https://chipsi.org/where-we-are/",
+              "candidate_valid": true,
+              "candidate_reasons": []
+            },
+            {
+              "slug": "chi-psi",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://chipsi.org/where-we-are/",
+              "confidence": 0.9,
+              "parser_key": "directory_v1",
+              "source_slug": "chi-psi-main",
+              "source_type": "html_directory",
+              "candidate_valid": true,
+              "last_run_status": "succeeded",
+              "last_success_at": "2026-04-05T02:56:39.182051+00:00",
+              "candidate_reasons": []
+            },
+            {
+              "url": "https://chipsi.org/where-we-are/",
+              "step": "selected_verified_registry_candidate",
+              "confidence": 0.85,
+              "health_rank": 3
+            }
+          ],
+          "sourceConfidence": 0.85,
+          "sourceProvenance": "verified_registry"
+        },
+        "queueTriage": {
+          "repairQueued": 103,
+          "invalidCancelled": 0,
+          "actionableRetained": 371,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 103,
+          "running": 15,
+          "repairExhausted": 0,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 31,
+          "reconciledHistorical": 548,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "canonical_ready",
+          "candidatesRejected": 0,
+          "candidatesExtracted": 51,
+          "rejectionReasonCounts": {},
+          "chapterSearchWallTimeMs": 735,
+          "nationalTargetsFollowed": 0,
+          "canonicalChaptersCreated": 32,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 0,
+          "repairableCount": 0,
+          "contactAdmission": {
+            "blocked_invalid": 0,
+            "admitted_canonical": 32,
+            "blocked_repairable": 0
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {},
+          "canonicalValidCount": 32,
+          "invalidReasonCounts": {},
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 100,
+          "processed": 62,
+          "autoWritten": 20,
+          "writesByField": {
+            "find_email": 3,
+            "find_website": 0,
+            "find_instagram": 17
+          },
+          "blockedInvalid": 0,
+          "queuedDeferred": 189,
+          "reviewRequired": 0,
+          "providerDegraded": 0,
+          "queuedActionable": 2,
+          "terminalNoSignal": 36,
+          "blockedRepairable": 103,
+          "actionableRemaining": 2,
+          "reconciledHistorical": 548,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "7486163f-df76-4b71-9a8a-a4ac50698e07",
+      "fraternity_name": "Delta Kappa Epsilon",
+      "fraternity_slug": "delta-kappa-epsilon",
+      "source_slug": "delta-kappa-epsilon-main",
+      "source_url": "https://dke.org/chapter-services/",
+      "status": "failed",
+      "stage": "failed",
+      "started_at": "2026-04-10T02:47:27.985266+00:00",
+      "finished_at": "2026-04-10T03:30:46.562706+00:00",
+      "updated_at": "2026-04-10T03:30:46.562706+00:00",
+      "last_error": "Enrichment cycle budget exhausted before queue drained",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 19
+        },
+        "fields": {
+          "find_email": {
+            "done": 16,
+            "failed": 0,
+            "queued": 177,
+            "running": 0,
+            "doneUpdated": 5,
+            "queuedDeferred": 176,
+            "queuedActionable": 1,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 0
+          },
+          "find_website": {
+            "done": 91,
+            "failed": 0,
+            "queued": 105,
+            "running": 0,
+            "doneUpdated": 9,
+            "queuedDeferred": 97,
+            "queuedActionable": 8,
+            "doneReviewRequired": 10,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 69
+          },
+          "find_instagram": {
+            "done": 80,
+            "failed": 1,
+            "queued": 112,
+            "running": 0,
+            "doneUpdated": 19,
+            "queuedDeferred": 109,
+            "queuedActionable": 3,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 60
+          }
+        },
+        "totals": {
+          "done": 187,
+          "failed": 1,
+          "queued": 394,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 292,
+          "status": "partial",
+          "recordsSeen": 3,
+          "pagesProcessed": 6,
+          "recordsUpserted": 0,
+          "fieldJobsCreated": 0,
+          "reviewItemsCreated": 3
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 15,
+              "invalidCancelled": 0,
+              "actionableRetained": 1379,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 12,
+            "chapterRepair": {
+              "queued": 15,
+              "running": 4,
+              "repairExhausted": 12,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 0,
+              "reconciledHistorical": 1830,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 0.0,
+            "requeuedTotal": 207,
+            "budgetStrategy": "v3_degraded",
+            "processedTotal": 17,
+            "queueRemaining": 12,
+            "cyclesCompleted": 10,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 4,
+            "failedTerminalTotal": 1,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 3,
+            "adaptiveMaxEnrichmentCycles": 10,
+            "effectiveFieldJobLimitPerCycle": 25
+          },
+          "sourceQuality": {
+            "score": 0.77,
+            "isWeak": false,
+            "reasons": [
+              "positive:chapter",
+              "positive:chapters",
+              "deeper_path"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 1,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 1
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://dke.org/chapter-services/",
+          "candidates": [
+            {
+              "url": "https://dke.org/chapter-experience/chapters/",
+              "rank": 1,
+              "score": 0.95,
+              "title": "Delta Kappa Epsilon verified source",
+              "snippet": "Verified source registry (nic_bootstrap); http_status=200",
+              "provider": "verified_registry"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": null,
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "dke",
+              "input_name": "Delta Kappa Epsilon",
+              "normalized_name": "Delta Kappa Epsilon",
+              "normalized_slug": "delta-kappa-epsilon"
+            },
+            {
+              "slug": "delta-kappa-epsilon",
+              "step": "checked_verified_registry",
+              "found": true,
+              "is_active": true,
+              "confidence": 0.95,
+              "http_status": 200,
+              "national_url": "https://dke.org/chapter-experience/chapters/",
+              "candidate_valid": true,
+              "candidate_reasons": []
+            },
+            {
+              "slug": "delta-kappa-epsilon",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://dke.org/chapter-experience/chapters/",
+              "confidence": 0.9,
+              "parser_key": "directory_v1",
+              "source_slug": "delta-kappa-epsilon-main",
+              "source_type": "html_directory",
+              "candidate_valid": true,
+              "last_run_status": "succeeded",
+              "last_success_at": "2026-04-05T02:59:30.520148+00:00",
+              "candidate_reasons": []
+            },
+            {
+              "url": "https://dke.org/chapter-experience/chapters/",
+              "step": "selected_verified_registry_candidate",
+              "confidence": 0.95,
+              "health_rank": 3
+            }
+          ],
+          "sourceConfidence": 0.92,
+          "sourceProvenance": "verified_registry"
+        },
+        "queueTriage": {
+          "repairQueued": 15,
+          "invalidCancelled": 0,
+          "actionableRetained": 1287,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 15,
+          "running": 4,
+          "repairExhausted": 12,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 0,
+          "reconciledHistorical": 1738,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "identity_incomplete",
+          "candidatesRejected": 0,
+          "candidatesExtracted": 119,
+          "rejectionReasonCounts": {},
+          "chapterSearchWallTimeMs": 546,
+          "nationalTargetsFollowed": 3,
+          "canonicalChaptersCreated": 0,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 0,
+          "repairableCount": 3,
+          "contactAdmission": {
+            "blocked_invalid": 0,
+            "admitted_canonical": 0,
+            "blocked_repairable": 3
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {
+            "identity_semantically_incomplete": 3
+          },
+          "canonicalValidCount": 0,
+          "invalidReasonCounts": {},
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 207,
+          "processed": 187,
+          "autoWritten": 33,
+          "writesByField": {
+            "find_email": 5,
+            "find_website": 9,
+            "find_instagram": 19
+          },
+          "blockedInvalid": 0,
+          "queuedDeferred": 382,
+          "reviewRequired": 10,
+          "providerDegraded": 0,
+          "queuedActionable": 12,
+          "terminalNoSignal": 129,
+          "blockedRepairable": 18,
+          "actionableRemaining": 12,
+          "reconciledHistorical": 1738,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "881aa779-50b1-49b8-bea0-ce20c070330a",
+      "fraternity_name": "Kappa Delta Rho",
+      "fraternity_slug": "kappa-delta-rho",
+      "source_slug": "kappa-delta-rho-main",
+      "source_url": "https://www.kdr.com/chapters",
+      "status": "succeeded",
+      "stage": "completed",
+      "started_at": "2026-04-10T02:47:28.118417+00:00",
+      "finished_at": "2026-04-10T03:22:40.959081+00:00",
+      "updated_at": "2026-04-10T03:22:40.985568+00:00",
+      "last_error": "",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 15
+        },
+        "fields": {
+          "find_email": {
+            "done": 3,
+            "failed": 0,
+            "queued": 84,
+            "running": 0,
+            "doneUpdated": 1,
+            "queuedDeferred": 84,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 0
+          },
+          "find_website": {
+            "done": 0,
+            "failed": 0,
+            "queued": 1,
+            "running": 0,
+            "doneUpdated": 0,
+            "queuedDeferred": 1,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 0
+          },
+          "find_instagram": {
+            "done": 1,
+            "failed": 0,
+            "queued": 86,
+            "running": 0,
+            "doneUpdated": 0,
+            "queuedDeferred": 86,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 0
+          }
+        },
+        "totals": {
+          "done": 4,
+          "failed": 0,
+          "queued": 171,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 288,
+          "status": "succeeded",
+          "recordsSeen": 87,
+          "pagesProcessed": 62,
+          "recordsUpserted": 86,
+          "fieldJobsCreated": 1,
+          "reviewItemsCreated": 10
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 3,
+              "invalidCancelled": 0,
+              "actionableRetained": 359,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 86,
+            "chapterRepair": {
+              "queued": 3,
+              "running": 1,
+              "repairExhausted": 0,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 3,
+              "reconciledHistorical": 441,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 1.0,
+            "requeuedTotal": 92,
+            "budgetStrategy": "v3_steady",
+            "processedTotal": 88,
+            "queueRemaining": 0,
+            "cyclesCompleted": 3,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 0,
+            "failedTerminalTotal": 0,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 6,
+            "adaptiveMaxEnrichmentCycles": 32,
+            "effectiveFieldJobLimitPerCycle": 60
+          },
+          "sourceQuality": {
+            "score": 0.7100000000000001,
+            "isWeak": false,
+            "reasons": [
+              "positive:chapter",
+              "positive:chapters"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 0,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 0
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://www.kdr.com/chapters",
+          "candidates": [
+            {
+              "url": "https://www.kdr.com/chapters",
+              "rank": 1,
+              "score": 0.95,
+              "title": "Kappa Delta Rho verified source",
+              "snippet": "Verified source registry (nic_bootstrap); http_status=200",
+              "provider": "verified_registry"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": null,
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "kdr",
+              "input_name": "Kappa Delta Rho",
+              "normalized_name": "Kappa Delta Rho",
+              "normalized_slug": "kappa-delta-rho"
+            },
+            {
+              "slug": "kappa-delta-rho",
+              "step": "checked_verified_registry",
+              "found": true,
+              "is_active": true,
+              "confidence": 0.95,
+              "http_status": 200,
+              "national_url": "https://www.kdr.com/chapters",
+              "candidate_valid": true,
+              "candidate_reasons": []
+            },
+            {
+              "slug": "kappa-delta-rho",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://www.kdr.com/chapters",
+              "confidence": 0.9,
+              "parser_key": "directory_v1",
+              "source_slug": "kappa-delta-rho-main",
+              "source_type": "html_directory",
+              "candidate_valid": true,
+              "last_run_status": "succeeded",
+              "last_success_at": "2026-04-05T05:41:17.780578+00:00",
+              "candidate_reasons": []
+            },
+            {
+              "url": "https://www.kdr.com/chapters",
+              "step": "selected_verified_registry_candidate",
+              "confidence": 0.95,
+              "health_rank": 3
+            }
+          ],
+          "sourceConfidence": 0.95,
+          "sourceProvenance": "verified_registry"
+        },
+        "provisional": {
+          "rejected": 0,
+          "evaluated": true,
+          "remaining": 0,
+          "autoPromoted": 0,
+          "reviewRequired": 0
+        },
+        "queueTriage": {
+          "repairQueued": 3,
+          "invalidCancelled": 0,
+          "actionableRetained": 298,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 3,
+          "running": 1,
+          "repairExhausted": 0,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 3,
+          "reconciledHistorical": 380,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "canonical_ready",
+          "candidatesRejected": 0,
+          "candidatesExtracted": 87,
+          "rejectionReasonCounts": {},
+          "chapterSearchWallTimeMs": 275,
+          "nationalTargetsFollowed": 60,
+          "canonicalChaptersCreated": 86,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 0,
+          "repairableCount": 1,
+          "contactAdmission": {
+            "blocked_invalid": 0,
+            "admitted_canonical": 86,
+            "blocked_repairable": 1
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {
+            "identity_semantically_incomplete": 1
+          },
+          "canonicalValidCount": 86,
+          "invalidReasonCounts": {},
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 92,
+          "processed": 4,
+          "autoWritten": 1,
+          "writesByField": {
+            "find_email": 1,
+            "find_website": 0,
+            "find_instagram": 0
+          },
+          "blockedInvalid": 0,
+          "queuedDeferred": 171,
+          "reviewRequired": 0,
+          "providerDegraded": 0,
+          "queuedActionable": 0,
+          "terminalNoSignal": 0,
+          "blockedRepairable": 4,
+          "actionableRemaining": 0,
+          "reconciledHistorical": 380,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "389f30e0-41df-454f-9eb4-06c2acce4721",
+      "fraternity_name": "Phi Gamma Delta",
+      "fraternity_slug": "phi-gamma-delta",
+      "source_slug": "phi-gamma-delta-main",
+      "source_url": "https://phigam.org/about/overview/our-chapters/",
+      "status": "succeeded",
+      "stage": "completed",
+      "started_at": "2026-04-10T02:47:27.939807+00:00",
+      "finished_at": "2026-04-10T03:24:20.908269+00:00",
+      "updated_at": "2026-04-10T03:24:20.931050+00:00",
+      "last_error": "",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 17
+        },
+        "fields": {
+          "find_email": {
+            "done": 66,
+            "failed": 129,
+            "queued": 88,
+            "running": 0,
+            "doneUpdated": 34,
+            "queuedDeferred": 88,
+            "queuedActionable": 0,
+            "doneReviewRequired": 5,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 15
+          },
+          "find_website": {
+            "done": 91,
+            "failed": 94,
+            "queued": 18,
+            "running": 0,
+            "doneUpdated": 53,
+            "queuedDeferred": 18,
+            "queuedActionable": 0,
+            "doneReviewRequired": 3,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 20
+          },
+          "find_instagram": {
+            "done": 32,
+            "failed": 33,
+            "queued": 8,
+            "running": 0,
+            "doneUpdated": 7,
+            "queuedDeferred": 8,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 16
+          }
+        },
+        "totals": {
+          "done": 189,
+          "failed": 256,
+          "queued": 114,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 293,
+          "status": "succeeded",
+          "recordsSeen": 51,
+          "pagesProcessed": 5,
+          "recordsUpserted": 4,
+          "fieldJobsCreated": 0,
+          "reviewItemsCreated": 3
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 2,
+              "invalidCancelled": 0,
+              "actionableRetained": 226,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 59,
+            "chapterRepair": {
+              "queued": 2,
+              "running": 2,
+              "repairExhausted": 2,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 0,
+              "reconciledHistorical": 371,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 1.0,
+            "requeuedTotal": 50,
+            "budgetStrategy": "v3_steady",
+            "processedTotal": 49,
+            "queueRemaining": 0,
+            "cyclesCompleted": 4,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 0,
+            "failedTerminalTotal": 1,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 3,
+            "adaptiveMaxEnrichmentCycles": 6,
+            "effectiveFieldJobLimitPerCycle": 25
+          },
+          "sourceQuality": {
+            "score": 0.8500000000000001,
+            "isWeak": false,
+            "reasons": [
+              "positive:chapter",
+              "positive:chapters",
+              "positive:our-chapters",
+              "deeper_path"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 0,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 0
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://phigam.org/about/overview/our-chapters/",
+          "candidates": [
+            {
+              "url": "https://phigam.org/about/overview/our-chapters/",
+              "rank": 1,
+              "score": 0.95,
+              "title": "Phi Gamma Delta verified source",
+              "snippet": "Verified source registry (nic_bootstrap); http_status=200",
+              "provider": "verified_registry"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": null,
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "pgd",
+              "input_name": "Phi Gamma Delta",
+              "normalized_name": "Phi Gamma Delta",
+              "normalized_slug": "phi-gamma-delta"
+            },
+            {
+              "slug": "phi-gamma-delta",
+              "step": "checked_verified_registry",
+              "found": true,
+              "is_active": true,
+              "confidence": 0.95,
+              "http_status": 200,
+              "national_url": "https://phigam.org/about/overview/our-chapters/",
+              "candidate_valid": true,
+              "candidate_reasons": []
+            },
+            {
+              "slug": "phi-gamma-delta",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://phigam.org/about/overview/our-chapters/",
+              "confidence": 0.9,
+              "parser_key": "directory_v1",
+              "source_slug": "phi-gamma-delta-main",
+              "source_type": "html_directory",
+              "candidate_valid": true,
+              "last_run_status": "succeeded",
+              "last_success_at": "2026-04-08T14:47:14.993179+00:00",
+              "candidate_reasons": []
+            },
+            {
+              "url": "https://phigam.org/about/overview/our-chapters/",
+              "step": "selected_verified_registry_candidate",
+              "confidence": 0.95,
+              "health_rank": 3
+            }
+          ],
+          "sourceConfidence": 0.95,
+          "sourceProvenance": "verified_registry"
+        },
+        "provisional": {
+          "rejected": 0,
+          "evaluated": true,
+          "remaining": 0,
+          "autoPromoted": 0,
+          "reviewRequired": 0
+        },
+        "queueTriage": {
+          "repairQueued": 2,
+          "invalidCancelled": 0,
+          "actionableRetained": 199,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 2,
+          "running": 2,
+          "repairExhausted": 2,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 0,
+          "reconciledHistorical": 344,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "locator_map",
+          "coverageState": "canonical_ready",
+          "candidatesRejected": 3,
+          "candidatesExtracted": 145,
+          "rejectionReasonCounts": {
+            "identity_semantically_incomplete": 3
+          },
+          "chapterSearchWallTimeMs": 874,
+          "nationalTargetsFollowed": 0,
+          "canonicalChaptersCreated": 4,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 40,
+          "provisionalChaptersCreated": 44,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 3,
+          "repairableCount": 0,
+          "contactAdmission": {
+            "blocked_invalid": 3,
+            "admitted_canonical": 4,
+            "blocked_repairable": 0
+          },
+          "provisionalCount": 44,
+          "repairReasonCounts": {},
+          "canonicalValidCount": 4,
+          "invalidReasonCounts": {
+            "identity_semantically_incomplete": 3
+          },
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 50,
+          "processed": 189,
+          "autoWritten": 94,
+          "writesByField": {
+            "find_email": 34,
+            "find_website": 53,
+            "find_instagram": 7
+          },
+          "blockedInvalid": 3,
+          "queuedDeferred": 114,
+          "reviewRequired": 8,
+          "providerDegraded": 0,
+          "queuedActionable": 0,
+          "terminalNoSignal": 51,
+          "blockedRepairable": 2,
+          "actionableRemaining": 0,
+          "reconciledHistorical": 344,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "a3bb041b-e142-4fdb-884e-4e4652ce57d2",
+      "fraternity_name": "Pi Kappa Alpha",
+      "fraternity_slug": "pi-kappa-alpha",
+      "source_slug": "pi-kappa-alpha-main",
+      "source_url": "https://pikes.org/membership/join/find-a-chapter/",
+      "status": "succeeded",
+      "stage": "completed",
+      "started_at": "2026-04-10T02:47:19.955831+00:00",
+      "finished_at": "2026-04-10T03:26:41.019374+00:00",
+      "updated_at": "2026-04-10T03:26:41.040757+00:00",
+      "last_error": "",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 18
+        },
+        "fields": {
+          "find_email": {
+            "done": 85,
+            "failed": 0,
+            "queued": 230,
+            "running": 0,
+            "doneUpdated": 20,
+            "queuedDeferred": 230,
+            "queuedActionable": 0,
+            "doneReviewRequired": 58,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 3
+          },
+          "find_website": {
+            "done": 23,
+            "failed": 0,
+            "queued": 14,
+            "running": 0,
+            "doneUpdated": 5,
+            "queuedDeferred": 14,
+            "queuedActionable": 0,
+            "doneReviewRequired": 4,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 12
+          },
+          "find_instagram": {
+            "done": 40,
+            "failed": 0,
+            "queued": 254,
+            "running": 0,
+            "doneUpdated": 16,
+            "queuedDeferred": 254,
+            "queuedActionable": 0,
+            "doneReviewRequired": 1,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 16
+          }
+        },
+        "totals": {
+          "done": 148,
+          "failed": 0,
+          "queued": 498,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 294,
+          "status": "partial",
+          "recordsSeen": 4,
+          "pagesProcessed": 6,
+          "recordsUpserted": 0,
+          "fieldJobsCreated": 0,
+          "reviewItemsCreated": 2
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 70,
+              "invalidCancelled": 0,
+              "actionableRetained": 3176,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 111,
+            "chapterRepair": {
+              "queued": 70,
+              "running": 20,
+              "repairExhausted": 46,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 0,
+              "reconciledHistorical": 3657,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 1.0,
+            "requeuedTotal": 235,
+            "budgetStrategy": "v3_degraded",
+            "processedTotal": 40,
+            "queueRemaining": 0,
+            "cyclesCompleted": 7,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 4,
+            "failedTerminalTotal": 0,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 3,
+            "adaptiveMaxEnrichmentCycles": 10,
+            "effectiveFieldJobLimitPerCycle": 25
+          },
+          "sourceQuality": {
+            "score": 0.77,
+            "isWeak": false,
+            "reasons": [
+              "positive:chapter",
+              "positive:chapters",
+              "deeper_path"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 1,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 1
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://pikes.org/membership/join/find-a-chapter/",
+          "candidates": [
+            {
+              "url": "https://www.transypike.com/faq",
+              "rank": 1,
+              "score": 0.99,
+              "title": "FAQ About PIKE - Pi Kappa Alpha",
+              "snippet": "Pike new member education culminates in Ingress- a final week of introspection and review prior to activation (or initiation into Pi Kappa Alpha as an Active Member). Ingress is a special time for a New Member to find their place in Kappa Chapter and the Fraternity as a whole.",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://pikes.org/membership/join/find-a-chapter/",
+              "rank": 1,
+              "score": 0.99,
+              "title": "Find a Chapter - Pi Kappa Alpha",
+              "snippet": "Find a Chapter. Use the search criteria below to find ... Memorial Headquarters. 8347 West Range Cove, Memphis, Tennessee 38125 info@pikes.org | 901.748.1868\u00a0...",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://www.wm.edu/offices/fsl/about/chapters/fraternities/pka.php",
+              "rank": 2,
+              "score": 0.99,
+              "title": "Pi Kappa Alpha | Fraternity & Sorority Life - William & Mary",
+              "snippet": "Directory \u00b7 Athletics \u00b7 W&M A-Z \u00b7 Libraries \u00b7 Giving \u00b7 William & Mary. Resources FOR ... Through chapter-specific initiatives such as the PIKE-Tswap thrift store\u00a0...",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://pikes.org/",
+              "rank": 2,
+              "score": 0.99,
+              "title": "Pi Kappa Alpha International Fraternity - Courage to Be More",
+              "snippet": "Pi Kappa Alpha is an international leader in the fraternity experience, with over 305000 lifetime initiates all across North America.",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://pikes.org/pike-u/certification/certified-men/",
+              "rank": 3,
+              "score": 0.99,
+              "title": "Certified Men - Pi Kappa Alpha",
+              "snippet": "... chapter by attending multiple PIKE U events and earning. ... Memorial Headquarters. 8347 West Range Cove, Memphis, Tennessee 38125 info@pikes.org | 901.748.1868\u00a0...",
+              "provider": "searxng_json"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": "upgraded_source_selection:quality",
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "pka",
+              "input_name": "Pi Kappa Alpha",
+              "normalized_name": "Pi Kappa Alpha",
+              "normalized_slug": "pi-kappa-alpha"
+            },
+            {
+              "step": "alias_resolution",
+              "alias": "Pi Kappa Alpha",
+              "canonical_name": "Pi Kappa Alpha",
+              "canonical_slug": "pi-kappa-alpha"
+            },
+            {
+              "slug": "pi-kappa-alpha",
+              "step": "checked_verified_registry",
+              "found": false
+            },
+            {
+              "slug": "pi-kappa-alpha",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://en.wikipedia.org/wiki/List_of_Pi_Kappa_Alpha_chapters",
+              "confidence": 0.5,
+              "parser_key": "directory_v1",
+              "source_slug": "pi-kappa-alpha-main",
+              "source_type": "html_directory",
+              "candidate_valid": false,
+              "last_run_status": "failed",
+              "last_success_at": "2026-04-05T00:17:23.482301+00:00",
+              "candidate_reasons": [
+                "blocked_host"
+              ]
+            },
+            {
+              "url": "https://en.wikipedia.org/wiki/List_of_Pi_Kappa_Alpha_chapters",
+              "step": "rejected_existing_source_candidate",
+              "reasons": [
+                "blocked_host"
+              ]
+            },
+            {
+              "url": "https://www.transypike.com/faq",
+              "step": "source_identity_guard",
+              "decision": {
+                "decision": "match",
+                "metadata": {
+                  "host": "www.transypike.com",
+                  "path": "/faq",
+                  "chapterContextHits": 2
+                },
+                "confidence": 0.84,
+                "nextAction": "continue",
+                "reasonCodes": [
+                  "fraternity_phrase_match",
+                  "host_partial_token_match",
+                  "directory_signal",
+                  "strong_chapter_context"
+                ],
+                "evidenceUrls": [
+                  "https://www.transypike.com/faq"
+                ]
+              }
+            },
+            {
+              "url": "https://www.transypike.com/faq",
+              "step": "selected_search_candidate",
+              "score": 0.99,
+              "provider": "searxng_json",
+              "rationale": "selected_search_candidate"
+            },
+            {
+              "step": "optimized_source_selection",
+              "nextUrl": "https://www.wm.edu/offices/fsl/about/chapters/fraternities/pka.php",
+              "previousUrl": "https://www.transypike.com/faq",
+              "candidateScore": 0.99,
+              "nextQualityScore": 0.77,
+              "previousQualityScore": 0.56
+            }
+          ],
+          "sourceConfidence": 0.99,
+          "sourceProvenance": "search"
+        },
+        "provisional": {
+          "rejected": 0,
+          "evaluated": true,
+          "remaining": 0,
+          "autoPromoted": 0,
+          "reviewRequired": 0
+        },
+        "queueTriage": {
+          "repairQueued": 70,
+          "invalidCancelled": 0,
+          "actionableRetained": 2725,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 70,
+          "running": 20,
+          "repairExhausted": 46,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 0,
+          "reconciledHistorical": 3206,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "identity_incomplete",
+          "candidatesRejected": 1,
+          "candidatesExtracted": 4,
+          "rejectionReasonCounts": {
+            "navigation_or_chrome": 1
+          },
+          "chapterSearchWallTimeMs": 468,
+          "nationalTargetsFollowed": 4,
+          "canonicalChaptersCreated": 0,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 1,
+          "repairableCount": 1,
+          "contactAdmission": {
+            "blocked_invalid": 1,
+            "admitted_canonical": 0,
+            "blocked_repairable": 1
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {
+            "identity_semantically_incomplete": 1
+          },
+          "canonicalValidCount": 0,
+          "invalidReasonCounts": {
+            "navigation_or_chrome": 1
+          },
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 235,
+          "processed": 148,
+          "autoWritten": 41,
+          "writesByField": {
+            "find_email": 20,
+            "find_website": 5,
+            "find_instagram": 16
+          },
+          "blockedInvalid": 1,
+          "queuedDeferred": 498,
+          "reviewRequired": 63,
+          "providerDegraded": 0,
+          "queuedActionable": 0,
+          "terminalNoSignal": 31,
+          "blockedRepairable": 71,
+          "actionableRemaining": 0,
+          "reconciledHistorical": 3206,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "c07aaac6-449e-4db6-b32a-789b039dbae0",
+      "fraternity_name": "Sigma Alpha Epsilon",
+      "fraternity_slug": "sigma-alpha-epsilon",
+      "source_slug": "sigma-alpha-epsilon-main",
+      "source_url": "https://sae.net/chapter-resources/",
+      "status": "failed",
+      "stage": "failed",
+      "started_at": "2026-04-10T02:47:27.753857+00:00",
+      "finished_at": "2026-04-10T03:30:48.804736+00:00",
+      "updated_at": "2026-04-10T03:30:48.804736+00:00",
+      "last_error": "Enrichment cycle budget exhausted before queue drained",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 20
+        },
+        "fields": {
+          "find_email": {
+            "done": 176,
+            "failed": 0,
+            "queued": 297,
+            "running": 0,
+            "doneUpdated": 68,
+            "queuedDeferred": 297,
+            "queuedActionable": 0,
+            "doneReviewRequired": 98,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 3
+          },
+          "find_website": {
+            "done": 49,
+            "failed": 0,
+            "queued": 60,
+            "running": 0,
+            "doneUpdated": 9,
+            "queuedDeferred": 60,
+            "queuedActionable": 0,
+            "doneReviewRequired": 5,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 34
+          },
+          "find_instagram": {
+            "done": 53,
+            "failed": 1,
+            "queued": 336,
+            "running": 0,
+            "doneUpdated": 28,
+            "queuedDeferred": 335,
+            "queuedActionable": 1,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 24
+          }
+        },
+        "totals": {
+          "done": 278,
+          "failed": 1,
+          "queued": 693,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 295,
+          "status": "partial",
+          "recordsSeen": 2,
+          "pagesProcessed": 4,
+          "recordsUpserted": 0,
+          "fieldJobsCreated": 0,
+          "reviewItemsCreated": 1
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 375,
+              "invalidCancelled": 0,
+              "actionableRetained": 7868,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 230,
+            "chapterRepair": {
+              "queued": 375,
+              "running": 55,
+              "repairExhausted": 151,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 0,
+              "reconciledHistorical": 8709,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 0.9957,
+            "requeuedTotal": 500,
+            "budgetStrategy": "v3_degraded",
+            "processedTotal": 44,
+            "queueRemaining": 1,
+            "cyclesCompleted": 16,
+            "lowProgressCycles": 8,
+            "degradedCycleCount": 6,
+            "failedTerminalTotal": 1,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 2,
+            "adaptiveMaxEnrichmentCycles": 16,
+            "effectiveFieldJobLimitPerCycle": 20
+          },
+          "sourceQuality": {
+            "score": 0.63,
+            "isWeak": false,
+            "reasons": [
+              "positive:chapter"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 0,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 0
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://sae.net/chapter-resources/",
+          "candidates": [
+            {
+              "url": "https://sae.net/chapter-resources/",
+              "rank": 4,
+              "score": 0.99,
+              "title": "Chapter Resources - Sigma Alpha Epsilon",
+              "snippet": "National Ambassador Program \u00b7 Join SAE \u00b7 Find A Chapter \u00b7 Refer a Brother ... \u00a9 2026 Sigma Alpha Epsilon. All Rights Reserved. Fraternity Web Design by Push10.",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://sae.net/join-sae/chapter-locator/",
+              "rank": 2,
+              "score": 0.9300000000000002,
+              "title": "Find A Chapter - Sigma Alpha Epsilon",
+              "snippet": "8 hours ago ... Use our interactive chapter coverage map to see where the nearest Sigma Alpha Epsilon chapter is or, if there is one at your university.",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://sae.net/",
+              "rank": 2,
+              "score": 0.8899999999999999,
+              "title": "Sigma Alpha Epsilon - Together, We Rise Above",
+              "snippet": "National Ambassador Program \u00b7 Join SAE \u00b7 Find A Chapter \u00b7 Refer a ... \u00a9 2026 Sigma Alpha Epsilon. All Rights Reserved. Fraternity Web Design by Push10. Close \u00d7\u00a0...",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://www.sae.net/resources/chapter-map/",
+              "rank": 2,
+              "score": 0.8700000000000001,
+              "title": "Chapter Coverage Map - Sigma Alpha Epsilon",
+              "snippet": "... Locator Widget\u2026 Quick Links. The SAE Portal \u00b7 Incident Report \u00b7 SAEStore ... Sigma Alpha Epsilon 1856 Sheridan Road Evanston, IL 60201-3837. Email contact\u00a0...",
+              "provider": "searxng_json"
+            },
+            {
+              "url": "https://sae.net/about/",
+              "rank": 5,
+              "score": 0.68,
+              "title": "About - Sigma Alpha Epsilon",
+              "snippet": "Founded in 1856, SAE has a long history with over 350000 lifetime members and numerous chapters, it emphasizes \"The True Gentleman\" creed.",
+              "provider": "searxng_json"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": "existing_source_invalid",
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "sae",
+              "input_name": "Sigma Alpha Epsilon",
+              "normalized_name": "Sigma Alpha Epsilon",
+              "normalized_slug": "sigma-alpha-epsilon"
+            },
+            {
+              "slug": "sigma-alpha-epsilon",
+              "step": "checked_verified_registry",
+              "found": false
+            },
+            {
+              "slug": "sigma-alpha-epsilon",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://en.wikipedia.org/wiki/List_of_Sigma_Alpha_Epsilon_chapters",
+              "confidence": 0.9,
+              "parser_key": "directory_v1",
+              "source_slug": "sigma-alpha-epsilon-main",
+              "source_type": "html_directory",
+              "candidate_valid": false,
+              "last_run_status": "succeeded",
+              "last_success_at": "2026-04-06T16:35:17.060159+00:00",
+              "candidate_reasons": [
+                "blocked_host"
+              ]
+            },
+            {
+              "url": "https://en.wikipedia.org/wiki/List_of_Sigma_Alpha_Epsilon_chapters",
+              "step": "rejected_existing_source_candidate",
+              "reasons": [
+                "blocked_host"
+              ]
+            },
+            {
+              "url": "https://sae.net/chapter-resources/",
+              "step": "source_identity_guard",
+              "decision": {
+                "decision": "match",
+                "metadata": {
+                  "host": "sae.net",
+                  "path": "/chapter-resources/",
+                  "chapterContextHits": 2
+                },
+                "confidence": 0.76,
+                "nextAction": "continue",
+                "reasonCodes": [
+                  "fraternity_phrase_match",
+                  "directory_signal",
+                  "strong_chapter_context"
+                ],
+                "evidenceUrls": [
+                  "https://sae.net/chapter-resources/"
+                ]
+              }
+            },
+            {
+              "url": "https://sae.net/chapter-resources/",
+              "step": "selected_search_candidate",
+              "score": 0.99,
+              "provider": "searxng_json",
+              "rationale": "selected_search_candidate"
+            }
+          ],
+          "sourceConfidence": 0.99,
+          "sourceProvenance": "search"
+        },
+        "queueTriage": {
+          "repairQueued": 375,
+          "invalidCancelled": 0,
+          "actionableRetained": 7385,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 375,
+          "running": 53,
+          "repairExhausted": 145,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 0,
+          "reconciledHistorical": 8226,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "identity_incomplete",
+          "candidatesRejected": 1,
+          "candidatesExtracted": 2,
+          "rejectionReasonCounts": {
+            "navigation_or_chrome": 1
+          },
+          "chapterSearchWallTimeMs": 295,
+          "nationalTargetsFollowed": 2,
+          "canonicalChaptersCreated": 0,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 1,
+          "repairableCount": 0,
+          "contactAdmission": {
+            "blocked_invalid": 1,
+            "admitted_canonical": 0,
+            "blocked_repairable": 0
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {},
+          "canonicalValidCount": 0,
+          "invalidReasonCounts": {
+            "navigation_or_chrome": 1
+          },
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 500,
+          "processed": 278,
+          "autoWritten": 105,
+          "writesByField": {
+            "find_email": 68,
+            "find_website": 9,
+            "find_instagram": 28
+          },
+          "blockedInvalid": 1,
+          "queuedDeferred": 692,
+          "reviewRequired": 103,
+          "providerDegraded": 0,
+          "queuedActionable": 1,
+          "terminalNoSignal": 61,
+          "blockedRepairable": 375,
+          "actionableRemaining": 1,
+          "reconciledHistorical": 8226,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "f94d1e2b-1170-4b79-8f41-65a8b19f2474",
+      "fraternity_name": "Sigma Chi",
+      "fraternity_slug": "sigma-chi",
+      "source_slug": "sigma-chi-main",
+      "source_url": "https://sigmachi.org/home/what-is-sigma-chi/undergraduate-groups/",
+      "status": "succeeded",
+      "stage": "completed",
+      "started_at": "2026-04-10T02:47:27.888832+00:00",
+      "finished_at": "2026-04-10T03:25:05.039570+00:00",
+      "updated_at": "2026-04-10T03:25:05.060363+00:00",
+      "last_error": "",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 21
+        },
+        "fields": {
+          "find_email": {
+            "done": 88,
+            "failed": 0,
+            "queued": 214,
+            "running": 0,
+            "doneUpdated": 74,
+            "queuedDeferred": 214,
+            "queuedActionable": 0,
+            "doneReviewRequired": 3,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 0
+          },
+          "find_website": {
+            "done": 210,
+            "failed": 3,
+            "queued": 140,
+            "running": 0,
+            "doneUpdated": 178,
+            "queuedDeferred": 140,
+            "queuedActionable": 0,
+            "doneReviewRequired": 15,
+            "doneProviderDegraded": 3,
+            "doneTerminalNoSignal": 14
+          },
+          "find_instagram": {
+            "done": 219,
+            "failed": 0,
+            "queued": 131,
+            "running": 0,
+            "doneUpdated": 195,
+            "queuedDeferred": 131,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 22
+          }
+        },
+        "totals": {
+          "done": 517,
+          "failed": 3,
+          "queued": 485,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 297,
+          "status": "succeeded",
+          "recordsSeen": 243,
+          "pagesProcessed": 2,
+          "recordsUpserted": 231,
+          "fieldJobsCreated": 228,
+          "reviewItemsCreated": 22
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 12,
+              "invalidCancelled": 0,
+              "actionableRetained": 1016,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 1,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 338,
+            "chapterRepair": {
+              "queued": 12,
+              "running": 3,
+              "repairExhausted": 0,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 8,
+              "reconciledHistorical": 1366,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 1.0,
+            "requeuedTotal": 298,
+            "budgetStrategy": "v3_degraded",
+            "processedTotal": 32,
+            "queueRemaining": 0,
+            "cyclesCompleted": 5,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 5,
+            "failedTerminalTotal": 0,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 4,
+            "adaptiveMaxEnrichmentCycles": 52,
+            "effectiveFieldJobLimitPerCycle": 50
+          },
+          "sourceQuality": {
+            "score": 0.7100000000000001,
+            "isWeak": false,
+            "reasons": [
+              "positive:chapter",
+              "positive:chapters"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 1,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 1
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://sigmachi.org/home/what-is-sigma-chi/undergraduate-groups/",
+          "candidates": [
+            {
+              "url": "https://sigmachi.org/chapters/",
+              "rank": 1,
+              "score": 0.95,
+              "title": "Sigma Chi verified source",
+              "snippet": "Verified source registry (nic_bootstrap); http_status=200",
+              "provider": "verified_registry"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": null,
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "sc",
+              "input_name": "Sigma Chi",
+              "normalized_name": "Sigma Chi",
+              "normalized_slug": "sigma-chi"
+            },
+            {
+              "slug": "sigma-chi",
+              "step": "checked_verified_registry",
+              "found": true,
+              "is_active": true,
+              "confidence": 0.95,
+              "http_status": 200,
+              "national_url": "https://sigmachi.org/chapters/",
+              "candidate_valid": true,
+              "candidate_reasons": []
+            },
+            {
+              "slug": "sigma-chi",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://sigmachi.org/chapters/",
+              "confidence": 0.75,
+              "parser_key": "directory_v1",
+              "source_slug": "sigma-chi-main",
+              "source_type": "html_directory",
+              "candidate_valid": true,
+              "last_run_status": "partial",
+              "last_success_at": "2026-04-05T00:48:44.759830+00:00",
+              "candidate_reasons": []
+            },
+            {
+              "url": "https://sigmachi.org/chapters/",
+              "step": "selected_verified_registry_candidate",
+              "confidence": 0.95,
+              "health_rank": 3
+            }
+          ],
+          "sourceConfidence": 0.99,
+          "sourceProvenance": "verified_registry"
+        },
+        "provisional": {
+          "rejected": 0,
+          "evaluated": true,
+          "remaining": 0,
+          "autoPromoted": 0,
+          "reviewRequired": 0
+        },
+        "queueTriage": {
+          "repairQueued": 12,
+          "invalidCancelled": 0,
+          "actionableRetained": 858,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 1,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 12,
+          "running": 3,
+          "repairExhausted": 0,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 8,
+          "reconciledHistorical": 1208,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "canonical_ready",
+          "candidatesRejected": 0,
+          "candidatesExtracted": 243,
+          "rejectionReasonCounts": {},
+          "chapterSearchWallTimeMs": 1587,
+          "nationalTargetsFollowed": 0,
+          "canonicalChaptersCreated": 231,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 0,
+          "repairableCount": 12,
+          "contactAdmission": {
+            "blocked_invalid": 0,
+            "admitted_canonical": 231,
+            "blocked_repairable": 12
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {
+            "identity_semantically_incomplete": 12
+          },
+          "canonicalValidCount": 231,
+          "invalidReasonCounts": {},
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 298,
+          "processed": 517,
+          "autoWritten": 447,
+          "writesByField": {
+            "find_email": 74,
+            "find_website": 178,
+            "find_instagram": 195
+          },
+          "blockedInvalid": 0,
+          "queuedDeferred": 485,
+          "reviewRequired": 18,
+          "providerDegraded": 3,
+          "queuedActionable": 0,
+          "terminalNoSignal": 36,
+          "blockedRepairable": 24,
+          "actionableRemaining": 0,
+          "reconciledHistorical": 1208,
+          "rejectionReasonCounts": {}
+        }
+      }
+    },
+    {
+      "id": "e11236f0-d704-4caf-96bc-5afc20774b34",
+      "fraternity_name": "Theta Xi",
+      "fraternity_slug": "theta-xi",
+      "source_slug": "theta-xi-main",
+      "source_url": "https://www.thetaxi.org/chapters-and-colonies/",
+      "status": "succeeded",
+      "stage": "completed",
+      "started_at": "2026-04-10T02:47:27.739311+00:00",
+      "finished_at": "2026-04-10T03:20:01.345592+00:00",
+      "updated_at": "2026-04-10T03:20:01.368842+00:00",
+      "last_error": "",
+      "progress": {
+        "graph": {
+          "workerId": "local-request-worker",
+          "activeNode": "sync_enrichment_progress",
+          "runtimeMode": "v3_request_supervisor",
+          "requestGraphRunId": 8
+        },
+        "fields": {
+          "find_email": {
+            "done": 20,
+            "failed": 0,
+            "queued": 25,
+            "running": 0,
+            "doneUpdated": 8,
+            "queuedDeferred": 25,
+            "queuedActionable": 0,
+            "doneReviewRequired": 4,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 2
+          },
+          "find_website": {
+            "done": 30,
+            "failed": 0,
+            "queued": 22,
+            "running": 0,
+            "doneUpdated": 7,
+            "queuedDeferred": 22,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 18
+          },
+          "find_instagram": {
+            "done": 35,
+            "failed": 0,
+            "queued": 17,
+            "running": 0,
+            "doneUpdated": 8,
+            "queuedDeferred": 17,
+            "queuedActionable": 0,
+            "doneReviewRequired": 0,
+            "doneProviderDegraded": 0,
+            "doneTerminalNoSignal": 20
+          }
+        },
+        "totals": {
+          "done": 85,
+          "failed": 0,
+          "queued": 64,
+          "running": 0
+        },
+        "crawlRun": {
+          "id": 281,
+          "status": "succeeded",
+          "recordsSeen": 43,
+          "pagesProcessed": 2,
+          "recordsUpserted": 42,
+          "fieldJobsCreated": 20,
+          "reviewItemsCreated": 4
+        },
+        "analytics": {
+          "enrichment": {
+            "queueTriage": {
+              "repairQueued": 3,
+              "invalidCancelled": 0,
+              "actionableRetained": 217,
+              "deferredLongCooldown": 0,
+              "purgedInactiveChapters": 0,
+              "sourceInvaliditySaturated": false,
+              "purgedBannedSchoolChapters": 0
+            },
+            "queueAtStart": 20,
+            "chapterRepair": {
+              "queued": 3,
+              "running": 1,
+              "repairExhausted": 3,
+              "confirmedInvalid": 0,
+              "promotedToCanonical": 0,
+              "reconciledHistorical": 267,
+              "downgradedToProvisional": 0
+            },
+            "queueBurnRate": 1.0,
+            "requeuedTotal": 66,
+            "budgetStrategy": "v3_degraded",
+            "processedTotal": 46,
+            "queueRemaining": 0,
+            "cyclesCompleted": 5,
+            "lowProgressCycles": 0,
+            "degradedCycleCount": 1,
+            "failedTerminalTotal": 0,
+            "runtimeFallbackCount": 0,
+            "effectiveFieldJobWorkers": 3,
+            "adaptiveMaxEnrichmentCycles": 6,
+            "effectiveFieldJobLimitPerCycle": 25
+          },
+          "sourceQuality": {
+            "score": 0.7100000000000001,
+            "isWeak": false,
+            "reasons": [
+              "positive:chapter",
+              "positive:chapters"
+            ],
+            "isBlocked": false,
+            "recoveredToUrl": null,
+            "recoveredFromUrl": null,
+            "recoveryAttempts": 0,
+            "sourceRejectedCount": 0,
+            "sourceRecoveredCount": 0,
+            "zeroChapterPrevented": 0
+          }
+        },
+        "discovery": {
+          "sourceUrl": "https://www.thetaxi.org/chapters-and-colonies/",
+          "candidates": [
+            {
+              "url": "https://www.thetaxi.org/chapters-and-colonies/",
+              "rank": 1,
+              "score": 0.9,
+              "title": "Theta Xi existing configured source (theta-xi-main)",
+              "snippet": "Existing source with last_run_status=succeeded; parser_key=directory_v1",
+              "provider": "existing_source"
+            }
+          ],
+          "confidenceTier": "high",
+          "fallbackReason": null,
+          "resolutionTrace": [
+            {
+              "step": "identity_normalization",
+              "acronym": "tx",
+              "input_name": "Theta Xi",
+              "normalized_name": "Theta Xi",
+              "normalized_slug": "theta-xi"
+            },
+            {
+              "slug": "theta-xi",
+              "step": "checked_verified_registry",
+              "found": false
+            },
+            {
+              "slug": "theta-xi",
+              "step": "checked_existing_sources",
+              "active": true,
+              "list_url": "https://www.thetaxi.org/chapters-and-colonies/",
+              "confidence": 0.9,
+              "parser_key": "directory_v1",
+              "source_slug": "theta-xi-main",
+              "source_type": "html_directory",
+              "candidate_valid": true,
+              "last_run_status": "succeeded",
+              "last_success_at": "2026-04-08T14:47:14.932196+00:00",
+              "candidate_reasons": []
+            },
+            {
+              "url": "https://www.thetaxi.org/chapters-and-colonies/",
+              "step": "selected_existing_source_candidate",
+              "confidence": 0.9,
+              "health_rank": 3
+            }
+          ],
+          "sourceConfidence": 0.9,
+          "sourceProvenance": "existing_source"
+        },
+        "provisional": {
+          "rejected": 0,
+          "evaluated": true,
+          "remaining": 0,
+          "autoPromoted": 0,
+          "reviewRequired": 0
+        },
+        "queueTriage": {
+          "repairQueued": 3,
+          "invalidCancelled": 0,
+          "actionableRetained": 205,
+          "deferredLongCooldown": 0,
+          "purgedInactiveChapters": 0,
+          "sourceInvaliditySaturated": false,
+          "purgedBannedSchoolChapters": 0
+        },
+        "chapterRepair": {
+          "queued": 3,
+          "running": 1,
+          "repairExhausted": 3,
+          "confirmedInvalid": 0,
+          "promotedToCanonical": 0,
+          "reconciledHistorical": 255,
+          "downgradedToProvisional": 0
+        },
+        "chapterSearch": {
+          "sourceClass": "html_directory",
+          "coverageState": "canonical_ready",
+          "candidatesRejected": 0,
+          "candidatesExtracted": 43,
+          "rejectionReasonCounts": {},
+          "chapterSearchWallTimeMs": 3030,
+          "nationalTargetsFollowed": 43,
+          "canonicalChaptersCreated": 42,
+          "broaderWebTargetsFollowed": 0,
+          "chapterOwnedTargetsSkipped": 0,
+          "provisionalChaptersCreated": 0,
+          "institutionalTargetsFollowed": 0
+        },
+        "chapterValidity": {
+          "invalidCount": 0,
+          "repairableCount": 1,
+          "contactAdmission": {
+            "blocked_invalid": 0,
+            "admitted_canonical": 42,
+            "blocked_repairable": 1
+          },
+          "provisionalCount": 0,
+          "repairReasonCounts": {
+            "identity_semantically_incomplete": 1
+          },
+          "canonicalValidCount": 42,
+          "invalidReasonCounts": {},
+          "sourceInvaliditySaturated": false
+        },
+        "contactResolution": {
+          "requeued": 66,
+          "processed": 85,
+          "autoWritten": 23,
+          "writesByField": {
+            "find_email": 8,
+            "find_website": 7,
+            "find_instagram": 8
+          },
+          "blockedInvalid": 0,
+          "queuedDeferred": 64,
+          "reviewRequired": 4,
+          "providerDegraded": 0,
+          "queuedActionable": 0,
+          "terminalNoSignal": 40,
+          "blockedRepairable": 4,
+          "actionableRemaining": 0,
+          "reconciledHistorical": 255,
+          "rejectionReasonCounts": {}
+        }
+      }
+    }
+  ]
+}
