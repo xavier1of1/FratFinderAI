@@ -58,13 +58,14 @@ class _FakeRepository:
     def insert_field_job_graph_decision(self, **kwargs):
         _ = kwargs
 
-    def claim_next_field_job(self, worker_id, source_slug=None, field_name=None, require_confident_website_for_email=False):
+    def claim_next_field_job(self, worker_id, source_slug=None, field_name=None, require_confident_website_for_email=False, degraded_mode=False):
         self.claim_args.append(
             {
                 "worker_id": worker_id,
                 "source_slug": source_slug,
                 "field_name": field_name,
                 "require_confident_website_for_email": require_confident_website_for_email,
+                "degraded_mode": degraded_mode,
             }
         )
         return self.jobs.pop(0) if self.jobs else None

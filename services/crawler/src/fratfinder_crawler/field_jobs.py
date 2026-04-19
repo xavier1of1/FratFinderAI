@@ -586,6 +586,9 @@ class FieldJobEngine:
         self._chapter_activity_cache: dict[tuple[str, str], ActivityValidationDecision] = {}
         self._authoritative_bundle_cache: dict[str, AuthoritativeBundle] = {}
         self._latest_provenance_context_cache: dict[str, dict[str, Any]] = {}
+        self._verify_school_cache_hit_count = 0
+        self._verify_school_official_url_reused_count = 0
+        self._verify_school_provider_search_attempted_count = 0
         search_settings = getattr(search_client, "_settings", None)
         configured_user_agent = str(getattr(search_settings, "crawler_http_user_agent", "") or "").strip()
         if configured_user_agent.lower().startswith("fratfinderai/") or not configured_user_agent:
@@ -653,6 +656,10 @@ class FieldJobEngine:
             "external_search_contact_resolved": 0,
             "chapter_search_queries": [],
             "enrichment_observations_logged": 0,
+            "degraded_authoritative_claimed": 0,
+            "verify_school_cache_hit": 0,
+            "verify_school_official_url_reused": 0,
+            "verify_school_provider_search_attempted": 0,
         }
 
         for _ in range(limit):
@@ -661,10 +668,18 @@ class FieldJobEngine:
                 source_slug=self._source_slug,
                 field_name=self._field_name,
                 require_confident_website_for_email=self._require_confident_website_for_email,
+                degraded_mode=self._search_degraded_mode,
             )
             if job is None:
                 break
             job = replace(job, field_name=_STATE_KEY_TO_FIELD_JOB.get(job.field_name, job.field_name))
+            if self._search_degraded_mode and job.field_name in {
+                FIELD_JOB_VERIFY_SCHOOL,
+                FIELD_JOB_VERIFY_WEBSITE,
+                FIELD_JOB_FIND_INSTAGRAM,
+                FIELD_JOB_FIND_EMAIL,
+            }:
+                summary["degraded_authoritative_claimed"] = int(summary["degraded_authoritative_claimed"]) + 1
 
             log_event(
                 self._logger,
@@ -784,6 +799,9 @@ class FieldJobEngine:
                 )
 
         self._last_batch_metrics = dict(summary)
+        self._last_batch_metrics["verify_school_cache_hit"] = self._verify_school_cache_hit_count
+        self._last_batch_metrics["verify_school_official_url_reused"] = self._verify_school_official_url_reused_count
+        self._last_batch_metrics["verify_school_provider_search_attempted"] = self._verify_school_provider_search_attempted_count
         return {
             "processed": int(summary["processed"]),
             "requeued": int(summary["requeued"]),
@@ -1094,6 +1112,9 @@ class FieldJobEngine:
                     return bundle_result
             match = self._find_email_candidate(job)
             if match is None:
+                if self._search_degraded_mode and _job_supporting_page_ready(job):
+                    self._trace("terminal_no_signal", target="contact_email", reason="authoritative_supporting_page_no_contact")
+                    return self._terminal_no_signal_result(job, "contact_email", reason_code="authoritative_supporting_page_no_contact")
                 if self._should_complete_provider_degraded(job):
                     self._trace("provider_degraded", target="contact_email")
                     return self._provider_degraded_result(job, "contact_email")
@@ -1129,6 +1150,9 @@ class FieldJobEngine:
             if fallback_result is not None:
                 self._trace("inactive_resolution", target="instagram_url")
                 return fallback_result
+            if self._search_degraded_mode and _job_supporting_page_ready(job):
+                self._trace("terminal_no_signal", target="instagram_url", reason="authoritative_supporting_page_no_contact")
+                return self._terminal_no_signal_result(job, "instagram_url", reason_code="authoritative_supporting_page_no_contact")
             if self._should_complete_provider_degraded(job):
                 self._trace("provider_degraded", target="instagram_url")
                 return self._provider_degraded_result(job, "instagram_url")
@@ -1224,7 +1248,7 @@ class FieldJobEngine:
         if self._search_queries_attempted <= 0 or self._search_queries_failed < self._search_queries_attempted:
             return False
         queue_state = job.queue_state or ((job.payload.get("contactResolution") or {}).get("queueState") if isinstance(job.payload.get("contactResolution"), dict) else None) or "actionable"
-        return queue_state == "deferred" and self._payload_int(job.payload.get("transient_provider_failures")) >= self._transient_short_retries and int(job.attempts or 0) > 1
+        return queue_state in {"deferred", "blocked_provider"} and self._payload_int(job.payload.get("transient_provider_failures")) >= self._transient_short_retries and int(job.attempts or 0) > 1
 
     def _school_name_for_job(self, job: FieldJob) -> str:
         for candidate in (job.university_name, job.payload.get("candidateSchoolName")):
@@ -1813,12 +1837,38 @@ class FieldJobEngine:
                 and stored_reason_code not in {"non_official_school_source", "no_official_school_policy_source_found"}
             )
             if stored_status != "unknown" or stored_unknown_is_reusable:
+                self._verify_school_cache_hit_count += 1
+                if stored_evidence_url:
+                    self._verify_school_official_url_reused_count += 1
+                if stored_unknown_is_reusable:
+                    reusable_document = self._fetch_search_document(stored_evidence_url, provider="official_school_cache")
+                    if reusable_document is not None and reusable_document.url:
+                        reusable_decision = tool_campus_greek_life_policy(
+                            school_name=school_name,
+                            page_url=reusable_document.url,
+                            title=reusable_document.title or "",
+                            text=reusable_document.text,
+                        )
+                        if reusable_decision.decision in {"allowed", "banned"}:
+                            record = self._repository.upsert_school_policy(
+                                school_name=school_name,
+                                greek_life_status="banned" if reusable_decision.decision == "banned" else "allowed",
+                                confidence=reusable_decision.confidence,
+                                evidence_url=reusable_document.url,
+                                evidence_source_type="official_school",
+                                reason_code=(reusable_decision.reason_codes or [f"school_policy_{reusable_decision.decision}"])[0],
+                                metadata={**reusable_decision.as_dict(), "sourceSnippet": reusable_document.text[:400]},
+                            )
+                            decision = self._decision_from_school_policy(record)
+                            self._school_policy_cache[school_slug] = decision
+                            return decision
                 decision = self._decision_from_school_policy(stored)
                 self._school_policy_cache[school_slug] = decision
                 return decision
 
         best_decision = ActivityValidationDecision()
         official_unknown: ActivityValidationDecision | None = None
+        self._verify_school_provider_search_attempted_count += 1
         for document in self._build_validation_documents(
             job,
             target="campus_policy",
@@ -1908,11 +1958,44 @@ class FieldJobEngine:
             return cached
         stored = self._repository.get_chapter_activity(fraternity_slug=fraternity_slug, school_name=school_name)
         if stored is not None:
+            self._verify_school_cache_hit_count += 1
+            stored_evidence_url = str(stored.evidence_url or "").strip()
+            if stored_evidence_url:
+                self._verify_school_official_url_reused_count += 1
+            stored_status = str(stored.chapter_activity_status or "unknown").strip().lower()
+            stored_source_type = str(stored.evidence_source_type or "").strip().lower()
+            if stored_status == "unknown" and stored_source_type == "official_school" and stored_evidence_url:
+                reusable_document = self._fetch_search_document(stored_evidence_url, provider="official_school_cache")
+                if reusable_document is not None and reusable_document.url:
+                    reusable_decision = tool_school_chapter_list_validator(
+                        school_name=school_name,
+                        fraternity_name=self._fraternity_name_for_job(job),
+                        fraternity_slug=fraternity_slug,
+                        page_url=reusable_document.url,
+                        title=reusable_document.title or "",
+                        text=reusable_document.text,
+                        html=reusable_document.html or "",
+                    )
+                    if reusable_decision.decision in {"confirmed_active", "confirmed_inactive"}:
+                        record = self._repository.upsert_chapter_activity(
+                            fraternity_slug=fraternity_slug,
+                            school_name=school_name,
+                            chapter_activity_status=reusable_decision.decision,
+                            confidence=reusable_decision.confidence,
+                            evidence_url=reusable_document.url,
+                            evidence_source_type="official_school",
+                            reason_code=(reusable_decision.reason_codes or [reusable_decision.decision])[0],
+                            metadata={**reusable_decision.as_dict(), "sourceSnippet": reusable_document.text[:400]},
+                        )
+                        decision = self._decision_from_chapter_activity(record)
+                        self._chapter_activity_cache[cache_key] = decision
+                        return decision
             decision = self._decision_from_chapter_activity(stored)
             self._chapter_activity_cache[cache_key] = decision
             return decision
 
         best_decision = ActivityValidationDecision()
+        self._verify_school_provider_search_attempted_count += 1
         validation_documents: list[SearchDocument] = []
         seen_validation_urls: set[str] = set()
         for target_name, query_limit, page_limit in (
@@ -3982,7 +4065,12 @@ class FieldJobEngine:
 
     def _build_requeue_payload_patch(self, job: FieldJob, exc: "RetryableJobError", backoff_seconds: int) -> dict[str, object]:
         patch: dict[str, object] = {}
-        queue_state = "deferred" if exc.reason_code in {"transient_network", "dependency_wait", "provider_low_signal", "provider_degraded"} else "actionable"
+        if exc.reason_code in {"transient_network", "provider_low_signal", "provider_degraded"}:
+            queue_state = "blocked_provider"
+        elif exc.reason_code in {"dependency_wait", "website_required"}:
+            queue_state = "blocked_dependency"
+        else:
+            queue_state = "actionable"
         patch["contactResolution"] = {
             "queueState": queue_state,
             "reasonCode": exc.reason_code,

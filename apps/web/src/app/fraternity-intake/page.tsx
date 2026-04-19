@@ -1,10 +1,12 @@
 import { FraternityIntakeDashboard } from "@/components/fraternity-intake-dashboard";
 import { PageIntro } from "@/components/page-intro";
-import { fetchFromApi } from "@/lib/api-client";
+import { listFraternityCrawlRequests } from "@/lib/repositories/fraternity-crawl-request-repository";
 import type { FraternityCrawlRequest } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 export default async function FraternityIntakePage() {
-  const requests = await fetchFromApi<FraternityCrawlRequest[]>("/api/fraternity-crawl-requests?limit=200");
+  const requests = await listFraternityCrawlRequests(200) as FraternityCrawlRequest[];
   const activeCount = requests.filter((item) => item.status === "queued" || item.status === "running").length;
 
   return (

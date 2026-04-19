@@ -1,11 +1,13 @@
 import { PageIntro } from "@/components/page-intro";
 import { StatusPill } from "@/components/status-pill";
 import { TagPill } from "@/components/tag-pill";
-import { fetchFromApi } from "@/lib/api-client";
+import { listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
 import type { CrawlRunListItem } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 export default async function RunsPage() {
-  const data = await fetchFromApi<CrawlRunListItem[]>("/api/runs?limit=200");
+  const data = await listCrawlRuns(200) as CrawlRunListItem[];
   const succeeded = data.filter((run) => run.status === "succeeded").length;
   const partial = data.filter((run) => run.status === "partial").length;
 

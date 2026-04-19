@@ -60,10 +60,18 @@ class FakeRepository:
         self.completed_siblings: list[dict[str, object]] = []
         self.enrichment_observations: list[object] = []
 
-    def claim_next_field_job(self, worker_id: str, source_slug: str | None = None, field_name: str | None = None, require_confident_website_for_email: bool = False) -> FieldJob | None:
+    def claim_next_field_job(
+        self,
+        worker_id: str,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        require_confident_website_for_email: bool = False,
+        degraded_mode: bool = False,
+    ) -> FieldJob | None:
         self.claimed_source_slugs.append(source_slug)
         self.claimed_field_names.append(field_name)
         self.claimed_require_confident_website_for_email.append(require_confident_website_for_email)
+        _ = worker_id, degraded_mode
         if not self.jobs:
             return None
         job = self.jobs.pop(0)
@@ -557,6 +565,7 @@ def test_degraded_mode_skips_external_search_and_requeues_with_long_cooldown():
     assert repo.requeue_preserve_attempt_flags == [True]
     assert repo.requeue_details[0][1] == 600
     assert "search preflight degraded" in repo.requeue_details[0][2]
+    assert repo.requeue_payload_patches[0]["contactResolution"]["queueState"] == "blocked_provider"
     assert repo.requeue_payload_patches[0]["contactResolution"]["reasonCode"] == "provider_degraded"
 
 
@@ -579,6 +588,62 @@ def test_degraded_mode_still_uses_existing_authoritative_context_before_requeue(
 
     assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
     assert search_client.queries == []
+    assert len(repo.completed) == 1
+
+
+def test_degraded_mode_completes_email_as_no_signal_when_supporting_page_has_no_contact():
+    job = replace(
+        _job("find_email", university_name="Demo University"),
+        payload={
+            "sourceSlug": "alpha-main",
+            "contactResolution": {
+                "supportingPageUrl": "https://demo.edu/greek/alpha",
+                "supportingPageScope": "school_affiliation_page",
+            },
+        },
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["No email listed here"]})
+    search_client = FakeSearchClient({})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_degraded_mode=True,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.requeued == []
+    assert len(repo.completed) == 1
+
+
+def test_degraded_mode_completes_instagram_as_no_signal_when_supporting_page_has_no_contact():
+    job = replace(
+        _job("find_instagram", university_name="Demo University"),
+        payload={
+            "sourceSlug": "alpha-main",
+            "contactResolution": {
+                "supportingPageUrl": "https://demo.edu/greek/alpha",
+                "supportingPageScope": "school_affiliation_page",
+            },
+        },
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={"chapter-1": ["No social links here"]})
+    search_client = FakeSearchClient({})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        search_degraded_mode=True,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.requeued == []
     assert len(repo.completed) == 1
 
 
@@ -671,6 +736,7 @@ def test_transient_search_failures_escalate_to_long_cooldown():
     assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
     assert repo.requeue_details[0][1] == 600
     assert repo.requeue_preserve_attempt_flags == [True]
+    assert repo.requeue_payload_patches[0]["contactResolution"]["queueState"] == "blocked_provider"
     assert repo.requeue_payload_patches[0]["transient_provider_failures"] == 3
 
 

@@ -2,8 +2,14 @@ import { MetricCard } from "@/components/metric-card";
 import { PageIntro } from "@/components/page-intro";
 import { StatusPill } from "@/components/status-pill";
 import { TagPill } from "@/components/tag-pill";
-import { fetchFromApi } from "@/lib/api-client";
+import { APP_VERSION_LABEL } from "@/lib/platform-version";
 import type { AgentOpsSummary, CampaignRun, ChapterListItem, CrawlRunListItem, FieldJobListItem, ReviewItemListItem } from "@/lib/types";
+import { getAgentOpsSummary } from "@/lib/repositories/agent-ops-repository";
+import { listCampaignRuns } from "@/lib/repositories/campaign-run-repository";
+import { listChapters } from "@/lib/repositories/chapter-repository";
+import { listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
+import { listFieldJobs } from "@/lib/repositories/field-job-repository";
+import { listReviewItems } from "@/lib/repositories/review-item-repository";
 
 const pageGuide = [
   {
@@ -48,14 +54,16 @@ const pageGuide = [
   }
 ];
 
+export const dynamic = "force-dynamic";
+
 export default async function OverviewPage() {
   const [chapters, runs, reviewItems, fieldJobs, campaigns, agentOps] = await Promise.all([
-    fetchFromApi<ChapterListItem[]>("/api/chapters?limit=5"),
-    fetchFromApi<CrawlRunListItem[]>("/api/runs?limit=8"),
-    fetchFromApi<ReviewItemListItem[]>("/api/review-items?limit=8"),
-    fetchFromApi<FieldJobListItem[]>("/api/field-jobs?limit=8"),
-    fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=8"),
-    fetchFromApi<{ summary: AgentOpsSummary }>("/api/agent-ops?limit=20")
+    listChapters({ limit: 5, offset: 0 }) as Promise<ChapterListItem[]>,
+    listCrawlRuns(8) as Promise<CrawlRunListItem[]>,
+    listReviewItems(8) as Promise<ReviewItemListItem[]>,
+    listFieldJobs(8) as Promise<FieldJobListItem[]>,
+    listCampaignRuns(8) as Promise<CampaignRun[]>,
+    getAgentOpsSummary() as Promise<AgentOpsSummary>
   ]);
 
   const latestRun = runs[0];
@@ -64,13 +72,13 @@ export default async function OverviewPage() {
     <div className="sectionStack">
       <PageIntro
         eyebrow="Overview"
-        title="V3.0.1 command center for sourcing, agents, and review"
-        description="Use this page to get your bearings fast: whether the V3 worker queue is healthy, how much data is loaded, and where operator attention is needed next."
+        title={`${APP_VERSION_LABEL} command center for sourcing, agents, and review`}
+        description={`Use this page to get your bearings fast: whether the ${APP_VERSION_LABEL} worker queue is healthy, how much data is loaded, and where operator attention is needed next.`}
         meta={[
           `${chapters.length} preview chapters`,
           `${runs.length} recent runs`,
           `${campaigns.filter((item) => item.status === "running" || item.status === "queued").length} active campaigns`,
-          agentOps.summary.requestQueueQueued === 0 && agentOps.summary.requestQueueRunning === 0 ? "V3 queue clear" : "V3 queue active"
+          agentOps.requestQueueQueued === 0 && agentOps.requestQueueRunning === 0 ? `${APP_VERSION_LABEL} queue clear` : `${APP_VERSION_LABEL} queue active`
         ]}
       />
 
@@ -82,9 +90,9 @@ export default async function OverviewPage() {
           <MetricCard label="Campaigns" value={campaigns.length} />
           <MetricCard label="Open Reviews" value={reviewItems.filter((item) => item.status === "open").length} />
           <MetricCard label="Queued Jobs" value={fieldJobs.filter((item) => item.status === "queued").length} />
-          <MetricCard label="V3 Graph Runs" value={agentOps.summary.graphRunsTotal} />
-          <MetricCard label="Queued Requests" value={agentOps.summary.requestQueueQueued} />
-          <MetricCard label="Provisional Chapters" value={agentOps.summary.provisionalOpen} />
+          <MetricCard label="V3 Graph Runs" value={agentOps.graphRunsTotal} />
+          <MetricCard label="Queued Requests" value={agentOps.requestQueueQueued} />
+          <MetricCard label="Provisional Chapters" value={agentOps.provisionalOpen} />
         </div>
       </section>
 

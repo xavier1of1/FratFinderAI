@@ -148,6 +148,8 @@ export interface FieldJobListItem {
   chapterSlug: string;
   fieldName: string;
   status: string;
+  queueState: string;
+  blockedReason: string | null;
   terminalFailure: boolean;
   claimedBy: string | null;
   attempts: number;
@@ -156,6 +158,23 @@ export interface FieldJobListItem {
   startedAt: string | null;
   finishedAt: string | null;
   lastError: string | null;
+}
+
+export interface FieldJobLogItem {
+  id: string;
+  jobId: string;
+  kind: "status" | "event" | "decision";
+  attempt: number | null;
+  createdAt: string;
+  message: string;
+  signature: string;
+}
+
+export interface FieldJobLogFeed {
+  jobId: string;
+  lines: FieldJobLogItem[];
+  dedupedCount: number;
+  generatedAt: string;
 }
 
 export interface ReviewItemAuditLog {
@@ -613,6 +632,14 @@ export interface AgentOpsSummary {
   fieldJobsDeferred: number;
   fieldJobsBlockedInvalid: number;
   fieldJobsBlockedRepairable: number;
+  fieldJobsBlockedProvider: number;
+  fieldJobsBlockedDependency: number;
+  fieldJobsProviderDependentDeferred: number;
+  fieldJobsDependencyBlocked: number;
+  fieldJobsRepairBacklog: number;
+  fieldJobWorkersActive: number;
+  fieldJobWorkersStale: number;
+  fieldJobWorkerAlertOpen: number;
   chapterRepairQueued: number;
   chapterRepairRunning: number;
   chapterRepairCompleted: number;

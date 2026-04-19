@@ -9,6 +9,7 @@ import unicodedata
 
 import requests
 
+from fratfinder_crawler import __version__
 from fratfinder_crawler.models import ExistingSourceCandidate, VerifiedSourceRecord
 from fratfinder_crawler.precision_tools import tool_same_host_directory_ranker, tool_source_identity_guard
 from fratfinder_crawler.search import SearchClient, SearchResult
@@ -668,7 +669,7 @@ def _default_html_fetcher(url: str) -> str | None:
         url,
         timeout=8,
         headers={
-            "User-Agent": "FratFinderAI/3.0.1 (+https://github.com/openai)"
+            "User-Agent": f"FratFinderAI/{__version__} (+https://github.com/openai)"
         },
     )
     response.raise_for_status()

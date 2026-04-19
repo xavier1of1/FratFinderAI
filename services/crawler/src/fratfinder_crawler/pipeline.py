@@ -329,6 +329,102 @@ class CrawlService:
                     error=str(exc),
                 )
 
+    def run_field_job_worker(
+        self,
+        *,
+        once: bool = False,
+        limit: int | None = None,
+        workers: int | None = None,
+        poll_seconds: int | None = None,
+        runtime_mode: str | None = None,
+        graph_durability: str | None = None,
+        run_preflight: bool = True,
+    ) -> dict[str, object]:
+        batch_limit = max(1, int(limit if limit is not None else self._settings.crawler_v3_request_batch_limit))
+        effective_poll_seconds = max(1, int(poll_seconds if poll_seconds is not None else 15))
+        effective_runtime_mode = self._resolve_field_job_runtime_mode(runtime_mode)
+        effective_graph_durability = self._resolve_field_job_graph_durability(graph_durability)
+        lease_seconds = max(30, int(self._settings.crawler_field_job_worker_lease_seconds))
+        worker_id = self._settings.crawler_field_job_worker_id
+        summaries: list[dict[str, object]] = []
+        idle_cycles = 0
+
+        log_event(
+            LOGGER,
+            "field_job_worker_started",
+            worker_id=worker_id,
+            once=once,
+            batch_limit=batch_limit,
+            poll_seconds=effective_poll_seconds,
+            runtime_mode=effective_runtime_mode,
+            graph_durability=effective_graph_durability,
+        )
+
+        try:
+            with get_connection(self._settings) as connection:
+                request_repository = RequestGraphRepository(connection)
+                request_repository.upsert_worker_process(
+                    worker_id=worker_id,
+                    workload_lane="contact_resolution",
+                    runtime_owner=f"python_field_job_worker_{effective_runtime_mode}",
+                    lease_seconds=lease_seconds,
+                    metadata={
+                        "runtimeMode": effective_runtime_mode,
+                        "graphDurability": effective_graph_durability,
+                        "workerType": "field_job_supervisor",
+                    },
+                )
+
+            while True:
+                with get_connection(self._settings) as connection:
+                    repository = CrawlerRepository(connection)
+                    request_repository = RequestGraphRepository(connection)
+                    request_repository.heartbeat_worker_process(worker_id, lease_seconds=lease_seconds)
+                    queue_counts = repository.get_field_job_queue_counts()
+
+                actionable_jobs = int(queue_counts.get("actionable_jobs", 0) or 0)
+                running_jobs = int(queue_counts.get("running_jobs", 0) or 0)
+                if actionable_jobs <= 0 and running_jobs <= 0:
+                    idle_cycles += 1
+                    if once or len(summaries) >= batch_limit:
+                        break
+                    time.sleep(effective_poll_seconds)
+                    continue
+
+                idle_cycles = 0
+                summary = self.process_field_jobs(
+                    limit=batch_limit,
+                    workers=workers,
+                    run_preflight=run_preflight,
+                    runtime_mode=effective_runtime_mode,
+                    graph_durability=effective_graph_durability,
+                )
+                summaries.append(summary)
+                with get_connection(self._settings) as connection:
+                    request_repository = RequestGraphRepository(connection)
+                    request_repository.heartbeat_worker_process(worker_id, lease_seconds=lease_seconds)
+                if once:
+                    break
+        finally:
+            with get_connection(self._settings) as connection:
+                request_repository = RequestGraphRepository(connection)
+                request_repository.stop_worker_process(worker_id, status="stopped")
+
+        aggregate = {
+            "workerId": worker_id,
+            "runtimeMode": effective_runtime_mode,
+            "graphDurability": effective_graph_durability,
+            "processedBatches": len(summaries),
+            "processed": sum(int(item.get("processed", 0) or 0) for item in summaries),
+            "requeued": sum(int(item.get("requeued", 0) or 0) for item in summaries),
+            "failedTerminal": sum(int(item.get("failed_terminal", 0) or 0) for item in summaries),
+            "fieldJobWorkerRecoveriesStarted": sum(int(item.get("field_job_worker_recoveries_started", 0) or 0) for item in summaries),
+            "idleCycles": idle_cycles,
+            "summaries": summaries,
+        }
+        log_event(LOGGER, "field_job_worker_finished", **aggregate)
+        return aggregate
+
     def adaptive_train_eval(
         self,
         *,
@@ -1514,8 +1610,19 @@ class CrawlService:
             "invalidCancelled": 0,
             "deferredLongCooldown": 0,
             "dependencyDeferred": 0,
+            "dependencyUnlockPromoted": 0,
+            "dependencyReactivatedFromExistingSupport": 0,
+            "dependencyPrerequisitesCreated": 0,
+            "dependencyPrerequisitesAlreadyPending": 0,
+            "dependencyJobsLeftBlocked": 0,
             "repairQueued": 0,
+            "repairIsolated": 0,
             "actionableRetained": 0,
+            "typedStateBackfilled": 0,
+            "repairBackfillIsolated": 0,
+            "providerRetryCandidatesConsidered": 0,
+            "providerRetryCandidatesAdmitted": 0,
+            "providerRetryCandidatesSkipped": 0,
             "sourceInvaliditySaturated": False,
         }
         repair_summary: dict[str, int] = {
@@ -1527,6 +1634,10 @@ class CrawlService:
             "repairExhausted": 0,
             "reconciledHistorical": 0,
         }
+        typed_state_backfill = repository.backfill_field_job_typed_queue_state()
+        triage_summary["typedStateBackfilled"] = int(typed_state_backfill.get("blocked_reason_populated", 0) or 0)
+        triage_summary["repairBackfillIsolated"] = int(typed_state_backfill.get("blocked_repairable_rows", 0) or 0)
+
         jobs = repository.list_queued_field_jobs_for_triage(limit=max(1, limit), source_slug=source_slug, field_name=field_name)
         if not jobs:
             return triage_summary, repair_summary
@@ -1568,11 +1679,13 @@ class CrawlService:
                 job.website_url
                 and website_field_state not in {"", "missing", "low_confidence"}
             )
+            has_dependency_support = _job_supporting_page_ready(job)
             if (
                 decision.validity_class == "canonical_valid"
                 and job.field_name == FIELD_JOB_FIND_EMAIL
                 and bool(getattr(self._settings, "crawler_search_require_confident_website_for_email", True))
                 and not has_confident_website
+                and not has_dependency_support
             ):
                 has_pending_website_job = repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE)
                 reason_code = "dependency_wait" if has_pending_website_job else "website_required"
@@ -1588,7 +1701,7 @@ class CrawlService:
                             "validityClass": decision.validity_class,
                         },
                         "contactResolution": {
-                            "queueState": "deferred",
+                            "queueState": "blocked_dependency",
                             "validityClass": decision.validity_class,
                             "reasonCode": reason_code,
                         },
@@ -1610,19 +1723,51 @@ class CrawlService:
                 current_reason_code = ""
                 if isinstance(job.payload.get("contactResolution"), dict):
                     current_reason_code = str((job.payload.get("contactResolution") or {}).get("reasonCode") or "").strip()
+                if (
+                    current_queue_state == "actionable"
+                    and not _preflight_snapshot_is_healthy(preflight_snapshot)
+                    and _job_has_provider_retry_signature(job)
+                    and not _job_is_degraded_authoritative_candidate(repository, job)
+                ):
+                    current_queue_state = "blocked_provider"
+                    current_reason_code = current_reason_code or str(job.payload.get("transient_provider_last_reason") or "transient_network")
                 next_queue_state = current_queue_state
                 queue_outcome = "keep_deferred" if current_queue_state == "deferred" else "keep_actionable"
                 scheduled_delay_seconds = 0 if current_queue_state != "deferred" else None
                 last_error = "" if current_queue_state != "deferred" else None
-                if current_queue_state == "deferred" and current_reason_code in {"provider_degraded", "dependency_wait", "website_required"}:
+                if current_queue_state in {"deferred", "blocked_provider", "blocked_dependency"} and current_reason_code in {
+                    "provider_degraded",
+                    "transient_network",
+                    "provider_low_signal",
+                    "dependency_wait",
+                    "website_required",
+                }:
                     can_reactivate = False
-                    if current_reason_code == "provider_degraded":
-                        can_reactivate = _preflight_snapshot_is_healthy(preflight_snapshot)
+                    if current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}:
+                        triage_summary["providerRetryCandidatesConsidered"] = int(triage_summary["providerRetryCandidatesConsidered"]) + 1
+                        can_reactivate = _preflight_snapshot_is_healthy(preflight_snapshot) or _job_is_degraded_authoritative_candidate(repository, job)
                     else:
-                        can_reactivate = _job_supporting_page_ready(job)
-                    next_queue_state = "actionable" if can_reactivate else "deferred"
+                        can_reactivate = _job_supporting_page_ready(job) or _job_has_reusable_official_school_evidence(repository, job)
+                    if can_reactivate:
+                        next_queue_state = "actionable"
+                        if current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}:
+                            triage_summary["providerRetryCandidatesAdmitted"] = int(triage_summary["providerRetryCandidatesAdmitted"]) + 1
+                        else:
+                            triage_summary["dependencyReactivatedFromExistingSupport"] = int(triage_summary["dependencyReactivatedFromExistingSupport"]) + 1
+                    elif current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}:
+                        next_queue_state = "blocked_provider"
+                        triage_summary["providerRetryCandidatesSkipped"] = int(triage_summary["providerRetryCandidatesSkipped"]) + 1
+                    else:
+                        next_queue_state = "blocked_dependency"
                     queue_outcome = "resume_actionable" if can_reactivate else "keep_deferred"
-                    scheduled_delay_seconds = 0 if can_reactivate else None
+                    scheduled_delay_seconds = 0 if can_reactivate else (
+                        max(
+                            int(getattr(self._settings, "crawler_search_transient_long_cooldown_seconds", 900)),
+                            int(getattr(self._settings, "crawler_search_dependency_wait_seconds", 300)),
+                        )
+                        if current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}
+                        else None
+                    )
                     last_error = "" if can_reactivate else None
                 repository.patch_queued_field_job(
                     job.id,
@@ -1634,7 +1779,7 @@ class CrawlService:
                         "contactResolution": {
                             "queueState": next_queue_state,
                             "validityClass": decision.validity_class,
-                            **({"reasonCode": current_reason_code} if next_queue_state == "deferred" and current_reason_code else {}),
+                            **({"reasonCode": current_reason_code} if next_queue_state != "actionable" and current_reason_code else {}),
                         },
                     },
                     status="queued",
@@ -1643,8 +1788,35 @@ class CrawlService:
                     terminal_failure=False,
                 )
                 triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
-                if next_queue_state == "deferred" and current_reason_code in {"dependency_wait", "website_required"}:
+                if next_queue_state == "blocked_dependency" and current_reason_code in {"dependency_wait", "website_required"}:
                     triage_summary["dependencyDeferred"] = int(triage_summary["dependencyDeferred"]) + 1
+                    if job.field_name in {FIELD_JOB_FIND_EMAIL, FIELD_JOB_VERIFY_WEBSITE}:
+                        missing_fields: list[str] = []
+                        has_support_ready = _job_supporting_page_ready(job)
+                        if not has_support_ready and not repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE):
+                            missing_fields.append(FIELD_JOB_FIND_WEBSITE)
+                        elif not has_support_ready:
+                            triage_summary["dependencyPrerequisitesAlreadyPending"] = int(triage_summary["dependencyPrerequisitesAlreadyPending"]) + 1
+                        if (
+                            not has_support_ready
+                            and job.university_name
+                            and not repository.has_pending_field_job(job.chapter_id, FIELD_JOB_VERIFY_SCHOOL)
+                        ):
+                            missing_fields.append(FIELD_JOB_VERIFY_SCHOOL)
+                        elif not has_support_ready and job.university_name:
+                            triage_summary["dependencyPrerequisitesAlreadyPending"] = int(triage_summary["dependencyPrerequisitesAlreadyPending"]) + 1
+                        if missing_fields:
+                            created_count = repository.create_field_jobs(
+                                job.chapter_id,
+                                job.crawl_run_id,
+                                job.chapter_slug,
+                                job.source_slug,
+                                missing_fields,
+                            )
+                            triage_summary["dependencyUnlockPromoted"] = int(triage_summary["dependencyUnlockPromoted"]) + created_count
+                            triage_summary["dependencyPrerequisitesCreated"] = int(triage_summary["dependencyPrerequisitesCreated"]) + created_count
+                        else:
+                            triage_summary["dependencyJobsLeftBlocked"] = int(triage_summary["dependencyJobsLeftBlocked"]) + 1
                 repair_summary["reconciledHistorical"] += 1
                 continue
             if decision.validity_class == "provisional_candidate":
@@ -1696,7 +1868,7 @@ class CrawlService:
                             "sourceSlug": seed_job.source_slug,
                         },
                         "contactResolution": {
-                            "queueState": "deferred",
+                            "queueState": "blocked_repairable",
                             "validityClass": "repairable_candidate",
                             "reasonCode": "queued_for_entity_repair",
                         },
@@ -1707,6 +1879,7 @@ class CrawlService:
                     terminal_failure=False,
                 )
                 triage_summary["repairQueued"] = int(triage_summary["repairQueued"]) + 1
+                triage_summary["repairIsolated"] = int(triage_summary["repairIsolated"]) + 1
                 repair_summary["reconciledHistorical"] += 1
 
         triaged = int(triage_summary["triaged"])
@@ -1949,7 +2122,7 @@ class CrawlService:
                             "family": repair_family,
                         },
                         "contactResolution": {
-                            "queueState": "deferred",
+                            "queueState": "blocked_repairable",
                             "validityClass": "repairable_candidate",
                             "reasonCode": outcome.get("reason") or "repair_exhausted",
                         },
@@ -2000,6 +2173,14 @@ class CrawlService:
             "repairQueued": 0,
             "actionableRetained": 0,
             "dependencyDeferred": 0,
+            "dependencyUnlockPromoted": 0,
+            "dependencyReactivatedFromExistingSupport": 0,
+            "dependencyPrerequisitesCreated": 0,
+            "dependencyPrerequisitesAlreadyPending": 0,
+            "dependencyJobsLeftBlocked": 0,
+            "providerRetryCandidatesConsidered": 0,
+            "providerRetryCandidatesAdmitted": 0,
+            "providerRetryCandidatesSkipped": 0,
             "sourceInvaliditySaturated": False,
         }
         repair_summary: dict[str, int] = {
@@ -2012,6 +2193,17 @@ class CrawlService:
             "reconciledHistorical": 0,
         }
         policy_pack = self._resolve_field_job_policy_pack(source_slug)
+        field_job_worker_recoveries_started = 0
+        initial_worker_processes = {"active_workers": 0, "stale_workers": 0}
+        initial_queue_counts = {
+            "queued_jobs": 0,
+            "actionable_jobs": 0,
+            "deferred_jobs": 0,
+            "blocked_provider_jobs": 0,
+            "blocked_dependency_jobs": 0,
+            "blocked_repairable_jobs": 0,
+            "running_jobs": 0,
+        }
 
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
@@ -2023,6 +2215,14 @@ class CrawlService:
                 stale_graph_runs_recovered = repository.reconcile_stale_field_job_graph_runs(
                     self._settings.crawler_field_job_graph_run_stale_minutes
                 )
+            initial_queue_counts = repository.get_field_job_queue_counts()
+            initial_worker_processes = repository.get_field_job_worker_process_stats()
+            if (
+                int(initial_queue_counts.get("actionable_jobs", 0) or 0) > 0
+                and int(initial_queue_counts.get("running_jobs", 0) or 0) == 0
+                and int(initial_worker_processes.get("active_workers", 0) or 0) == 0
+            ):
+                field_job_worker_recoveries_started = 1
 
         if stale_jobs_recovered or stale_graph_runs_recovered:
             log_event(
@@ -2057,6 +2257,14 @@ class CrawlService:
                         "mid_batch_provider_reorders": 0,
                         "preflight_probe_queries": _probe_queries_from_preflight(preflight_snapshot),
                         "chapter_search_queries": [],
+                        "field_job_workers_active": int(initial_worker_processes.get("active_workers", 0) or 0),
+                        "field_job_workers_stale": int(initial_worker_processes.get("stale_workers", 0) or 0),
+                        "field_job_worker_recoveries_started": field_job_worker_recoveries_started,
+                        "field_job_worker_alert_open": bool(
+                            int(initial_queue_counts.get("actionable_jobs", 0) or 0) > 0
+                            and int(initial_queue_counts.get("running_jobs", 0) or 0) == 0
+                            and int(initial_worker_processes.get("active_workers", 0) or 0) == 0
+                        ),
                     }
                     aggregate.update(_field_job_batch_delta_payload(before_metrics, before_metrics, processed=0))
                     aggregate["stale_jobs_recovered"] = stale_jobs_recovered
@@ -2121,6 +2329,13 @@ class CrawlService:
                 "queue_triage": triage_summary,
                 "chapter_repair": repair_summary,
                 "policy_pack": str(policy_pack.get("name") or "default"),
+                "field_job_workers_active": 0,
+                "field_job_workers_stale": int(initial_worker_processes.get("stale_workers", 0) or 0),
+                "field_job_worker_recoveries_started": field_job_worker_recoveries_started,
+                "field_job_worker_alert_open": bool(
+                    int(initial_queue_counts.get("actionable_jobs", 0) or 0) > 0
+                    and int(initial_queue_counts.get("running_jobs", 0) or 0) == 0
+                ),
             }
             aggregate.update(_field_job_batch_delta_payload(before_metrics, before_metrics, processed=0))
             aggregate["stale_jobs_recovered"] = stale_jobs_recovered
@@ -2174,6 +2389,10 @@ class CrawlService:
         aggregate["queue_triage"] = triage_summary
         aggregate["chapter_repair"] = repair_summary
         aggregate["policy_pack"] = str(policy_pack.get("name") or "default")
+        aggregate["field_job_worker_recoveries_started"] = field_job_worker_recoveries_started
+        aggregate["field_job_workers_active"] = max(len(worker_limits), int(initial_worker_processes.get("active_workers", 0) or 0))
+        aggregate["field_job_workers_stale"] = int(initial_worker_processes.get("stale_workers", 0) or 0)
+        aggregate["field_job_worker_alert_open"] = False
         aggregate["provider_window_state"] = aggregate.get("provider_window_state") or _provider_window_state_from_preflight(
             preflight_snapshot,
             degraded_mode=degraded_mode,
@@ -2224,6 +2443,10 @@ class CrawlService:
             "enrichment_observations_logged": 0,
             "mid_batch_provider_rechecks": 0,
             "mid_batch_provider_reorders": 0,
+            "degraded_authoritative_claimed": 0,
+            "verify_school_cache_hit": 0,
+            "verify_school_official_url_reused": 0,
+            "verify_school_provider_search_attempted": 0,
             "preflight_probe_queries": [],
             "chapter_search_queries": [],
             "provider_window_state": current_provider_window_state,
@@ -2245,135 +2468,156 @@ class CrawlService:
 
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
+            request_repository = RequestGraphRepository(connection)
             worker_id = _worker_id(self._settings.crawler_field_job_worker_id, worker_index, total_workers)
+            lease_seconds = max(30, int(self._settings.crawler_field_job_worker_lease_seconds))
+            request_repository.upsert_worker_process(
+                worker_id=worker_id,
+                workload_lane="contact_resolution",
+                runtime_owner=f"python_field_job_{runtime_mode}",
+                status="active",
+                lease_seconds=lease_seconds,
+                metadata={
+                    "sourceSlug": source_slug,
+                    "fieldName": field_name,
+                    "runtimeMode": runtime_mode,
+                    "graphDurability": graph_durability,
+                    "workerIndex": worker_index,
+                    "totalWorkers": total_workers,
+                    "degradedMode": current_degraded_mode,
+                },
+            )
+            try:
+                while remaining > 0:
+                    segment_limit = min(remaining, jobs_per_recheck) if recheck_enabled and not current_degraded_mode else remaining
+                    max_search_pages = self._settings.crawler_search_max_pages_per_job
+                    dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
+                    email_max_queries = min(self._settings.crawler_search_email_max_queries, 3)
+                    instagram_max_queries = min(self._settings.crawler_search_instagram_max_queries, 3)
+                    if policy_pack.get("max_search_pages") is not None:
+                        max_search_pages = min(max_search_pages, int(policy_pack["max_search_pages"]))
+                    if policy_pack.get("email_max_queries") is not None:
+                        email_max_queries = min(email_max_queries, int(policy_pack["email_max_queries"]))
+                    if policy_pack.get("instagram_max_queries") is not None:
+                        instagram_max_queries = min(instagram_max_queries, int(policy_pack["instagram_max_queries"]))
+                    if current_degraded_mode:
+                        current_search_settings = current_search_settings.model_copy(
+                            update={"crawler_search_max_results": current_search_settings.crawler_search_degraded_max_results}
+                        )
+                        max_search_pages = max(1, self._settings.crawler_search_degraded_max_pages_per_job)
+                        dependency_wait_seconds = max(
+                            self._settings.crawler_search_degraded_dependency_wait_seconds,
+                            self._settings.crawler_search_dependency_wait_seconds,
+                        )
+                        email_max_queries = min(max(1, self._settings.crawler_search_degraded_email_max_queries), 3)
+                        instagram_max_queries = min(max(1, self._settings.crawler_search_degraded_instagram_max_queries), 3)
 
-            while remaining > 0:
-                segment_limit = min(remaining, jobs_per_recheck) if recheck_enabled and not current_degraded_mode else remaining
-                max_search_pages = self._settings.crawler_search_max_pages_per_job
-                dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
-                email_max_queries = min(self._settings.crawler_search_email_max_queries, 3)
-                instagram_max_queries = min(self._settings.crawler_search_instagram_max_queries, 3)
-                if policy_pack.get("max_search_pages") is not None:
-                    max_search_pages = min(max_search_pages, int(policy_pack["max_search_pages"]))
-                if policy_pack.get("email_max_queries") is not None:
-                    email_max_queries = min(email_max_queries, int(policy_pack["email_max_queries"]))
-                if policy_pack.get("instagram_max_queries") is not None:
-                    instagram_max_queries = min(instagram_max_queries, int(policy_pack["instagram_max_queries"]))
-                if current_degraded_mode:
-                    current_search_settings = current_search_settings.model_copy(
-                        update={"crawler_search_max_results": current_search_settings.crawler_search_degraded_max_results}
-                    )
-                    max_search_pages = max(1, self._settings.crawler_search_degraded_max_pages_per_job)
-                    dependency_wait_seconds = max(
-                        self._settings.crawler_search_degraded_dependency_wait_seconds,
-                        self._settings.crawler_search_dependency_wait_seconds,
-                    )
-                    email_max_queries = min(max(1, self._settings.crawler_search_degraded_email_max_queries), 3)
-                    instagram_max_queries = min(max(1, self._settings.crawler_search_degraded_instagram_max_queries), 3)
+                    adaptive_policy: AdaptivePolicy | None = None
+                    if self._settings.crawler_adaptive_enrichment_observations_enabled:
+                        adaptive_policy = AdaptivePolicy(
+                            epsilon=self._settings.crawler_adaptive_epsilon,
+                            policy_version=self._settings.crawler_policy_version,
+                            live_epsilon=self._settings.crawler_adaptive_live_epsilon,
+                            train_epsilon=self._settings.crawler_adaptive_train_epsilon,
+                            risk_timeout_weight=self._settings.crawler_adaptive_risk_timeout_weight,
+                            risk_requeue_weight=self._settings.crawler_adaptive_risk_requeue_weight,
+                        )
+                        snapshot = repository.load_latest_policy_snapshot(
+                            policy_version=adaptive_policy.policy_version,
+                            runtime_mode=self._settings.crawler_adaptive_train_default_runtime_mode or "adaptive_assisted",
+                        )
+                        payload = snapshot.get("model_payload") if isinstance(snapshot, dict) else None
+                        if isinstance(payload, dict):
+                            adaptive_policy.load_snapshot(payload)
 
-                adaptive_policy: AdaptivePolicy | None = None
-                if self._settings.crawler_adaptive_enrichment_observations_enabled:
-                    adaptive_policy = AdaptivePolicy(
-                        epsilon=self._settings.crawler_adaptive_epsilon,
-                        policy_version=self._settings.crawler_policy_version,
-                        live_epsilon=self._settings.crawler_adaptive_live_epsilon,
-                        train_epsilon=self._settings.crawler_adaptive_train_epsilon,
-                        risk_timeout_weight=self._settings.crawler_adaptive_risk_timeout_weight,
-                        risk_requeue_weight=self._settings.crawler_adaptive_risk_requeue_weight,
+                    engine = FieldJobEngine(
+                        repository=repository,
+                        logger=LOGGER,
+                        worker_id=worker_id,
+                        base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
+                        source_slug=source_slug,
+                        field_name=field_name,
+                        search_client=SearchClient(current_search_settings),
+                        search_provider=self._settings.crawler_search_provider,
+                        max_search_pages=max_search_pages,
+                        negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
+                        dependency_wait_seconds=dependency_wait_seconds,
+                        require_confident_website_for_email=self._settings.crawler_search_require_confident_website_for_email,
+                        email_escape_on_provider_block=self._settings.crawler_search_email_escape_on_provider_block,
+                        email_escape_min_website_failures=self._settings.crawler_search_email_escape_min_website_failures,
+                        transient_short_retries=self._settings.crawler_search_transient_short_retries,
+                        transient_long_cooldown_seconds=self._settings.crawler_search_transient_long_cooldown_seconds,
+                        min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
+                        email_max_queries=email_max_queries,
+                        instagram_max_queries=instagram_max_queries,
+                        enable_school_initials=self._settings.crawler_search_enable_school_initials,
+                        min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
+                        enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
+                        instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
+                        instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
+                        greedy_collect_mode=self._settings.crawler_greedy_collect,
+                        search_degraded_mode=current_degraded_mode,
+                        adaptive_policy=adaptive_policy,
+                        adaptive_runtime_mode=runtime_mode,
+                        adaptive_policy_mode="shadow",
+                        adaptive_policy_version=self._settings.crawler_policy_version,
+                        provider_window_state=current_provider_window_state,
+                        enrichment_observations_enabled=self._settings.crawler_adaptive_enrichment_observations_enabled,
                     )
-                    snapshot = repository.load_latest_policy_snapshot(
-                        policy_version=adaptive_policy.policy_version,
-                        runtime_mode=self._settings.crawler_adaptive_train_default_runtime_mode or "adaptive_assisted",
+                    result = self._run_field_job_runtime(
+                        repository=repository,
+                        engine=engine,
+                        worker_id=worker_id,
+                        runtime_mode=runtime_mode,
+                        graph_durability=graph_durability,
+                        source_slug=source_slug,
+                        field_name=field_name,
+                        limit=segment_limit,
                     )
-                    payload = snapshot.get("model_payload") if isinstance(snapshot, dict) else None
-                    if isinstance(payload, dict):
-                        adaptive_policy.load_snapshot(payload)
+                    result.update(engine.consume_last_batch_metrics())
+                    aggregate = _merge_field_job_chunk_results(aggregate, result)
+                    request_repository.heartbeat_worker_process(worker_id, lease_seconds=lease_seconds)
+                    handled = int(result.get("processed", 0) or 0) + int(result.get("requeued", 0) or 0) + int(result.get("failed_terminal", 0) or 0)
+                    if handled <= 0:
+                        break
+                    remaining -= handled
+                    handled_since_recheck += handled
+                    if current_degraded_mode or not recheck_enabled or remaining <= 0:
+                        continue
+                    if handled_since_recheck < jobs_per_recheck and (time.monotonic() - window_started) < seconds_per_recheck:
+                        continue
 
-                engine = FieldJobEngine(
-                    repository=repository,
-                    logger=LOGGER,
-                    worker_id=worker_id,
-                    base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
-                    source_slug=source_slug,
-                    field_name=field_name,
-                    search_client=SearchClient(current_search_settings),
-                    search_provider=self._settings.crawler_search_provider,
-                    max_search_pages=max_search_pages,
-                    negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
-                    dependency_wait_seconds=dependency_wait_seconds,
-                    require_confident_website_for_email=self._settings.crawler_search_require_confident_website_for_email,
-                    email_escape_on_provider_block=self._settings.crawler_search_email_escape_on_provider_block,
-                    email_escape_min_website_failures=self._settings.crawler_search_email_escape_min_website_failures,
-                    transient_short_retries=self._settings.crawler_search_transient_short_retries,
-                    transient_long_cooldown_seconds=self._settings.crawler_search_transient_long_cooldown_seconds,
-                    min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
-                    email_max_queries=email_max_queries,
-                    instagram_max_queries=instagram_max_queries,
-                    enable_school_initials=self._settings.crawler_search_enable_school_initials,
-                    min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
-                    enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
-                    instagram_enable_handle_queries=self._settings.crawler_search_instagram_enable_handle_queries,
-                    instagram_direct_probe_enabled=self._settings.crawler_search_instagram_direct_probe_enabled,
-                    greedy_collect_mode=self._settings.crawler_greedy_collect,
-                    search_degraded_mode=current_degraded_mode,
-                    adaptive_policy=adaptive_policy,
-                    adaptive_runtime_mode=runtime_mode,
-                    adaptive_policy_mode="shadow",
-                    adaptive_policy_version=self._settings.crawler_policy_version,
-                    provider_window_state=current_provider_window_state,
-                    enrichment_observations_enabled=self._settings.crawler_adaptive_enrichment_observations_enabled,
-                )
-                result = self._run_field_job_runtime(
-                    repository=repository,
-                    engine=engine,
-                    worker_id=worker_id,
-                    runtime_mode=runtime_mode,
-                    graph_durability=graph_durability,
-                    source_slug=source_slug,
-                    field_name=field_name,
-                    limit=segment_limit,
-                )
-                result.update(engine.consume_last_batch_metrics())
-                aggregate = _merge_field_job_chunk_results(aggregate, result)
-                handled = int(result.get("processed", 0) or 0) + int(result.get("requeued", 0) or 0) + int(result.get("failed_terminal", 0) or 0)
-                if handled <= 0:
-                    break
-                remaining -= handled
-                handled_since_recheck += handled
-                if current_degraded_mode or not recheck_enabled or remaining <= 0:
-                    continue
-                if handled_since_recheck < jobs_per_recheck and (time.monotonic() - window_started) < seconds_per_recheck:
-                    continue
-
-                recheck_snapshot = self.search_preflight()
-                aggregate["mid_batch_provider_rechecks"] = int(aggregate.get("mid_batch_provider_rechecks", 0) or 0) + 1
-                aggregate["preflight_probe_queries"] = _merge_unique_texts(
-                    aggregate.get("preflight_probe_queries") or [],
-                    _probe_queries_from_preflight(recheck_snapshot),
-                )
-                reordered_settings = _reorder_search_settings_from_window(
-                    current_search_settings,
-                    recheck_snapshot,
-                    min_success_rate=min_success_rate,
-                )
-                previous_order = _provider_order_from_settings(current_search_settings)
-                next_order = _provider_order_from_settings(reordered_settings)
-                if previous_order != next_order:
-                    aggregate["mid_batch_provider_reorders"] = int(aggregate.get("mid_batch_provider_reorders", 0) or 0) + 1
-                current_search_settings = reordered_settings
-                if _all_attempted_providers_below_threshold(
-                    recheck_snapshot,
-                    current_search_settings,
-                    min_success_rate=min_success_rate,
-                ):
-                    current_degraded_mode = True
-                current_provider_window_state = _provider_window_state_from_preflight(
-                    recheck_snapshot,
-                    degraded_mode=current_degraded_mode,
-                )
-                aggregate["provider_window_state"] = current_provider_window_state
-                handled_since_recheck = 0
-                window_started = time.monotonic()
+                    recheck_snapshot = self.search_preflight()
+                    aggregate["mid_batch_provider_rechecks"] = int(aggregate.get("mid_batch_provider_rechecks", 0) or 0) + 1
+                    aggregate["preflight_probe_queries"] = _merge_unique_texts(
+                        aggregate.get("preflight_probe_queries") or [],
+                        _probe_queries_from_preflight(recheck_snapshot),
+                    )
+                    reordered_settings = _reorder_search_settings_from_window(
+                        current_search_settings,
+                        recheck_snapshot,
+                        min_success_rate=min_success_rate,
+                    )
+                    previous_order = _provider_order_from_settings(current_search_settings)
+                    next_order = _provider_order_from_settings(reordered_settings)
+                    if previous_order != next_order:
+                        aggregate["mid_batch_provider_reorders"] = int(aggregate.get("mid_batch_provider_reorders", 0) or 0) + 1
+                    current_search_settings = reordered_settings
+                    if _all_attempted_providers_below_threshold(
+                        recheck_snapshot,
+                        current_search_settings,
+                        min_success_rate=min_success_rate,
+                    ):
+                        current_degraded_mode = True
+                    current_provider_window_state = _provider_window_state_from_preflight(
+                        recheck_snapshot,
+                        degraded_mode=current_degraded_mode,
+                    )
+                    aggregate["provider_window_state"] = current_provider_window_state
+                    handled_since_recheck = 0
+                    window_started = time.monotonic()
+            finally:
+                request_repository.stop_worker_process(worker_id, status="stopped")
 
         return aggregate
 
@@ -2571,6 +2815,9 @@ class CrawlService:
                       COUNT(*) FILTER (WHERE status = 'queued')::int AS queued_jobs,
                       COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'actionable')::int AS actionable_jobs,
                       COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'deferred')::int AS deferred_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_provider')::int AS blocked_provider_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_dependency')::int AS blocked_dependency_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_repairable')::int AS blocked_repairable_jobs,
                       COUNT(*) FILTER (WHERE status = 'running')::int AS running_jobs,
                       COUNT(*) FILTER (WHERE status = 'done')::int AS done_jobs,
                       COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_jobs,
@@ -2587,6 +2834,9 @@ class CrawlService:
                       field_name,
                       COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'actionable')::int AS actionable_jobs,
                       COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'deferred')::int AS deferred_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_provider')::int AS blocked_provider_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_dependency')::int AS blocked_dependency_jobs,
+                      COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_repairable')::int AS blocked_repairable_jobs,
                       COUNT(*) FILTER (WHERE status = 'done')::int AS done_jobs,
                       COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_jobs
                     FROM field_jobs
@@ -2596,6 +2846,129 @@ class CrawlService:
                     """
                 )
                 field_breakdown = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    SELECT
+                      COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') AS blocked_reason,
+                      COUNT(*)::int AS count,
+                      CASE
+                        WHEN COALESCE(queue_state, 'actionable') = 'blocked_repairable'
+                          OR COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                          THEN 'repair_backlog'
+                        WHEN COALESCE(queue_state, 'actionable') = 'blocked_provider'
+                          THEN 'provider_dependent_search'
+                        WHEN COALESCE(queue_state, 'actionable') = 'blocked_dependency'
+                          THEN 'dependency_blocked'
+                        WHEN COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('provider_degraded', 'transient_network', 'provider_low_signal')
+                          THEN 'provider_dependent_search'
+                        WHEN COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('dependency_wait', 'website_required')
+                          THEN 'dependency_blocked'
+                        ELSE 'authoritative_resolution'
+                      END AS queue_lane
+                    FROM field_jobs
+                    WHERE status = 'queued'
+                      AND COALESCE(queue_state, 'actionable') IN ('deferred', 'blocked_repairable', 'blocked_provider', 'blocked_dependency')
+                    GROUP BY 1, 3
+                    ORDER BY 2 DESC, 1 ASC
+                    LIMIT 20
+                    """
+                )
+                deferred_reason_breakdown = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    SELECT
+                      field_name,
+                      COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') AS blocked_reason,
+                      COUNT(*)::int AS count,
+                      CASE
+                        WHEN COALESCE(queue_state, 'actionable') = 'blocked_repairable'
+                          OR COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                          THEN 'repair_backlog'
+                        WHEN COALESCE(queue_state, 'actionable') = 'blocked_provider'
+                          THEN 'provider_dependent_search'
+                        WHEN COALESCE(queue_state, 'actionable') = 'blocked_dependency'
+                          THEN 'dependency_blocked'
+                        WHEN COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('provider_degraded', 'transient_network', 'provider_low_signal')
+                          THEN 'provider_dependent_search'
+                        WHEN COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('dependency_wait', 'website_required')
+                          THEN 'dependency_blocked'
+                        ELSE 'authoritative_resolution'
+                      END AS queue_lane
+                    FROM field_jobs
+                    WHERE status = 'queued'
+                      AND COALESCE(queue_state, 'actionable') IN ('deferred', 'blocked_repairable', 'blocked_provider', 'blocked_dependency')
+                    GROUP BY 1, 2, 4
+                    ORDER BY 3 DESC, 1 ASC, 2 ASC
+                    LIMIT 20
+                    """
+                )
+                deferred_field_breakdown = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    SELECT
+                      COALESCE(s.slug, 'unknown') AS source_slug,
+                      CASE
+                        WHEN COALESCE(fj.queue_state, 'actionable') = 'blocked_repairable'
+                          OR COALESCE(NULLIF(BTRIM(fj.blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                          THEN 'repair_backlog'
+                        WHEN COALESCE(fj.queue_state, 'actionable') = 'blocked_provider'
+                          THEN 'provider_dependent_search'
+                        WHEN COALESCE(fj.queue_state, 'actionable') = 'blocked_dependency'
+                          THEN 'dependency_blocked'
+                        WHEN COALESCE(NULLIF(BTRIM(fj.blocked_reason), ''), 'unknown') IN ('provider_degraded', 'transient_network', 'provider_low_signal')
+                          THEN 'provider_dependent_search'
+                        WHEN COALESCE(NULLIF(BTRIM(fj.blocked_reason), ''), 'unknown') IN ('dependency_wait', 'website_required')
+                          THEN 'dependency_blocked'
+                        ELSE 'authoritative_resolution'
+                      END AS queue_lane,
+                      COUNT(*)::int AS count
+                    FROM field_jobs fj
+                    LEFT JOIN crawl_runs cr ON cr.id = fj.crawl_run_id
+                    LEFT JOIN sources s ON s.id = cr.source_id
+                    WHERE fj.status = 'queued'
+                      AND COALESCE(fj.queue_state, 'actionable') IN ('deferred', 'blocked_repairable', 'blocked_provider', 'blocked_dependency')
+                    GROUP BY 1, 2
+                    ORDER BY 3 DESC, 1 ASC
+                    LIMIT 20
+                    """
+                )
+                deferred_source_breakdown = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    SELECT
+                      CASE
+                        WHEN NOW() - COALESCE(created_at, scheduled_at, NOW()) < INTERVAL '1 hour' THEN 'lt_1h'
+                        WHEN NOW() - COALESCE(created_at, scheduled_at, NOW()) < INTERVAL '6 hours' THEN '1h_to_6h'
+                        WHEN NOW() - COALESCE(created_at, scheduled_at, NOW()) < INTERVAL '24 hours' THEN '6h_to_24h'
+                        WHEN NOW() - COALESCE(created_at, scheduled_at, NOW()) < INTERVAL '72 hours' THEN '1d_to_3d'
+                        ELSE 'gte_3d'
+                      END AS age_bucket,
+                      COUNT(*)::int AS count
+                    FROM field_jobs
+                    WHERE status = 'queued'
+                      AND COALESCE(queue_state, 'actionable') IN ('deferred', 'blocked_repairable', 'blocked_provider', 'blocked_dependency')
+                    GROUP BY 1
+                    ORDER BY count DESC, age_bucket ASC
+                    """
+                )
+                deferred_age_buckets = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    SELECT
+                      COUNT(*) FILTER (
+                        WHERE status = 'active'
+                          AND workload_lane = 'contact_resolution'
+                          AND (lease_expires_at IS NULL OR lease_expires_at > NOW())
+                      )::int AS active_workers,
+                      COUNT(*) FILTER (
+                        WHERE workload_lane = 'contact_resolution'
+                          AND lease_expires_at IS NOT NULL
+                          AND lease_expires_at <= NOW()
+                      )::int AS stale_workers
+                    FROM worker_processes
+                    """
+                )
+                field_worker_processes = dict(cursor.fetchone() or {})
                 cursor.execute(
                     """
                     SELECT
@@ -2613,7 +2986,18 @@ class CrawlService:
             "captured_at": _utc_now_iso(),
             "accuracy": accuracy,
             "queue": queue,
+            "queue_health": _queue_health_payload(
+                queue,
+                deferred_reason_breakdown=deferred_reason_breakdown,
+                field_worker_processes=field_worker_processes,
+                liveness_alert_poll_windows=self._settings.crawler_field_job_liveness_alert_poll_windows,
+            ),
             "field_breakdown": field_breakdown,
+            "deferred_reason_breakdown": deferred_reason_breakdown,
+            "deferred_field_breakdown": deferred_field_breakdown,
+            "deferred_source_breakdown": deferred_source_breakdown,
+            "deferred_age_buckets": deferred_age_buckets,
+            "field_worker_processes": field_worker_processes,
             "national_profiles": {
                 "total_profiles": len(national_profiles),
                 "with_email": sum(1 for item in national_profiles if item.contact_email),
@@ -3478,6 +3862,10 @@ def _merge_field_job_chunk_results(aggregate: dict[str, object], result: dict[st
         "enrichment_observations_logged",
         "mid_batch_provider_rechecks",
         "mid_batch_provider_reorders",
+        "degraded_authoritative_claimed",
+        "verify_school_cache_hit",
+        "verify_school_official_url_reused",
+        "verify_school_provider_search_attempted",
     ):
         merged[key] = int(merged.get(key, 0) or 0) + int(result.get(key, 0) or 0)
     merged["runtime_mode_used"] = str(result.get("runtime_mode_used") or merged.get("runtime_mode_used") or "legacy")
@@ -3619,6 +4007,125 @@ def _cached_chapter_activity_is_decisive(record: object) -> bool:
     if source_type != "official_school":
         return False
     return status in {"confirmed_active", "confirmed_inactive"}
+
+
+def _job_has_reusable_official_school_evidence(repository: CrawlerRepository, job: FieldJob) -> bool:
+    url = repository.get_reusable_official_school_evidence_url(
+        fraternity_slug=job.fraternity_slug,
+        school_name=job.university_name,
+    )
+    return bool(str(url or "").strip())
+
+
+def _job_is_degraded_authoritative_candidate(repository: CrawlerRepository, job: FieldJob) -> bool:
+    if job.field_name == FIELD_JOB_VERIFY_SCHOOL:
+        cached_school_policy = repository.get_school_policy(job.university_name)
+        cached_chapter_activity = repository.get_chapter_activity(
+            fraternity_slug=job.fraternity_slug,
+            school_name=job.university_name,
+        )
+        return (
+            _cached_school_policy_is_decisive(cached_school_policy)
+            or _cached_chapter_activity_is_decisive(cached_chapter_activity)
+            or _job_has_reusable_official_school_evidence(repository, job)
+        )
+    if job.field_name == FIELD_JOB_VERIFY_WEBSITE:
+        return _job_supporting_page_ready(job)
+    if job.field_name in {FIELD_JOB_FIND_INSTAGRAM, FIELD_JOB_FIND_EMAIL}:
+        return _job_supporting_page_ready(job)
+    return False
+
+
+def _job_has_provider_retry_signature(job: FieldJob) -> bool:
+    payload = dict(job.payload or {})
+    last_reason = str(payload.get("transient_provider_last_reason") or "").strip().lower()
+    if last_reason in {"provider_degraded", "transient_network", "provider_low_signal"}:
+        return True
+    attempts = payload.get("provider_attempts")
+    if not isinstance(attempts, list) or not attempts:
+        return False
+    statuses = {
+        str((item or {}).get("status") or "").strip().lower()
+        for item in attempts
+        if isinstance(item, dict)
+    }
+    if not statuses:
+        return False
+    return statuses.issubset({"unavailable", "request_error", "low_signal"})
+
+
+def _field_job_queue_lane(*, queue_state: str | None, blocked_reason: str | None, field_name: str | None = None) -> str:
+    normalized_state = str(queue_state or "actionable").strip().lower() or "actionable"
+    normalized_reason = str(blocked_reason or "").strip().lower()
+    normalized_field = str(field_name or "").strip().lower()
+    if normalized_state == "blocked_provider":
+        return "provider_dependent_search"
+    if normalized_state == "blocked_dependency":
+        return "dependency_blocked"
+    if normalized_state == "blocked_repairable" or normalized_reason in {
+        "queued_for_entity_repair",
+        "identity_semantically_incomplete",
+        "repair_exhausted",
+    }:
+        return "repair_backlog"
+    if normalized_reason in {"provider_degraded", "transient_network", "provider_low_signal"}:
+        return "provider_dependent_search"
+    if normalized_reason in {"dependency_wait", "website_required"}:
+        return "dependency_blocked"
+    if normalized_field in {FIELD_JOB_VERIFY_SCHOOL, FIELD_JOB_VERIFY_WEBSITE}:
+        return "authoritative_resolution"
+    return "authoritative_resolution"
+
+
+def _queue_health_payload(
+    queue: dict[str, object],
+    *,
+    deferred_reason_breakdown: list[dict[str, object]],
+    field_worker_processes: dict[str, int],
+    liveness_alert_poll_windows: int,
+) -> dict[str, object]:
+    queued_jobs = max(0, int(queue.get("queued_jobs", 0) or 0))
+    actionable_jobs = max(0, int(queue.get("actionable_jobs", 0) or 0))
+    deferred_jobs = max(0, int(queue.get("deferred_jobs", 0) or 0))
+    running_jobs = max(0, int(queue.get("running_jobs", 0) or 0))
+    deferred_ratio = round(deferred_jobs / queued_jobs, 4) if queued_jobs else 0.0
+
+    lane_totals = {
+        "provider_dependent_search": 0,
+        "dependency_blocked": 0,
+        "repair_backlog": 0,
+        "authoritative_resolution": 0,
+    }
+    for row in deferred_reason_breakdown:
+        lane = str(row.get("queue_lane") or "authoritative_resolution")
+        lane_totals[lane] = int(lane_totals.get(lane, 0) or 0) + int(row.get("count", 0) or 0)
+
+    active_workers = max(0, int(field_worker_processes.get("active_workers", 0) or 0))
+    stale_workers = max(0, int(field_worker_processes.get("stale_workers", 0) or 0))
+    liveness_alert = bool(actionable_jobs > 0 and running_jobs == 0 and active_workers == 0)
+    worker_liveness_ratio = 1.0 if actionable_jobs <= 0 else (1.0 if (running_jobs > 0 or active_workers > 0) else 0.0)
+
+    return {
+        "deferred_ratio": deferred_ratio,
+        "provider_degraded_ratio": round(lane_totals["provider_dependent_search"] / queued_jobs, 4) if queued_jobs else 0.0,
+        "dependency_blocked_ratio": round(lane_totals["dependency_blocked"] / queued_jobs, 4) if queued_jobs else 0.0,
+        "repair_backlog_ratio": round(lane_totals["repair_backlog"] / queued_jobs, 4) if queued_jobs else 0.0,
+        "authoritative_resolution_ratio": round(lane_totals["authoritative_resolution"] / queued_jobs, 4) if queued_jobs else 0.0,
+        "worker_liveness_ratio": round(worker_liveness_ratio, 4),
+        "worker_liveness_alert": {
+            "open": liveness_alert,
+            "message": (
+                f"Actionable field jobs are present but no field-job workers are active across {liveness_alert_poll_windows} poll windows"
+                if liveness_alert
+                else ""
+            ),
+            "actionableJobs": actionable_jobs,
+            "runningJobs": running_jobs,
+            "activeWorkers": active_workers,
+            "staleWorkers": stale_workers,
+            "pollWindows": max(1, int(liveness_alert_poll_windows or 1)),
+        },
+    }
 
 
 def _job_supporting_page_ready(job: FieldJob) -> bool:

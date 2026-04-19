@@ -1,4 +1,6 @@
 :root {
+  --font-display: "Aptos", "Segoe UI", sans-serif;
+  --font-mono: "Consolas", "IBM Plex Mono", monospace;
   --bg: #edf3f6;
   --bg-soft: #dde9f0;
   --surface: rgba(255, 255, 255, 0.78);
@@ -745,6 +747,84 @@ form {
   color: #9f2d2d;
   border-color: rgba(159, 45, 45, 0.18);
   background: rgba(255, 242, 242, 0.92);
+}
+
+.jobLogToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.jobLogToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 600;
+}
+
+.jobLogToggle input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.jobLogGrid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.jobLogPanel {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(8, 18, 31, 0.96), rgba(16, 31, 46, 0.95));
+  box-shadow: var(--shadow-tight);
+  overflow: hidden;
+}
+
+.jobLogPanelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(235, 245, 252, 0.96);
+}
+
+.jobLogPanelHeader h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1rem;
+}
+
+.jobLogPanelMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  color: rgba(185, 208, 226, 0.78);
+  font-size: 0.8rem;
+}
+
+.jobLogTerminal {
+  margin: 0;
+  padding: 1rem;
+  min-height: 220px;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: #d8ebf7;
+}
+
+.jobLogError {
+  margin: 0;
+  color: #b73535;
 }
 
 .toggleLabel {

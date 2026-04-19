@@ -1,13 +1,11 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+
+import { APP_VERSION_LABEL } from "@/lib/platform-version";
 
 import "./globals.css";
 
-const displayFont = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
-const monoFont = IBM_Plex_Mono({ subsets: ["latin"], variable: "--font-mono", weight: ["400", "500"] });
-
 export const metadata: Metadata = {
-  title: "Frat Finder AI V3.0.1 Dashboard",
+  title: `Frat Finder AI ${APP_VERSION_LABEL} Dashboard`,
   description: "LangGraph-native fraternity crawl operations dashboard"
 };
 
@@ -25,7 +23,7 @@ const navItems = [
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${displayFont.variable} ${monoFont.variable}`}>
+    <html lang="en">
       <body>
         <div className="shellGlow shellGlowA" />
         <div className="shellGlow shellGlowB" />
@@ -34,7 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="railCard railBrandCard">
               <p className="eyebrow">Frat Finder AI</p>
               <h1>Operator Console</h1>
-              <p className="headerDescription">V3.0.1 request workers, LangGraph evidence flows, and chapter coverage in one operating surface.</p>
+              <p className="headerDescription">{APP_VERSION_LABEL} request workers, LangGraph evidence flows, and chapter coverage in one operating surface.</p>
             </div>
             <nav className="railNav" aria-label="Primary">
               {navItems.map((item, index) => (
@@ -62,7 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
               <div className="headerMetaBand">
                 <span className="headerMetaChip">Registry-first discovery</span>
-                <span className="headerMetaChip">V3.0.1 request workers</span>
+                <span className="headerMetaChip">{APP_VERSION_LABEL} request workers</span>
                 <span className="headerMetaChip">Search-safe enrichment</span>
                 <span className="headerMetaChip">Review-aware writes</span>
               </div>

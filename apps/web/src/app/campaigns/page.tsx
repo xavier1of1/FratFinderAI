@@ -1,12 +1,15 @@
 import { CampaignsDashboard } from "@/components/campaigns-dashboard";
 import { PageIntro } from "@/components/page-intro";
-import { fetchFromApi } from "@/lib/api-client";
+import { listCampaignRuns } from "@/lib/repositories/campaign-run-repository";
+import { listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
 import type { CampaignRun, CrawlRunListItem } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 export default async function CampaignsPage() {
   const [campaigns, runs] = await Promise.all([
-    fetchFromApi<CampaignRun[]>("/api/campaign-runs?limit=100"),
-    fetchFromApi<CrawlRunListItem[]>("/api/runs?limit=800")
+    listCampaignRuns(100) as Promise<CampaignRun[]>,
+    listCrawlRuns(800) as Promise<CrawlRunListItem[]>
   ]);
   const running = campaigns.filter((item) => item.status === "running" || item.status === "queued").length;
   const latest = campaigns[0] ?? null;

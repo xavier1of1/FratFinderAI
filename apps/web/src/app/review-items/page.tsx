@@ -1,13 +1,17 @@
+import { FieldJobsDashboard } from "@/components/field-jobs-dashboard";
 import { PageIntro } from "@/components/page-intro";
 import { StatusPill } from "@/components/status-pill";
 import { ReviewStatusForm } from "@/components/review-status-form";
-import { fetchFromApi } from "@/lib/api-client";
+import { listFieldJobs } from "@/lib/repositories/field-job-repository";
+import { listReviewItems } from "@/lib/repositories/review-item-repository";
 import type { FieldJobListItem, ReviewItemListItem } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 export default async function ReviewItemsPage() {
   const [reviewItems, fieldJobs] = await Promise.all([
-    fetchFromApi<ReviewItemListItem[]>("/api/review-items?limit=200"),
-    fetchFromApi<FieldJobListItem[]>("/api/field-jobs?limit=200")
+    listReviewItems(200) as Promise<ReviewItemListItem[]>,
+    listFieldJobs(200) as Promise<FieldJobListItem[]>
   ]);
 
   return (
@@ -110,40 +114,7 @@ export default async function ReviewItemsPage() {
       <section className="panel">
         <h2>Field Jobs</h2>
         <p className="sectionDescription">Monitor the queued enrichment work here so you can tell whether the pipeline is discovering websites, emails, and social links as expected.</p>
-        <div className="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Chapter</th>
-                <th>Field</th>
-                <th>Status</th>
-                <th>Attempts</th>
-                <th>Worker</th>
-                <th>Scheduled</th>
-                <th>Last Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fieldJobs.map((job) => (
-                <tr key={job.id}>
-                  <td>{job.id.slice(0, 8)}</td>
-                  <td>{job.chapterSlug}</td>
-                  <td>{job.fieldName}</td>
-                  <td>
-                    <StatusPill status={job.status} />
-                  </td>
-                  <td>
-                    {job.attempts}/{job.maxAttempts}
-                  </td>
-                  <td>{job.claimedBy ?? <span className="muted">unclaimed</span>}</td>
-                  <td>{new Date(job.scheduledAt).toLocaleString()}</td>
-                  <td>{job.lastError ?? <span className="muted">none</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <FieldJobsDashboard initialJobs={fieldJobs} />
       </section>
     </div>
   );

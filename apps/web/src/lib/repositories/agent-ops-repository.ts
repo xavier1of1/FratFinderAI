@@ -319,6 +319,14 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
     field_jobs_deferred: string | number;
     field_jobs_blocked_invalid: string | number;
     field_jobs_blocked_repairable: string | number;
+    field_jobs_blocked_provider: string | number;
+    field_jobs_blocked_dependency: string | number;
+    field_jobs_provider_dependent_deferred: string | number;
+    field_jobs_dependency_blocked: string | number;
+    field_jobs_repair_backlog: string | number;
+    field_job_workers_active: string | number;
+    field_job_workers_stale: string | number;
+    field_job_worker_alert_open: string | number;
     chapter_repair_queued: string | number;
     chapter_repair_running: string | number;
     chapter_repair_completed: string | number;
@@ -360,6 +368,61 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
         (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'deferred') AS field_jobs_deferred,
         (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_invalid') AS field_jobs_blocked_invalid,
         (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_repairable') AS field_jobs_blocked_repairable,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_provider') AS field_jobs_blocked_provider,
+        (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_dependency') AS field_jobs_blocked_dependency,
+        (
+          SELECT COUNT(*)
+          FROM field_jobs
+          WHERE status = 'queued'
+            AND COALESCE(queue_state, 'actionable') IN ('deferred', 'blocked_provider')
+            AND COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('provider_degraded', 'transient_network', 'provider_low_signal')
+        ) AS field_jobs_provider_dependent_deferred,
+        (
+          SELECT COUNT(*)
+          FROM field_jobs
+          WHERE status = 'queued'
+            AND COALESCE(queue_state, 'actionable') IN ('deferred', 'blocked_dependency')
+            AND COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('dependency_wait', 'website_required')
+        ) AS field_jobs_dependency_blocked,
+        (
+          SELECT COUNT(*)
+          FROM field_jobs
+          WHERE status = 'queued'
+            AND (
+              COALESCE(queue_state, 'actionable') = 'blocked_repairable'
+              OR COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+            )
+        ) AS field_jobs_repair_backlog,
+        (
+          SELECT COUNT(*)
+          FROM worker_processes
+          WHERE workload_lane = 'contact_resolution'
+            AND status = 'active'
+            AND (lease_expires_at IS NULL OR lease_expires_at > NOW())
+        ) AS field_job_workers_active,
+        (
+          SELECT COUNT(*)
+          FROM worker_processes
+          WHERE workload_lane = 'contact_resolution'
+            AND lease_expires_at IS NOT NULL
+            AND lease_expires_at <= NOW()
+        ) AS field_job_workers_stale,
+        (
+          SELECT CASE
+            WHEN
+              (SELECT COUNT(*) FROM field_jobs WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'actionable') > 0
+              AND (SELECT COUNT(*) FROM field_jobs WHERE status = 'running') = 0
+              AND (
+                SELECT COUNT(*)
+                FROM worker_processes
+                WHERE workload_lane = 'contact_resolution'
+                  AND status = 'active'
+                  AND (lease_expires_at IS NULL OR lease_expires_at > NOW())
+              ) = 0
+            THEN 1
+            ELSE 0
+          END
+        ) AS field_job_worker_alert_open,
         (SELECT COUNT(*) FROM chapter_repair_jobs WHERE status = 'queued') AS chapter_repair_queued,
         (SELECT COUNT(*) FROM chapter_repair_jobs WHERE status = 'running') AS chapter_repair_running,
         (SELECT COUNT(*) FROM chapter_repair_jobs WHERE status = 'done') AS chapter_repair_completed,
@@ -411,6 +474,14 @@ export async function getAgentOpsSummary(): Promise<AgentOpsSummary> {
     fieldJobsDeferred: Number(row?.field_jobs_deferred ?? 0),
     fieldJobsBlockedInvalid: Number(row?.field_jobs_blocked_invalid ?? 0),
     fieldJobsBlockedRepairable: Number(row?.field_jobs_blocked_repairable ?? 0),
+    fieldJobsBlockedProvider: Number(row?.field_jobs_blocked_provider ?? 0),
+    fieldJobsBlockedDependency: Number(row?.field_jobs_blocked_dependency ?? 0),
+    fieldJobsProviderDependentDeferred: Number(row?.field_jobs_provider_dependent_deferred ?? 0),
+    fieldJobsDependencyBlocked: Number(row?.field_jobs_dependency_blocked ?? 0),
+    fieldJobsRepairBacklog: Number(row?.field_jobs_repair_backlog ?? 0),
+    fieldJobWorkersActive: Number(row?.field_job_workers_active ?? 0),
+    fieldJobWorkersStale: Number(row?.field_job_workers_stale ?? 0),
+    fieldJobWorkerAlertOpen: Number(row?.field_job_worker_alert_open ?? 0),
     chapterRepairQueued: Number(row?.chapter_repair_queued ?? 0),
     chapterRepairRunning: Number(row?.chapter_repair_running ?? 0),
     chapterRepairCompleted: Number(row?.chapter_repair_completed ?? 0),

@@ -2,21 +2,30 @@ import { MetricCard } from "@/components/metric-card";
 import { PageIntro } from "@/components/page-intro";
 import { StatusPill } from "@/components/status-pill";
 import { TagPill } from "@/components/tag-pill";
-import { fetchFromApi } from "@/lib/api-client";
+import { APP_VERSION_LABEL } from "@/lib/platform-version";
+import {
+  getAgentOpsSummary,
+  listChapterEvidence,
+  listChapterSearchRuns,
+  listOpsAlertsForAgentOps,
+  listProvisionalChapters,
+  listRequestGraphRuns
+} from "@/lib/repositories/agent-ops-repository";
 import { instagramHandleFromUrl } from "@/lib/social";
 import type { AgentOpsSummary, ChapterEvidence, ChapterSearchRun, OpsAlert, ProvisionalChapter, RequestGraphRun } from "@/lib/types";
 
-interface AgentOpsPayload {
-  summary: AgentOpsSummary;
-  graphRuns: RequestGraphRun[];
-  provisionalChapters: ProvisionalChapter[];
-  evidence: ChapterEvidence[];
-  chapterSearchRuns: ChapterSearchRun[];
-  opsAlerts: OpsAlert[];
-}
+export const dynamic = "force-dynamic";
 
 export default async function AgentOpsPage() {
-  const data = await fetchFromApi<AgentOpsPayload>("/api/agent-ops?limit=75");
+  const [summary, graphRuns, provisionalChapters, evidence, chapterSearchRuns, opsAlerts] = await Promise.all([
+    getAgentOpsSummary() as Promise<AgentOpsSummary>,
+    listRequestGraphRuns(75) as Promise<RequestGraphRun[]>,
+    listProvisionalChapters(75) as Promise<ProvisionalChapter[]>,
+    listChapterEvidence(150) as Promise<ChapterEvidence[]>,
+    listChapterSearchRuns(75) as Promise<ChapterSearchRun[]>,
+    listOpsAlertsForAgentOps(75) as Promise<OpsAlert[]>
+  ]);
+  const data = { summary, graphRuns, provisionalChapters, evidence, chapterSearchRuns, opsAlerts };
   const running = data.graphRuns.filter((item) => item.status === "running").length;
   const paused = data.graphRuns.filter((item) => item.status === "paused").length;
   const provisionalOpen = data.provisionalChapters.filter((item) => item.status === "provisional").length;
@@ -27,8 +36,8 @@ export default async function AgentOpsPage() {
     <div className="sectionStack">
       <PageIntro
         eyebrow="Agent Ops"
-        title="V3.0.1 LangGraph execution, queue health, and evidence"
-        description="Use this console to inspect V3 request graph runs, verify the worker queue is draining cleanly, and audit evidence before anything becomes canonical chapter data."
+        title={`${APP_VERSION_LABEL} LangGraph execution, queue health, and evidence`}
+        description={`Use this console to inspect ${APP_VERSION_LABEL} request graph runs, verify the worker queue is draining cleanly, and audit evidence before anything becomes canonical chapter data.`}
         meta={[
           `${data.graphRuns.length} graph runs`,
           `${running} running`,
@@ -40,7 +49,7 @@ export default async function AgentOpsPage() {
 
       <section className="panel">
         <h2>Runtime Health</h2>
-        <p className="sectionDescription">These counters are the fastest way to see whether the V3 worker loop is healthy or backing up.</p>
+        <p className="sectionDescription">{`These counters are the fastest way to see whether the ${APP_VERSION_LABEL} worker loop is healthy or backing up.`}</p>
         <div className="metrics">
           <MetricCard label="Queued Requests" value={data.summary.requestQueueQueued} />
           <MetricCard label="Running Requests" value={data.summary.requestQueueRunning} />
@@ -52,6 +61,14 @@ export default async function AgentOpsPage() {
           <MetricCard label="Deferred Field Jobs" value={data.summary.fieldJobsDeferred} />
           <MetricCard label="Blocked Invalid Jobs" value={data.summary.fieldJobsBlockedInvalid} />
           <MetricCard label="Blocked Repair Jobs" value={data.summary.fieldJobsBlockedRepairable} />
+          <MetricCard label="Blocked Provider Jobs" value={data.summary.fieldJobsBlockedProvider} />
+          <MetricCard label="Blocked Dependency Jobs" value={data.summary.fieldJobsBlockedDependency} />
+          <MetricCard label="Provider-Blocked Jobs" value={data.summary.fieldJobsProviderDependentDeferred} />
+          <MetricCard label="Dependency-Blocked Jobs" value={data.summary.fieldJobsDependencyBlocked} />
+          <MetricCard label="Repair Backlog" value={data.summary.fieldJobsRepairBacklog} />
+          <MetricCard label="Active Field Workers" value={data.summary.fieldJobWorkersActive} />
+          <MetricCard label="Stale Field Workers" value={data.summary.fieldJobWorkersStale} />
+          <MetricCard label="Field Worker Alert" value={data.summary.fieldJobWorkerAlertOpen ? "open" : "clear"} />
           <MetricCard label="Queued Repair Jobs" value={data.summary.chapterRepairQueued} />
           <MetricCard label="Running Repair Jobs" value={data.summary.chapterRepairRunning} />
           <MetricCard label="Completed Repair Jobs" value={data.summary.chapterRepairCompleted} />
@@ -94,7 +111,7 @@ export default async function AgentOpsPage() {
 
       <section className="panel">
         <h2>Chapter Search Core</h2>
-        <p className="sectionDescription">This is the new V3 chapter-discovery surface: national and institutional follow behavior, canonical vs provisional creation, and rejected candidate reasons.</p>
+        <p className="sectionDescription">{`This is the new ${APP_VERSION_LABEL} chapter-discovery surface: national and institutional follow behavior, canonical vs provisional creation, and rejected candidate reasons.`}</p>
         <div className="metrics">
           <MetricCard label="Chapter Search Runs" value={data.summary.chapterSearchRuns} />
           <MetricCard label="Canonical Created" value={data.summary.chapterSearchCanonical} />
@@ -161,7 +178,7 @@ export default async function AgentOpsPage() {
 
       <section className="panel">
         <h2>Request Graph Runs</h2>
-        <p className="sectionDescription">Every V3 request worker execution is checkpointed here so runtime ownership is visible outside the crawler logs.</p>
+        <p className="sectionDescription">{`Every ${APP_VERSION_LABEL} request worker execution is checkpointed here so runtime ownership is visible outside the crawler logs.`}</p>
         <div className="tableWrap">
           <table>
             <thead>
@@ -282,7 +299,7 @@ export default async function AgentOpsPage() {
 
       <section className="panel">
         <h2>Recent Evidence</h2>
-        <p className="sectionDescription">This is the candidate ledger behind V3 writes, review routing, and later reinforcement signals.</p>
+        <p className="sectionDescription">{`This is the candidate ledger behind ${APP_VERSION_LABEL} writes, review routing, and later reinforcement signals.`}</p>
         <p className="muted">
           Total ledger rows: {data.summary.evidenceTotal} | Review: {data.summary.evidenceReview} | Ready to write: {data.summary.evidenceWrite}
         </p>

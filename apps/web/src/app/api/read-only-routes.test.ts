@@ -46,6 +46,13 @@ const listChapterSearchRuns = vi.fn(async () => []);
 const listOpsAlertsForAgentOps = vi.fn(async () => []);
 const listProvisionalChapters = vi.fn(async () => []);
 const listRequestGraphRuns = vi.fn(async () => []);
+const listFieldJobs = vi.fn(async () => []);
+const getFieldJobLogFeed = vi.fn(async () => ({
+  jobId: "job-1",
+  lines: [],
+  dedupedCount: 0,
+  generatedAt: new Date().toISOString(),
+}));
 
 const listCampaignRuns = vi.fn(async () => [
   {
@@ -209,6 +216,11 @@ vi.mock("@/lib/repositories/agent-ops-repository", () => ({
   listRequestGraphRuns,
 }));
 
+vi.mock("@/lib/repositories/field-job-repository", () => ({
+  listFieldJobs,
+  getFieldJobLogFeed,
+}));
+
 vi.mock("@/lib/benchmark-alerts", () => ({
   scheduleBenchmarkDriftAlertScan,
 }));
@@ -299,6 +311,26 @@ describe("read-only API routes", () => {
     } as never);
     expect(response.status).toBe(200);
     expect(failStaleCrawlRuns).not.toHaveBeenCalled();
+  });
+
+  it("field-jobs GET is observational only", async () => {
+    const route = await import("./field-jobs/route");
+    const response = await route.GET({
+      nextUrl: new URL("http://localhost/api/field-jobs?limit=10"),
+    } as never);
+    expect(response.status).toBe(200);
+    expect(listFieldJobs).toHaveBeenCalled();
+    expect(scheduleDueCampaignRuns).not.toHaveBeenCalled();
+  });
+
+  it("field-job logs GET is observational only", async () => {
+    const route = await import("./field-jobs/[id]/logs/route");
+    const response = await route.GET(new Request("http://localhost/api/field-jobs/job-1/logs?limit=20"), {
+      params: { id: "job-1" },
+    });
+    expect(response.status).toBe(200);
+    expect(getFieldJobLogFeed).toHaveBeenCalledWith("job-1", 20);
+    expect(scheduleDueCampaignRuns).not.toHaveBeenCalled();
   });
 
   it("health GET is observational only", async () => {

@@ -68,7 +68,14 @@ from fratfinder_crawler.models import (
 
 def _normalize_field_job_queue_state(value: Any) -> str:
     normalized = str(value or "").strip()
-    if normalized in {"actionable", "deferred", "blocked_invalid", "blocked_repairable"}:
+    if normalized in {
+        "actionable",
+        "deferred",
+        "blocked_invalid",
+        "blocked_repairable",
+        "blocked_provider",
+        "blocked_dependency",
+    }:
         return normalized
     return "actionable"
 
@@ -90,13 +97,20 @@ def _extract_field_job_typed_state(
     chapter_repair = patch.get("chapterRepair") if isinstance(patch.get("chapterRepair"), dict) else {}
     queue_triage = patch.get("queueTriage") if isinstance(patch.get("queueTriage"), dict) else {}
 
+    blocked_reason = (
+        contact_resolution.get("blockedReason")
+        or contact_resolution.get("reasonCode")
+        or queue_triage.get("reason")
+        or queue_triage.get("repairReason")
+    )
+
     typed: dict[str, Any] = {
         "queue_state": _normalize_field_job_queue_state(contact_resolution.get("queueState"))
         if contact_resolution.get("queueState") is not None
         else None,
         "validity_class": _normalize_field_job_validity_class(contact_resolution.get("validityClass")),
         "repair_state": chapter_repair.get("state") if chapter_repair.get("state") else None,
-        "blocked_reason": contact_resolution.get("blockedReason") or queue_triage.get("reason"),
+        "blocked_reason": str(blocked_reason).strip() or None if blocked_reason is not None else None,
         "terminal_outcome": completed_payload.get("status") if isinstance(completed_payload, dict) else None,
     }
     return typed
@@ -2174,10 +2188,29 @@ class CrawlerRepository:
         self._connection.commit()
         return created
 
-    def claim_next_field_job(self, worker_id: str, source_slug: str | None = None, field_name: str | None = None, require_confident_website_for_email: bool = False) -> FieldJob | None:
+    def claim_next_field_job(
+        self,
+        worker_id: str,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+        require_confident_website_for_email: bool = False,
+        *,
+        degraded_mode: bool = False,
+    ) -> FieldJob | None:
         source_filter = ""
         field_name_filter = ""
         email_dependency_filter = ""
+        degraded_claim_filter = ""
+        field_priority_case = """
+                        CASE fj.field_name
+                            WHEN 'verify_school_match' THEN 0
+                            WHEN 'verify_website' THEN 1
+                            WHEN 'find_website' THEN 2
+                            WHEN 'find_instagram' THEN 3
+                            WHEN 'find_email' THEN 4
+                            ELSE 5
+                        END
+        """
         params: dict[str, Any] = {"worker_id": worker_id}
         if source_slug is not None:
             source_filter = """
@@ -2206,6 +2239,98 @@ class CrawlerRepository:
                           )
                       )
             """
+        if degraded_mode:
+            degraded_claim_filter = """
+                      AND (
+                          (
+                              fj.field_name = 'verify_school_match'
+                              AND (
+                                  EXISTS (
+                                      SELECT 1
+                                      FROM school_greek_life_registry sgr
+                                      WHERE sgr.school_slug = regexp_replace(lower(COALESCE(c.university_name, '')), '[^a-z0-9]+', '-', 'g')
+                                        AND sgr.evidence_source_type = 'official_school'
+                                        AND (
+                                            sgr.greek_life_status IN ('allowed', 'banned')
+                                            OR NULLIF(BTRIM(COALESCE(sgr.evidence_url, '')), '') IS NOT NULL
+                                        )
+                                  )
+                                  OR EXISTS (
+                                      SELECT 1
+                                      FROM fraternity_school_activity_cache fsac
+                                      JOIN fraternities f2 ON f2.id = c.fraternity_id
+                                      WHERE fsac.fraternity_slug = f2.slug
+                                        AND fsac.school_slug = regexp_replace(lower(COALESCE(c.university_name, '')), '[^a-z0-9]+', '-', 'g')
+                                        AND fsac.evidence_source_type = 'official_school'
+                                        AND (
+                                            fsac.chapter_activity_status IN ('confirmed_active', 'confirmed_inactive')
+                                            OR NULLIF(BTRIM(COALESCE(fsac.evidence_url, '')), '') IS NOT NULL
+                                        )
+                                  )
+                              )
+                          )
+                          OR (
+                              fj.field_name = 'verify_website'
+                              AND (
+                                  (
+                                      c.website_url ~* '^https?://'
+                                      AND COALESCE(c.field_states->>'website_url', '') NOT IN ('low_confidence', 'missing')
+                                  )
+                                  OR (
+                                      NULLIF(BTRIM(COALESCE(fj.payload -> 'contactResolution' ->> 'supportingPageUrl', '')), '') IS NOT NULL
+                                      AND LOWER(COALESCE(fj.payload -> 'contactResolution' ->> 'supportingPageScope', fj.payload -> 'contactResolution' ->> 'pageScope', '')) IN (
+                                          'chapter_site',
+                                          'school_affiliation_page',
+                                          'nationals_chapter_page'
+                                      )
+                                  )
+                              )
+                          )
+                          OR (
+                              fj.field_name = 'find_instagram'
+                              AND (
+                                  (
+                                      c.website_url ~* '^https?://'
+                                      AND COALESCE(c.field_states->>'website_url', '') NOT IN ('low_confidence', 'missing')
+                                  )
+                                  OR (
+                                      NULLIF(BTRIM(COALESCE(fj.payload -> 'contactResolution' ->> 'supportingPageUrl', '')), '') IS NOT NULL
+                                      AND LOWER(COALESCE(fj.payload -> 'contactResolution' ->> 'supportingPageScope', fj.payload -> 'contactResolution' ->> 'pageScope', '')) IN (
+                                          'chapter_site',
+                                          'school_affiliation_page',
+                                          'nationals_chapter_page'
+                                      )
+                                  )
+                              )
+                          )
+                          OR (
+                              fj.field_name = 'find_email'
+                              AND (
+                                  (
+                                      c.website_url ~* '^https?://'
+                                      AND COALESCE(c.field_states->>'website_url', '') NOT IN ('low_confidence', 'missing')
+                                  )
+                                  OR (
+                                      NULLIF(BTRIM(COALESCE(fj.payload -> 'contactResolution' ->> 'supportingPageUrl', '')), '') IS NOT NULL
+                                      AND LOWER(COALESCE(fj.payload -> 'contactResolution' ->> 'supportingPageScope', fj.payload -> 'contactResolution' ->> 'pageScope', '')) IN (
+                                          'chapter_site',
+                                          'school_affiliation_page',
+                                          'nationals_chapter_page'
+                                      )
+                                  )
+                              )
+                          )
+                      )
+            """
+            field_priority_case = """
+                        CASE fj.field_name
+                            WHEN 'verify_school_match' THEN 0
+                            WHEN 'verify_website' THEN 1
+                            WHEN 'find_instagram' THEN 2
+                            WHEN 'find_email' THEN 3
+                            ELSE 4
+                        END
+            """
         with self._connection.transaction(), self._connection.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -2215,11 +2340,13 @@ class CrawlerRepository:
                     FROM field_jobs fj
                     JOIN chapters c ON c.id = fj.chapter_id
                     WHERE fj.status = 'queued'
+                      AND COALESCE(fj.queue_state, 'actionable') = 'actionable'
                       AND fj.scheduled_at <= NOW()
                       AND fj.attempts < fj.max_attempts
 {source_filter}
 {field_name_filter}
  {email_dependency_filter}
+ {degraded_claim_filter}
                     ORDER BY
                         fj.priority DESC,
                         CASE
@@ -2227,14 +2354,7 @@ class CrawlerRepository:
                             ELSE 0
                         END ASC,
                         fj.scheduled_at ASC,
-                        CASE fj.field_name
-                            WHEN 'verify_school' THEN 0
-                            WHEN 'verify_website' THEN 1
-                            WHEN 'find_website' THEN 2
-                            WHEN 'find_instagram' THEN 3
-                            WHEN 'find_email' THEN 4
-                            ELSE 5
-                        END ASC,
+                        {field_priority_case} ASC,
                         fj.id ASC
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
@@ -2345,6 +2465,166 @@ class CrawlerRepository:
                 blocked_reason=row["blocked_reason"],
                 terminal_outcome=row["terminal_outcome"],
             )
+
+    def get_field_job_worker_process_stats(self, workload_lane: str = "contact_resolution") -> dict[str, int]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  COUNT(*) FILTER (
+                    WHERE workload_lane = %s
+                      AND status = 'active'
+                      AND (lease_expires_at IS NULL OR lease_expires_at > NOW())
+                  )::int AS active_workers,
+                  COUNT(*) FILTER (
+                    WHERE workload_lane = %s
+                      AND lease_expires_at IS NOT NULL
+                      AND lease_expires_at <= NOW()
+                  )::int AS stale_workers
+                FROM worker_processes
+                """,
+                (workload_lane, workload_lane),
+            )
+            row = cursor.fetchone() or {}
+        return {
+            "active_workers": int(row.get("active_workers") or 0),
+            "stale_workers": int(row.get("stale_workers") or 0),
+        }
+
+    def get_field_job_queue_counts(self) -> dict[str, int]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  COUNT(*) FILTER (WHERE status = 'queued')::int AS queued_jobs,
+                  COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'actionable')::int AS actionable_jobs,
+                  COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'deferred')::int AS deferred_jobs,
+                  COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_provider')::int AS blocked_provider_jobs,
+                  COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_dependency')::int AS blocked_dependency_jobs,
+                  COUNT(*) FILTER (WHERE status = 'queued' AND COALESCE(queue_state, 'actionable') = 'blocked_repairable')::int AS blocked_repairable_jobs,
+                  COUNT(*) FILTER (WHERE status = 'running')::int AS running_jobs
+                FROM field_jobs
+                WHERE field_name IN ('find_website', 'verify_website', 'find_instagram', 'find_email', 'verify_school_match')
+                """
+            )
+            row = cursor.fetchone() or {}
+        return {key: int(value or 0) for key, value in dict(row).items()}
+
+    def get_reusable_official_school_evidence_url(self, *, fraternity_slug: str | None, school_name: str | None) -> str | None:
+        school_slug = _normalize_school_slug(school_name)
+        fraternity = str(fraternity_slug or "").strip()
+        if school_slug and fraternity:
+            with self._connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT evidence_url
+                    FROM fraternity_school_activity_cache
+                    WHERE fraternity_slug = %s
+                      AND school_slug = %s
+                      AND evidence_source_type = 'official_school'
+                      AND NULLIF(BTRIM(COALESCE(evidence_url, '')), '') IS NOT NULL
+                    ORDER BY
+                      CASE
+                        WHEN chapter_activity_status IN ('confirmed_active', 'confirmed_inactive') THEN 0
+                        ELSE 1
+                      END,
+                      updated_at DESC
+                    LIMIT 1
+                    """,
+                    (fraternity, school_slug),
+                )
+                row = cursor.fetchone()
+                if row and row.get("evidence_url"):
+                    return str(row["evidence_url"])
+        if school_slug:
+            with self._connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT evidence_url
+                    FROM school_greek_life_registry
+                    WHERE school_slug = %s
+                      AND evidence_source_type = 'official_school'
+                      AND NULLIF(BTRIM(COALESCE(evidence_url, '')), '') IS NOT NULL
+                    ORDER BY
+                      CASE
+                        WHEN greek_life_status IN ('allowed', 'banned') THEN 0
+                        ELSE 1
+                      END,
+                      updated_at DESC
+                    LIMIT 1
+                    """,
+                    (school_slug,),
+                )
+                row = cursor.fetchone()
+                if row and row.get("evidence_url"):
+                    return str(row["evidence_url"])
+        return None
+
+    def backfill_field_job_typed_queue_state(self) -> dict[str, int]:
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH updated AS (
+                    UPDATE field_jobs fj
+                    SET
+                        blocked_reason = COALESCE(
+                            NULLIF(BTRIM(fj.blocked_reason), ''),
+                            NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
+                            NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
+                            NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
+                            NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
+                        ),
+                        queue_state = CASE
+                            WHEN COALESCE(fj.queue_state, 'actionable') IN ('actionable', 'deferred')
+                                 AND COALESCE(
+                                     NULLIF(BTRIM(fj.blocked_reason), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
+                                 ) IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                                THEN 'blocked_repairable'
+                            WHEN COALESCE(fj.queue_state, 'actionable') IN ('actionable', 'deferred')
+                                 AND COALESCE(
+                                     NULLIF(BTRIM(fj.blocked_reason), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
+                                 ) IN ('provider_degraded', 'transient_network', 'provider_low_signal')
+                                THEN 'blocked_provider'
+                            WHEN COALESCE(fj.queue_state, 'actionable') IN ('actionable', 'deferred')
+                                 AND COALESCE(
+                                     NULLIF(BTRIM(fj.blocked_reason), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
+                                 ) IN ('dependency_wait', 'website_required')
+                                THEN 'blocked_dependency'
+                            ELSE COALESCE(fj.queue_state, 'actionable')
+                        END
+                    WHERE fj.status = 'queued'
+                    RETURNING
+                        CASE
+                            WHEN COALESCE(NULLIF(BTRIM(blocked_reason), ''), NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''), NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''), NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''), NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')) IS NOT NULL
+                            THEN 1 ELSE 0
+                        END AS reason_present,
+                        CASE
+                            WHEN queue_state = 'blocked_repairable' THEN 1 ELSE 0
+                        END AS moved_blocked_repairable
+                )
+                SELECT
+                    COUNT(*) FILTER (WHERE reason_present = 1)::int AS blocked_reason_populated,
+                    COUNT(*) FILTER (WHERE moved_blocked_repairable = 1)::int AS blocked_repairable_rows
+                FROM updated
+                """
+            )
+            row = cursor.fetchone() or {}
+        return {
+            "blocked_reason_populated": int(row.get("blocked_reason_populated") or 0),
+            "blocked_repairable_rows": int(row.get("blocked_repairable_rows") or 0),
+        }
 
     def list_queued_field_jobs_for_triage(
         self,

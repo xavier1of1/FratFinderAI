@@ -7,15 +7,21 @@ import { createRequire } from "module";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const appDir = path.resolve(__dirname, "..");
-const nextDir = path.join(appDir, ".next");
+const runtimeDistDir = `.next-dev-${process.pid}`;
+const nextDir = path.join(appDir, runtimeDistDir);
 const require = createRequire(import.meta.url);
 const nextCliPath = require.resolve("next/dist/bin/next");
-const forwardedArgs = process.argv.slice(2);
+const forwardedArgs = process.argv.slice(2).filter((arg, index, allArgs) => !(arg === "--" && index === 0));
 
 // Local operator work is more important than hot-reload cache reuse.
 // Clean starts avoid stale route bundle lookups and broken _next asset paths.
 if (existsSync(nextDir)) {
-  rmSync(nextDir, { recursive: true, force: true });
+  try {
+    rmSync(nextDir, { recursive: true, force: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[fratfinder-web] clean start skipped for .next: ${message}`);
+  }
 }
 
 const child = spawn(process.execPath, [nextCliPath, "dev", ...forwardedArgs], {
@@ -23,7 +29,8 @@ const child = spawn(process.execPath, [nextCliPath, "dev", ...forwardedArgs], {
   stdio: "inherit",
   env: {
     ...process.env,
-    FRATFINDER_WEB_DEV_CLEAN_START: "true"
+    FRATFINDER_WEB_DEV_CLEAN_START: "true",
+    FRATFINDER_WEB_DIST_DIR: runtimeDistDir
   }
 });
 

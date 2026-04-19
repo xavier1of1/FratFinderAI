@@ -55,6 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
     request_worker_parser.add_argument("--poll-seconds", type=int, default=None, help="Worker idle poll interval in seconds")
     request_worker_parser.add_argument("--runtime-mode", choices=REQUEST_RUNTIME_CHOICES, default="v3_request_supervisor")
 
+    field_job_worker_parser = subparsers.add_parser("run-field-job-worker", help="Continuously claim and execute queued field jobs while actionable work exists")
+    field_job_worker_parser.add_argument("--once", action="store_true", help="Process one bounded field-job batch and then exit")
+    field_job_worker_parser.add_argument("--limit", type=int, default=None, help="Maximum jobs to process per batch")
+    field_job_worker_parser.add_argument("--workers", type=int, default=None, help="Number of field-job workers per batch")
+    field_job_worker_parser.add_argument("--poll-seconds", type=int, default=None, help="Worker idle poll interval in seconds")
+    field_job_worker_parser.add_argument("--runtime-mode", choices=FIELD_JOB_RUNTIME_CHOICES, default=None, help="Field-job runtime mode")
+    field_job_worker_parser.add_argument("--graph-durability", choices=["exit", "async", "sync"], default=None, help="LangGraph checkpoint durability mode")
+    field_job_worker_parser.add_argument("--skip-preflight", action="store_true", help="Skip search preflight before each field-job batch")
+
     jobs_parser = subparsers.add_parser("process-field-jobs", help="Process queued field jobs")
     jobs_parser.add_argument("--limit", type=int, default=25)
     jobs_parser.add_argument("--source-slug", help="Only process field jobs for one source slug", default=None)
@@ -236,6 +245,19 @@ def main() -> None:
             limit=args.limit,
             poll_seconds=args.poll_seconds,
             runtime_mode=args.runtime_mode,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "run-field-job-worker":
+        result = service.run_field_job_worker(
+            once=args.once,
+            limit=args.limit,
+            workers=args.workers,
+            poll_seconds=args.poll_seconds,
+            runtime_mode=args.runtime_mode,
+            graph_durability=args.graph_durability,
+            run_preflight=not args.skip_preflight,
         )
         print(json.dumps(result, indent=2, default=str))
         return

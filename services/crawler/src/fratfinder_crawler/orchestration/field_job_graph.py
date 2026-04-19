@@ -270,6 +270,7 @@ class FieldJobGraphRuntime:
             source_slug=self._source_slug,
             field_name=self._field_name,
             require_confident_website_for_email=bool(getattr(self._engine, "require_confident_website_for_email", False)),
+            degraded_mode=bool(getattr(self._engine, "_search_degraded_mode", False)),
         )
         if job is None:
             return {"terminal_reason": "no_job", "action": "none"}

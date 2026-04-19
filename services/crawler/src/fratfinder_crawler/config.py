@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     crawler_field_job_max_workers: int = Field(default=12, alias="CRAWLER_FIELD_JOB_MAX_WORKERS")
     crawler_field_job_stale_claim_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_STALE_CLAIM_MINUTES")
     crawler_field_job_graph_run_stale_minutes: int = Field(default=60, alias="CRAWLER_FIELD_JOB_GRAPH_RUN_STALE_MINUTES")
+    crawler_field_job_worker_lease_seconds: int = Field(default=180, alias="CRAWLER_FIELD_JOB_WORKER_LEASE_SECONDS")
+    crawler_field_job_worker_heartbeat_seconds: int = Field(default=30, alias="CRAWLER_FIELD_JOB_WORKER_HEARTBEAT_SECONDS")
+    crawler_field_job_liveness_alert_poll_windows: int = Field(default=2, alias="CRAWLER_FIELD_JOB_LIVENESS_ALERT_POLL_WINDOWS")
     crawler_field_job_runtime_mode: str = Field(
         default="langgraph_primary",
         alias="Agent:FIELD_JOB_RUNTIME_MODE",

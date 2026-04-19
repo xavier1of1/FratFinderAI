@@ -319,11 +319,18 @@ class _QueueTriageRepository:
         self.jobs = jobs
         self.snippets_by_chapter = snippets_by_chapter or {}
         self.pending_field_jobs = pending_field_jobs or set()
+        self.school_policy = None
+        self.chapter_activity = None
+        self.official_school_evidence_url = None
         self.patched: list[dict[str, object]] = []
         self.repairs: list[dict[str, object]] = []
         self.repair_jobs: list[dict[str, object]] = []
         self.completed_repair_jobs: list[dict[str, object]] = []
         self.claimable_repair_jobs: list[object] = []
+        self.created_field_jobs: list[dict[str, object]] = []
+
+    def backfill_field_job_typed_queue_state(self) -> dict[str, int]:
+        return {"blocked_reason_populated": 0, "blocked_repairable_rows": 0}
 
     def list_queued_field_jobs_for_triage(self, *, limit: int = 200, source_slug: str | None = None, field_name: str | None = None):
         _ = limit, source_slug, field_name
@@ -338,6 +345,37 @@ class _QueueTriageRepository:
 
     def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
         return (chapter_id, field_name) in self.pending_field_jobs
+
+    def get_school_policy(self, school_name: str | None):
+        _ = school_name
+        return self.school_policy
+
+    def get_chapter_activity(self, *, fraternity_slug: str | None, school_name: str | None):
+        _ = fraternity_slug, school_name
+        return self.chapter_activity
+
+    def get_reusable_official_school_evidence_url(self, *, fraternity_slug: str | None, school_name: str | None):
+        _ = fraternity_slug, school_name
+        return self.official_school_evidence_url
+
+    def create_field_jobs(
+        self,
+        chapter_id: str,
+        crawl_run_id: int | None,
+        chapter_slug: str,
+        source_slug: str | None,
+        missing_fields: list[str],
+    ) -> int:
+        self.created_field_jobs.append(
+            {
+                "chapter_id": chapter_id,
+                "crawl_run_id": crawl_run_id,
+                "chapter_slug": chapter_slug,
+                "source_slug": source_slug,
+                "missing_fields": list(missing_fields),
+            }
+        )
+        return len(missing_fields)
 
     def update_chapter_identity_repair(self, **kwargs: object) -> bool:
         self.repairs.append(dict(kwargs))
@@ -565,9 +603,88 @@ def test_reconcile_field_job_queue_preserves_deferred_canonical_jobs():
     assert triage["actionableRetained"] == 1
     assert repair["reconciledHistorical"] == 1
     assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "keep_deferred"
-    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "deferred"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "blocked_provider"
     assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "provider_degraded"
-    assert repo.patched[0]["scheduled_delay_seconds"] is None
+    assert repo.patched[0]["scheduled_delay_seconds"] == 900
+
+
+def test_reconcile_field_job_queue_reactivates_authoritative_provider_blocked_jobs_in_degraded_mode():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_transient_long_cooldown_seconds=900,
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="verify_school_match",
+                university_name="Example University",
+                payload={
+                    "sourceSlug": "alpha-main",
+                    "queue_state": "blocked_provider",
+                    "contactResolution": {"queueState": "blocked_provider", "reasonCode": "provider_degraded"},
+                },
+            )
+        ],
+    )
+    repo.school_policy = SimpleNamespace(greek_life_status="allowed", evidence_source_type="official_school")
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": False},
+    )
+
+    assert triage["providerRetryCandidatesConsidered"] == 1
+    assert triage["providerRetryCandidatesAdmitted"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
+    assert repo.patched[0]["scheduled_delay_seconds"] == 0
+
+
+def test_reconcile_field_job_queue_reactivates_dependency_blocked_job_when_support_exists():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_email",
+                university_name="Example University",
+                payload={
+                    "sourceSlug": "alpha-main",
+                    "queue_state": "blocked_dependency",
+                    "contactResolution": {
+                        "queueState": "blocked_dependency",
+                        "reasonCode": "dependency_wait",
+                        "supportingPageUrl": "https://example.edu/greek/alpha",
+                        "supportingPageScope": "school_affiliation_page",
+                    },
+                },
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": False},
+    )
+
+    assert triage["dependencyReactivatedFromExistingSupport"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
 
 
 def test_process_chapter_repair_queue_promotes_canonical_and_unblocks_jobs():
@@ -846,6 +963,11 @@ def test_system_baseline_returns_accuracy_queue_and_preflight(monkeypatch):
             self._last_query = str(query)
 
         def fetchone(self):
+            if "FROM worker_processes" in self._last_query:
+                return {
+                    "active_workers": 0,
+                    "stale_workers": 1,
+                }
             return {
                 "queued_jobs": 12,
                 "actionable_jobs": 5,
@@ -863,6 +985,27 @@ def test_system_baseline_returns_accuracy_queue_and_preflight(monkeypatch):
                 return [
                     {"field_name": "find_email", "actionable_jobs": 1, "deferred_jobs": 2, "done_jobs": 3, "failed_jobs": 0},
                     {"field_name": "find_website", "actionable_jobs": 4, "deferred_jobs": 5, "done_jobs": 6, "failed_jobs": 1},
+                ]
+            if "AS blocked_reason" in self._last_query and "GROUP BY 1, 3" in self._last_query:
+                return [
+                    {"blocked_reason": "provider_degraded", "count": 4, "queue_lane": "provider_dependent_search"},
+                    {"blocked_reason": "dependency_wait", "count": 2, "queue_lane": "dependency_blocked"},
+                    {"blocked_reason": "queued_for_entity_repair", "count": 1, "queue_lane": "repair_backlog"},
+                ]
+            if "field_name," in self._last_query and "AS blocked_reason" in self._last_query and "GROUP BY 1, 2, 4" in self._last_query:
+                return [
+                    {"field_name": "find_website", "blocked_reason": "provider_degraded", "count": 4, "queue_lane": "provider_dependent_search"},
+                    {"field_name": "find_email", "blocked_reason": "dependency_wait", "count": 2, "queue_lane": "dependency_blocked"},
+                ]
+            if "COALESCE(s.slug, 'unknown') AS source_slug" in self._last_query:
+                return [
+                    {"source_slug": "alpha-main", "queue_lane": "provider_dependent_search", "count": 4},
+                    {"source_slug": "beta-main", "queue_lane": "dependency_blocked", "count": 2},
+                ]
+            if "AS age_bucket" in self._last_query:
+                return [
+                    {"age_bucket": "1h_to_6h", "count": 5},
+                    {"age_bucket": "lt_1h", "count": 2},
                 ]
             if "FROM chapter_evidence" in self._last_query:
                 return [{"reason_code": "chapter_page_match", "count": 11}]
@@ -962,6 +1105,10 @@ def test_system_baseline_returns_accuracy_queue_and_preflight(monkeypatch):
 
     assert baseline["accuracy"]["complete_rows"] == 10
     assert baseline["queue"]["queued_jobs"] == 12
+    assert baseline["queue_health"]["deferred_ratio"] == 0.5833
+    assert baseline["queue_health"]["provider_degraded_ratio"] == 0.3333
+    assert baseline["queue_health"]["worker_liveness_alert"]["open"] is False
+    assert baseline["deferred_reason_breakdown"][0]["blocked_reason"] == "provider_degraded"
     assert baseline["national_profiles"]["total_profiles"] == 2
     assert baseline["search_preflight"]["probes"] == 4
     assert baseline["provenance_audit"]["accepted_rows_missing_reason_code"] == 2
