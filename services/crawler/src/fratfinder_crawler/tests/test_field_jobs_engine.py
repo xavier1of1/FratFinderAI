@@ -26,6 +26,11 @@ from fratfinder_crawler.field_jobs import (
 from fratfinder_crawler.models import FieldJob
 from fratfinder_crawler.search import SearchResult, SearchUnavailableError
 from fratfinder_crawler.models import ChapterActivityRecord, SchoolPolicyRecord
+from fratfinder_crawler.status.models import (
+    ChapterStatusDecision,
+    ChapterStatusFinal,
+    SchoolRecognitionStatus,
+)
 
 
 class FakeRepository:
@@ -35,11 +40,13 @@ class FakeRepository:
         snippets_by_chapter: dict[str, list[str]],
         pending_field_jobs: set[tuple[str, str]] | None = None,
         latest_provenance_by_chapter: dict[str, dict[str, object]] | None = None,
+        synthesize_active_status_decision: bool = True,
     ):
         self.jobs = jobs
         self.snippets_by_chapter = snippets_by_chapter
         self.pending_field_jobs = pending_field_jobs or set()
         self.latest_provenance_by_chapter = latest_provenance_by_chapter or {}
+        self.synthesize_active_status_decision = synthesize_active_status_decision
         self.completed: list[tuple[str, dict[str, str], dict[str, str], int]] = []
         self.requeued: list[str] = []
         self.requeue_details: list[tuple[str, int, str]] = []
@@ -59,6 +66,8 @@ class FakeRepository:
         self.inactive_applied: list[dict[str, object]] = []
         self.completed_siblings: list[dict[str, object]] = []
         self.enrichment_observations: list[object] = []
+        self.latest_status_decisions: dict[str, ChapterStatusDecision] = {}
+        self.current_jobs_by_chapter: dict[str, FieldJob] = {}
 
     def claim_next_field_job(
         self,
@@ -75,6 +84,7 @@ class FakeRepository:
         if not self.jobs:
             return None
         job = self.jobs.pop(0)
+        self.current_jobs_by_chapter[job.chapter_id] = job
         self.claim_order.append(job.field_name)
         return job
 
@@ -242,6 +252,31 @@ class FakeRepository:
             "chapter_safe_instagram": False,
             "complete_row": False,
         }
+
+    def get_latest_chapter_status_decision(self, chapter_id: str):
+        decision = self.latest_status_decisions.get(chapter_id)
+        if decision is not None:
+            return decision
+        if not self.synthesize_active_status_decision:
+            return None
+        job = self.current_jobs_by_chapter.get(chapter_id)
+        if job is None or job.field_name == "verify_school_match":
+            return None
+        school_name = (job.university_name or job.payload.get("candidateSchoolName") or "").strip().lower()
+        fraternity_slug = (job.fraternity_slug or "").strip()
+        if school_name and school_name in self.school_policies:
+            return None
+        if school_name and fraternity_slug and (fraternity_slug, school_name) in self.chapter_activities:
+            return None
+        return ChapterStatusDecision(
+            final_status=ChapterStatusFinal.ACTIVE,
+            school_recognition_status=SchoolRecognitionStatus.RECOGNIZED,
+            national_status="unknown",
+            reason_code="legacy_test_assumed_active_status",
+            confidence=0.99,
+            evidence_ids=["legacy-test-status"],
+            decision_trace={"authority_order": ["test_harness"], "winning_evidence_id": "legacy-test-status"},
+        )
 
 
 def test_generic_office_email_markers_cover_school_office_aliases():
@@ -2627,6 +2662,21 @@ def test_instagram_miss_marks_chapter_inactive_when_official_school_list_exclude
     repo = FakeRepository(
         jobs=[_job("find_instagram", university_name="Columbia University", chapter_name="Nu Nu")],
         snippets_by_chapter={"chapter-1": []},
+        synthesize_active_status_decision=False,
+    )
+    repo.chapter_activities[("sigma-chi", "columbia university")] = ChapterActivityRecord(
+        fraternity_slug="sigma-chi",
+        school_slug="columbia-university",
+        school_name="Columbia University",
+        chapter_activity_status="confirmed_inactive",
+        confidence=0.95,
+        evidence_url="https://www.cc-seas.columbia.edu/reslife/fsl/chapters",
+        evidence_source_type="official_school",
+        reason_code="fraternity_absent_from_official_school_list",
+        metadata={"sourceSnippet": "Recognized fraternities exclude Sigma Chi."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
     )
     search_client = FakeSearchClient(
         {
@@ -2741,7 +2791,7 @@ def test_invalid_entity_gate_marks_wikipedia_seeded_junk_and_cancels_siblings():
 def test_campus_policy_unknown_without_official_school_evidence_stays_process_local():
     school_name = "Mystery State University"
     job_one = _job("find_website", university_name=school_name, chapter_name="Alpha Chapter")
-    repo = FakeRepository(jobs=[job_one], snippets_by_chapter={"chapter-1": []})
+    repo = FakeRepository(jobs=[job_one], snippets_by_chapter={"chapter-1": []}, synthesize_active_status_decision=False)
     search_client_one = FakeSearchClient({})
     engine_one = FieldJobEngine(
         repo,

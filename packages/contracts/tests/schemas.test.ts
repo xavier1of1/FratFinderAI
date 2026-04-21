@@ -1,6 +1,7 @@
 ﻿import { describe, expect, it } from "vitest";
 import {
   canonicalChapterSchema,
+  chapterStatusDecisionSchema,
   chapterProvenanceSchema,
   fieldJobPayloadSchema,
   reviewItemPayloadSchema
@@ -59,5 +60,33 @@ describe("contract schemas", () => {
     expect(review.itemType).toBe("unsupported_source");
     expect(review.extractionNotes).toContain("locator shell");
     expect(fieldJob.fieldName).toBe("websiteUrl");
+  });
+
+  it("validates chapter status decisions and rejects unsafe payloads", () => {
+    const payload = chapterStatusDecisionSchema.parse({
+      finalStatus: "active",
+      schoolRecognitionStatus: "recognized",
+      nationalStatus: "active",
+      reasonCode: "official_school_current_recognition",
+      confidence: 0.98,
+      evidenceIds: ["evidence-1"],
+      decisionTrace: {},
+      conflictFlags: [],
+      reviewRequired: false
+    });
+
+    expect(payload.finalStatus).toBe("active");
+    expect(() =>
+      chapterStatusDecisionSchema.parse({
+        finalStatus: "inactive",
+        schoolRecognitionStatus: "unrecognized",
+        reasonCode: "official_school_negative_status",
+        confidence: 0.9,
+        evidenceIds: [],
+        decisionTrace: {},
+        conflictFlags: [],
+        reviewRequired: false
+      })
+    ).toThrow();
   });
 });

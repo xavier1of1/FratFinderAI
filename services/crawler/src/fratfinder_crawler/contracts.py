@@ -22,6 +22,9 @@ class ContractValidator:
         self._field_job_validator = Draft202012Validator(
             json.loads((schemas_dir / "field-job-payload.schema.json").read_text(encoding="utf-8"))
         )
+        self._chapter_status_decision_validator = Draft202012Validator(
+            json.loads((schemas_dir / "chapter-status-decision.schema.json").read_text(encoding="utf-8"))
+        )
 
     def validate_chapter(self, payload: dict[str, Any]) -> None:
         self._chapter_validator.validate(payload)
@@ -34,3 +37,6 @@ class ContractValidator:
 
     def validate_field_job(self, payload: dict[str, Any]) -> None:
         self._field_job_validator.validate(payload)
+
+    def validate_chapter_status_decision(self, payload: dict[str, Any]) -> None:
+        self._chapter_status_decision_validator.validate(payload)

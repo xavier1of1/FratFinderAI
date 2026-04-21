@@ -64,6 +64,14 @@ from fratfinder_crawler.models import (
     SourceRecord,
     VerifiedSourceRecord,
 )
+from fratfinder_crawler.status.models import (
+    CampusStatusSource,
+    ChapterStatusDecision,
+    ChapterStatusEvidence,
+    NationalStatusValue,
+    SchoolRecognitionStatus,
+    StatusZone,
+)
 
 
 def _normalize_field_job_queue_state(value: Any) -> str:
@@ -1180,6 +1188,226 @@ class CrawlerRepository:
             updated_at=row["updated_at"],
         )
 
+    def upsert_campus_status_source(self, source: CampusStatusSource) -> str:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO campus_status_sources (
+                    school_name,
+                    source_url,
+                    source_host,
+                    source_type,
+                    authority_tier,
+                    currentness_score,
+                    completeness_score,
+                    parse_completeness_score,
+                    is_official_school_source,
+                    last_fetched_at,
+                    content_hash,
+                    title,
+                    text_excerpt,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (school_name, source_url)
+                DO UPDATE SET
+                    source_host = EXCLUDED.source_host,
+                    source_type = EXCLUDED.source_type,
+                    authority_tier = EXCLUDED.authority_tier,
+                    currentness_score = EXCLUDED.currentness_score,
+                    completeness_score = EXCLUDED.completeness_score,
+                    parse_completeness_score = EXCLUDED.parse_completeness_score,
+                    is_official_school_source = EXCLUDED.is_official_school_source,
+                    last_fetched_at = EXCLUDED.last_fetched_at,
+                    content_hash = EXCLUDED.content_hash,
+                    title = EXCLUDED.title,
+                    text_excerpt = EXCLUDED.text_excerpt,
+                    metadata = EXCLUDED.metadata
+                RETURNING id
+                """,
+                (
+                    source.school_name,
+                    source.source_url,
+                    source.source_host,
+                    str(source.source_type),
+                    source.authority_tier,
+                    float(source.currentness_score),
+                    float(source.completeness_score),
+                    float(source.parse_completeness_score),
+                    bool(source.is_official_school_source),
+                    source.last_fetched_at,
+                    source.content_hash,
+                    source.title[:5000],
+                    (source.text or "")[:16000],
+                    Jsonb(dict(source.metadata or {})),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return str(row["id"])
+
+    def replace_campus_status_zones(self, *, campus_status_source_id: str, zones: list[StatusZone]) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute("DELETE FROM campus_status_zones WHERE campus_status_source_id = %s", (campus_status_source_id,))
+            inserted = 0
+            for zone in zones:
+                cursor.execute(
+                    """
+                    INSERT INTO campus_status_zones (
+                        campus_status_source_id,
+                        zone_type,
+                        zone_heading,
+                        dom_path,
+                        zone_text,
+                        links,
+                        confidence,
+                        parser_version,
+                        metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        campus_status_source_id,
+                        str(zone.zone_type),
+                        zone.heading,
+                        zone.dom_path,
+                        zone.text[:20000],
+                        Jsonb(list(zone.links)),
+                        float(zone.confidence),
+                        zone.parser_version,
+                        Jsonb(dict(zone.metadata or {})),
+                    ),
+                )
+                inserted += 1
+        self._connection.commit()
+        return inserted
+
+    def insert_chapter_status_evidence(self, evidence: ChapterStatusEvidence) -> str:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO chapter_status_evidence (
+                    chapter_id,
+                    fraternity_name,
+                    school_name,
+                    source_url,
+                    authority_tier,
+                    evidence_type,
+                    status_signal,
+                    matched_text,
+                    matched_alias,
+                    zone_type,
+                    match_confidence,
+                    evidence_confidence,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    evidence.chapter_id,
+                    evidence.fraternity_name,
+                    evidence.school_name,
+                    evidence.source_url,
+                    evidence.authority_tier,
+                    evidence.evidence_type,
+                    evidence.status_signal,
+                    evidence.matched_text,
+                    evidence.matched_alias,
+                    evidence.zone_type,
+                    float(evidence.match_confidence),
+                    float(evidence.evidence_confidence),
+                    Jsonb(dict(evidence.metadata or {})),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return str(row["id"])
+
+    def insert_chapter_status_decision(self, *, chapter_id: str, decision: ChapterStatusDecision) -> ChapterStatusDecision:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO chapter_status_decisions (
+                    chapter_id,
+                    final_status,
+                    school_recognition_status,
+                    national_status,
+                    confidence,
+                    reason_code,
+                    conflict_flags,
+                    evidence_ids,
+                    decision_trace,
+                    review_required
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, decided_at
+                """,
+                (
+                    chapter_id,
+                    str(decision.final_status),
+                    str(decision.school_recognition_status),
+                    str(decision.national_status),
+                    float(decision.confidence),
+                    decision.reason_code,
+                    Jsonb(list(decision.conflict_flags)),
+                    list(decision.evidence_ids),
+                    Jsonb(dict(decision.decision_trace or {})),
+                    bool(decision.review_required),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return decision.model_copy(
+            update={
+                "id": str(row["id"]),
+                "chapter_id": chapter_id,
+                "decided_at": row["decided_at"].isoformat() if row["decided_at"] else None,
+            }
+        )
+
+    def get_latest_chapter_status_decision(self, chapter_id: str) -> ChapterStatusDecision | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    chapter_id,
+                    final_status,
+                    school_recognition_status,
+                    national_status,
+                    confidence,
+                    reason_code,
+                    conflict_flags,
+                    evidence_ids,
+                    decision_trace,
+                    review_required,
+                    decided_at
+                FROM chapter_status_decisions
+                WHERE chapter_id = %s
+                ORDER BY decided_at DESC, id DESC
+                LIMIT 1
+                """,
+                (chapter_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return ChapterStatusDecision(
+            id=str(row["id"]),
+            chapter_id=str(row["chapter_id"]),
+            final_status=str(row["final_status"] or "unknown"),
+            school_recognition_status=str(row["school_recognition_status"] or "unknown"),
+            national_status=str(row["national_status"] or NationalStatusValue.UNKNOWN.value),
+            confidence=float(row["confidence"] or 0.0),
+            reason_code=str(row["reason_code"] or ""),
+            conflict_flags=list(row["conflict_flags"] or []),
+            evidence_ids=[str(value) for value in list(row["evidence_ids"] or [])],
+            decision_trace=dict(row["decision_trace"] or {}),
+            review_required=bool(row["review_required"]),
+            decided_at=row["decided_at"].isoformat() if row["decided_at"] else None,
+        )
+
     def upsert_fraternity(self, slug: str, name: str, nic_affiliated: bool = True) -> tuple[str, str]:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -1718,6 +1946,20 @@ class CrawlerRepository:
     ) -> None:
         field_state_updates = field_state_updates or {}
         provenance_records = provenance_records or []
+        decision_evidence = _build_decision_evidence(completed_payload)
+        contact_field_writes = any(
+            field_name in chapter_updates for field_name in ("website_url", "instagram_url", "contact_email")
+        )
+        status_decision_id = str(
+            decision_evidence.metadata.get("statusDecisionId")
+            or completed_payload.get("statusDecisionId")
+            or ""
+        ).strip() or None
+        operator_override_reason = str(
+            decision_evidence.metadata.get("operatorOverrideReason")
+            or completed_payload.get("operatorOverrideReason")
+            or ""
+        ).strip() or None
         contact_provenance_patch = _build_contact_provenance_patch(
             chapter_updates=chapter_updates,
             field_state_updates=field_state_updates,
@@ -1725,6 +1967,26 @@ class CrawlerRepository:
             provenance_records=provenance_records,
         )
         with self._connection.transaction(), self._connection.cursor() as cursor:
+            if contact_field_writes and not operator_override_reason:
+                cursor.execute(
+                    """
+                    SELECT id, final_status
+                    FROM chapter_status_decisions
+                    WHERE chapter_id = %s
+                    ORDER BY decided_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (chapter_id,),
+                )
+                status_row = cursor.fetchone()
+                if status_row is None:
+                    raise ValueError("inline contact writes require an existing chapter_status_decision")
+                latest_status_decision_id = str(status_row["id"])
+                latest_final_status = str(status_row["final_status"] or "").strip().lower()
+                if latest_final_status != "active":
+                    raise ValueError("inactive/unknown/review chapters cannot receive new contact writes")
+                if status_decision_id is not None and latest_status_decision_id != status_decision_id:
+                    raise ValueError("inline contact write statusDecisionId does not match the latest chapter_status_decision")
             if chapter_updates or field_state_updates:
                 cursor.execute(
                     """
@@ -1761,7 +2023,6 @@ class CrawlerRepository:
             provider = completed_payload.get("provider") or completed_payload.get("source_provider")
             query = completed_payload.get("query")
             related_website_url = completed_payload.get("related_website_url")
-            decision_evidence = _build_decision_evidence(completed_payload)
 
             for record in provenance_records:
                 payload = asdict(record)
@@ -3262,6 +3523,20 @@ class CrawlerRepository:
     ) -> None:
         field_state_updates = field_state_updates or {}
         provenance_records = provenance_records or []
+        decision_evidence = _build_decision_evidence(completed_payload)
+        contact_field_writes = any(
+            field_name in chapter_updates for field_name in ("website_url", "instagram_url", "contact_email")
+        )
+        status_decision_id = str(
+            decision_evidence.metadata.get("statusDecisionId")
+            or completed_payload.get("statusDecisionId")
+            or ""
+        ).strip() or None
+        operator_override_reason = str(
+            decision_evidence.metadata.get("operatorOverrideReason")
+            or completed_payload.get("operatorOverrideReason")
+            or ""
+        ).strip() or None
         contact_provenance_patch = _build_contact_provenance_patch(
             chapter_updates=chapter_updates,
             field_state_updates=field_state_updates,
@@ -3270,6 +3545,26 @@ class CrawlerRepository:
         )
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
+            if contact_field_writes and not operator_override_reason:
+                cursor.execute(
+                    """
+                    SELECT id, final_status
+                    FROM chapter_status_decisions
+                    WHERE chapter_id = %s
+                    ORDER BY decided_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (job.chapter_id,),
+                )
+                status_row = cursor.fetchone()
+                if status_row is None:
+                    raise ValueError("contact writes require an existing chapter_status_decision")
+                latest_status_decision_id = str(status_row["id"])
+                latest_final_status = str(status_row["final_status"] or "").strip().lower()
+                if latest_final_status != "active":
+                    raise ValueError("inactive/unknown/review chapters cannot receive new contact writes")
+                if status_decision_id is not None and latest_status_decision_id != status_decision_id:
+                    raise ValueError("contact write statusDecisionId does not match the latest chapter_status_decision")
             if chapter_updates or field_state_updates:
                 cursor.execute(
                     """
@@ -3306,7 +3601,6 @@ class CrawlerRepository:
             provider = completed_payload.get("provider") or completed_payload.get("source_provider")
             query = completed_payload.get("query")
             related_website_url = completed_payload.get("related_website_url")
-            decision_evidence = _build_decision_evidence(completed_payload)
 
             for record in provenance_records:
                 payload = asdict(record)

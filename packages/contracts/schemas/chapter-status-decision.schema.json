@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "finalStatus",
+    "schoolRecognitionStatus",
+    "reasonCode",
+    "confidence",
+    "evidenceIds",
+    "decisionTrace",
+    "conflictFlags",
+    "reviewRequired"
+  ],
+  "properties": {
+    "finalStatus": {
+      "type": "string",
+      "enum": ["active", "inactive", "unknown", "review"]
+    },
+    "schoolRecognitionStatus": {
+      "type": "string",
+      "enum": [
+        "recognized",
+        "probationary_recognition",
+        "active_under_conduct_sanction",
+        "seeking_recognition",
+        "interim_suspension",
+        "suspended",
+        "closed",
+        "dismissed",
+        "expelled",
+        "unrecognized",
+        "banned_no_greek_life",
+        "not_found_on_conclusive_roster",
+        "unknown"
+      ]
+    },
+    "nationalStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "associate",
+        "colony",
+        "inactive",
+        "dormant",
+        "closed",
+        "not_listed_on_active_only_directory",
+        "not_listed_on_all_status_directory",
+        "unknown"
+      ],
+      "default": "unknown"
+    },
+    "reasonCode": {
+      "type": "string",
+      "minLength": 1
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "evidenceIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "decisionTrace": {
+      "type": "object",
+      "default": {}
+    },
+    "conflictFlags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "reviewRequired": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "finalStatus": {
+            "enum": ["active", "inactive"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "evidenceIds": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

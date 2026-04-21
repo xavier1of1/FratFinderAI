@@ -58,6 +58,19 @@ from fratfinder_crawler.precision_tools import (
     tool_site_scope_classifier,
 )
 from fratfinder_crawler.search import SearchClient, SearchResult, SearchUnavailableError
+from fratfinder_crawler.status import (
+    CampusSourceDocument,
+    ChapterStatusDecision,
+    ChapterStatusEvidence,
+    ChapterStatusFinal,
+    SchoolRecognitionStatus,
+    build_campus_status_index,
+    chapter_activity_status_from_decision,
+    decide_chapter_status,
+    school_policy_status_from_decision,
+)
+from fratfinder_crawler.status.evidence_repository import status_decision_metadata
+from fratfinder_crawler.status.national_capabilities import infer_national_status_from_page
 
 if TYPE_CHECKING:
     from fratfinder_crawler.db.repository import CrawlerRepository
@@ -407,11 +420,16 @@ class CandidateMatch:
 class ActivityValidationDecision:
     school_policy_status: str = "unknown"
     chapter_activity_status: str = "unknown"
+    final_status: str = "unknown"
+    school_recognition_status: str = "unknown"
+    national_status: str = "unknown"
     evidence_url: str | None = None
     evidence_source_type: str | None = None
     reason_code: str | None = None
     source_snippet: str | None = None
     confidence: float = 0.0
+    status_decision_id: str | None = None
+    review_required: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -584,6 +602,7 @@ class FieldJobEngine:
         self._source_record_cache: dict[str, SourceRecord | None] = {}
         self._school_policy_cache: dict[str, ActivityValidationDecision] = {}
         self._chapter_activity_cache: dict[tuple[str, str], ActivityValidationDecision] = {}
+        self._status_decision_cache: dict[str, ChapterStatusDecision] = {}
         self._authoritative_bundle_cache: dict[str, AuthoritativeBundle] = {}
         self._latest_provenance_context_cache: dict[str, dict[str, Any]] = {}
         self._verify_school_cache_hit_count = 0
@@ -753,7 +772,7 @@ class FieldJobEngine:
                 summary["requeued"] = int(summary["requeued"]) + 1
                 if exc.reason_code == "provider_degraded":
                     summary["provider_degraded_deferred"] = int(summary["provider_degraded_deferred"]) + 1
-                if exc.reason_code in {"dependency_wait", "website_required"}:
+                if exc.reason_code in {"dependency_wait", "website_required", "status_dependency_unmet"}:
                     summary["dependency_wait_deferred"] = int(summary["dependency_wait_deferred"]) + 1
                 self._append_chapter_search_queries(summary, self._chapter_search_queries)
                 self._record_enrichment_observation(
@@ -883,7 +902,7 @@ class FieldJobEngine:
         unexpected_error: Exception | None = None,
     ) -> str:
         if retry_error is not None:
-            if retry_error.reason_code in {"provider_degraded", "transient_network", "dependency_wait", "website_required", "provider_low_signal"}:
+            if retry_error.reason_code in {"provider_degraded", "transient_network", "dependency_wait", "website_required", "provider_low_signal", "status_dependency_unmet"}:
                 return "defer"
             if retry_error.low_signal:
                 return "stop_no_signal"
@@ -1371,6 +1390,7 @@ class FieldJobEngine:
             )
             if not candidate_same_as_source:
                 page_scope = PAGE_SCOPE_CHAPTER_SITE
+        status_decision = self._status_decision_cache.get(job.chapter_id)
         return {
             "decisionStage": decision_stage,
             "evidenceUrl": match.source_url,
@@ -1382,6 +1402,7 @@ class FieldJobEngine:
             "metadata": {
                 "query": match.query,
                 "relatedWebsiteUrl": match.related_website_url,
+                **(status_decision_metadata(status_decision) if status_decision is not None else {}),
             },
         }
 
@@ -1396,7 +1417,20 @@ class FieldJobEngine:
             "contactSpecificity": _contact_specificity_for_page_scope(page_scope),
             "confidence": round(float(decision.confidence or 0.0), 4),
             "reasonCode": decision.reason_code,
-            "metadata": dict(decision.metadata or {}),
+            "metadata": {
+                **dict(decision.metadata or {}),
+                **(
+                    {
+                        "statusDecisionId": decision.status_decision_id,
+                        "finalStatus": decision.final_status,
+                        "schoolRecognitionStatus": decision.school_recognition_status,
+                        "nationalStatus": decision.national_status,
+                        "reviewRequired": decision.review_required,
+                    }
+                    if decision.status_decision_id
+                    else {}
+                ),
+            },
         }
 
     def _resolution_evidence_for_authoritative_bundle(
@@ -1415,6 +1449,7 @@ class FieldJobEngine:
             return self._resolution_evidence_for_candidate(job, match, target_field=target_field, decision_stage="authoritative_bundle")
         source_type = str(bundle.evidence_source_type or "authoritative_validation").strip() or "authoritative_validation"
         page_scope = PAGE_SCOPE_SCHOOL_AFFILIATION if "school" in source_type else PAGE_SCOPE_NATIONALS_CHAPTER if "national" in source_type else PAGE_SCOPE_DIRECTORY
+        status_decision = self._status_decision_cache.get(job.chapter_id)
         return {
             "decisionStage": "authoritative_bundle",
             "evidenceUrl": bundle.evidence_url,
@@ -1423,12 +1458,15 @@ class FieldJobEngine:
             "contactSpecificity": _contact_specificity_for_page_scope(page_scope),
             "confidence": 0.9,
             "reasonCode": bundle.reason_code,
-            "metadata": {},
+            "metadata": status_decision_metadata(status_decision) if status_decision is not None else {},
         }
 
     def _decision_from_school_policy(self, record) -> ActivityValidationDecision:
+        school_policy_status = str(getattr(record, "greek_life_status", "unknown") or "unknown")
         return ActivityValidationDecision(
-            school_policy_status=str(getattr(record, "greek_life_status", "unknown") or "unknown"),
+            school_policy_status=school_policy_status,
+            final_status="inactive" if school_policy_status == "banned" else "active" if school_policy_status == "allowed" else "unknown",
+            school_recognition_status="banned_no_greek_life" if school_policy_status == "banned" else "recognized" if school_policy_status == "allowed" else "unknown",
             evidence_url=getattr(record, "evidence_url", None),
             evidence_source_type=getattr(record, "evidence_source_type", None),
             reason_code=getattr(record, "reason_code", None),
@@ -1440,6 +1478,8 @@ class FieldJobEngine:
     def _decision_from_chapter_activity(self, record) -> ActivityValidationDecision:
         return ActivityValidationDecision(
             chapter_activity_status=str(getattr(record, "chapter_activity_status", "unknown") or "unknown"),
+            final_status="active" if str(getattr(record, "chapter_activity_status", "unknown") or "unknown") == "confirmed_active" else "inactive" if str(getattr(record, "chapter_activity_status", "unknown") or "unknown") == "confirmed_inactive" else "unknown",
+            school_recognition_status="recognized" if str(getattr(record, "chapter_activity_status", "unknown") or "unknown") == "confirmed_active" else "unrecognized" if str(getattr(record, "chapter_activity_status", "unknown") or "unknown") == "confirmed_inactive" else "unknown",
             evidence_url=getattr(record, "evidence_url", None),
             evidence_source_type=getattr(record, "evidence_source_type", None),
             reason_code=getattr(record, "reason_code", None),
@@ -1447,6 +1487,278 @@ class FieldJobEngine:
             confidence=float(getattr(record, "confidence", 0.0) or 0.0),
             metadata=dict(getattr(record, "metadata", {}) or {}),
         )
+
+    def _activity_decision_from_status_decision(
+        self,
+        status_decision: ChapterStatusDecision,
+        *,
+        evidence_url: str | None = None,
+        evidence_source_type: str = "official_school",
+        source_snippet: str | None = None,
+    ) -> ActivityValidationDecision:
+        activity_status = chapter_activity_status_from_decision(status_decision)
+        school_policy_status = school_policy_status_from_decision(status_decision)
+        return ActivityValidationDecision(
+            school_policy_status=school_policy_status,
+            chapter_activity_status=activity_status,
+            final_status=str(status_decision.final_status),
+            school_recognition_status=str(status_decision.school_recognition_status),
+            national_status=str(status_decision.national_status),
+            evidence_url=evidence_url,
+            evidence_source_type=evidence_source_type,
+            reason_code=status_decision.reason_code,
+            source_snippet=source_snippet,
+            confidence=float(status_decision.confidence),
+            status_decision_id=status_decision.id,
+            review_required=bool(status_decision.review_required),
+            metadata=status_decision_metadata(status_decision),
+        )
+
+    def _persist_status_decision(
+        self,
+        job: FieldJob,
+        *,
+        status_decision: ChapterStatusDecision,
+        campus_index,
+        evidence_url: str | None,
+        source_snippet: str | None,
+    ) -> ChapterStatusDecision:
+        if hasattr(self._repository, "upsert_campus_status_source"):
+            for source in campus_index.sources:
+                source_id = self._repository.upsert_campus_status_source(source)
+                zones = [zone for zone in campus_index.zones if zone.source_url == source.source_url]
+                if hasattr(self._repository, "replace_campus_status_zones"):
+                    self._repository.replace_campus_status_zones(campus_status_source_id=source_id, zones=zones)
+
+        persisted_evidence_ids: list[str] = []
+        if hasattr(self._repository, "insert_chapter_status_evidence"):
+            source_urls = [
+                value
+                for value in [
+                    status_decision.decision_trace.get("winning_evidence_id"),
+                    *list(status_decision.decision_trace.get("conflicting_evidence_ids") or []),
+                ]
+                if isinstance(value, str) and value.strip()
+            ]
+            if not source_urls:
+                source_urls = [source.source_url for source in campus_index.sources[:1]]
+            if not source_urls and evidence_url:
+                source_urls = [evidence_url]
+            if not source_urls:
+                source_urls = [f"status://{job.chapter_id}"]
+            for source_url in source_urls[:4]:
+                persisted_evidence_ids.append(
+                    self._repository.insert_chapter_status_evidence(
+                        ChapterStatusEvidence(
+                            chapter_id=job.chapter_id,
+                            fraternity_name=self._fraternity_name_for_job(job),
+                            school_name=self._school_name_for_job(job),
+                            source_url=source_url,
+                            authority_tier=1,
+                            evidence_type="official_school_status_zone" if "school" in (source_url or "") or source_url in {source.source_url for source in campus_index.sources} else "national_directory_status",
+                            status_signal=status_decision.reason_code,
+                            matched_text=source_snippet,
+                            zone_type=str(status_decision.school_recognition_status),
+                            match_confidence=float(status_decision.confidence),
+                            evidence_confidence=float(status_decision.confidence),
+                            metadata={
+                                "statusDecisionBasis": status_decision.reason_code,
+                                "conflictFlags": list(status_decision.conflict_flags),
+                            },
+                        )
+                    )
+                )
+        final_decision = status_decision.model_copy(update={"evidence_ids": persisted_evidence_ids or status_decision.evidence_ids})
+        if hasattr(self._repository, "insert_chapter_status_decision"):
+            final_decision = self._repository.insert_chapter_status_decision(chapter_id=job.chapter_id, decision=final_decision)
+        school_policy_status = school_policy_status_from_decision(final_decision)
+        if school_policy_status in {"allowed", "banned"} and hasattr(self._repository, "upsert_school_policy"):
+            self._repository.upsert_school_policy(
+                school_name=self._school_name_for_job(job),
+                greek_life_status=school_policy_status,
+                confidence=float(final_decision.confidence),
+                evidence_url=evidence_url,
+                evidence_source_type="official_school",
+                reason_code=final_decision.reason_code,
+                metadata={"statusDecisionId": final_decision.id},
+            )
+        chapter_activity_status = chapter_activity_status_from_decision(final_decision)
+        if chapter_activity_status in {"confirmed_active", "confirmed_inactive"} and hasattr(self._repository, "upsert_chapter_activity"):
+            self._repository.upsert_chapter_activity(
+                fraternity_slug=str(job.fraternity_slug or ""),
+                school_name=self._school_name_for_job(job),
+                chapter_activity_status=chapter_activity_status,
+                confidence=float(final_decision.confidence),
+                evidence_url=evidence_url,
+                evidence_source_type="official_school",
+                reason_code=final_decision.reason_code,
+                metadata={"statusDecisionId": final_decision.id},
+            )
+        self._status_decision_cache[job.chapter_id] = final_decision
+        return final_decision
+
+    def _build_status_decision(self, job: FieldJob) -> ChapterStatusDecision | None:
+        school_name = self._school_name_for_job(job)
+        fraternity_name = self._fraternity_name_for_job(job)
+        if not school_name or not fraternity_name:
+            return None
+
+        school_policy = self._get_or_resolve_school_policy(job)
+        if school_policy.school_policy_status == "banned":
+            decision = ChapterStatusDecision(
+                final_status=ChapterStatusFinal.INACTIVE,
+                school_recognition_status=SchoolRecognitionStatus.BANNED_NO_GREEK_LIFE,
+                national_status="unknown",
+                reason_code=school_policy.reason_code or "official_school_policy_prohibits_fraternities",
+                confidence=float(school_policy.confidence or 0.0),
+                evidence_ids=[school_policy.evidence_url or "school-policy"],
+                decision_trace={"authority_order": ["school_policy"], "winning_evidence_id": school_policy.evidence_url},
+            )
+            return self._persist_status_decision(
+                job,
+                status_decision=decision,
+                campus_index=build_campus_status_index(school_name=school_name, documents=[]),
+                evidence_url=school_policy.evidence_url,
+                source_snippet=school_policy.source_snippet,
+            )
+
+        chapter_activity = self._get_or_resolve_chapter_activity(job)
+        if chapter_activity.chapter_activity_status == "confirmed_active":
+            decision = ChapterStatusDecision(
+                final_status=ChapterStatusFinal.ACTIVE,
+                school_recognition_status=SchoolRecognitionStatus.RECOGNIZED,
+                national_status="unknown",
+                reason_code=chapter_activity.reason_code or "official_school_current_recognition",
+                confidence=float(chapter_activity.confidence or 0.0),
+                evidence_ids=[chapter_activity.evidence_url or "chapter-activity"],
+                decision_trace={"authority_order": ["school_status"], "winning_evidence_id": chapter_activity.evidence_url},
+            )
+            return self._persist_status_decision(
+                job,
+                status_decision=decision,
+                campus_index=build_campus_status_index(school_name=school_name, documents=[]),
+                evidence_url=chapter_activity.evidence_url,
+                source_snippet=chapter_activity.source_snippet,
+            )
+
+        if chapter_activity.chapter_activity_status == "confirmed_inactive":
+            decision = ChapterStatusDecision(
+                final_status=ChapterStatusFinal.INACTIVE,
+                school_recognition_status=SchoolRecognitionStatus.UNRECOGNIZED,
+                national_status="unknown",
+                reason_code=chapter_activity.reason_code or "official_school_negative_status",
+                confidence=float(chapter_activity.confidence or 0.0),
+                evidence_ids=[chapter_activity.evidence_url or "chapter-activity"],
+                decision_trace={"authority_order": ["school_status"], "winning_evidence_id": chapter_activity.evidence_url},
+            )
+            return self._persist_status_decision(
+                job,
+                status_decision=decision,
+                campus_index=build_campus_status_index(school_name=school_name, documents=[]),
+                evidence_url=chapter_activity.evidence_url,
+                source_snippet=chapter_activity.source_snippet,
+            )
+
+        documents: list[CampusSourceDocument] = []
+        seen_urls: set[str] = set()
+
+        reusable_url = None
+        if hasattr(self._repository, "get_reusable_official_school_evidence_url"):
+            reusable_url = self._repository.get_reusable_official_school_evidence_url(
+                fraternity_slug=job.fraternity_slug,
+                school_name=school_name,
+            )
+        if reusable_url:
+            reusable_document = self._fetch_search_document(reusable_url, provider="official_school_cache")
+            if reusable_document is not None and reusable_document.url:
+                seen_urls.add(_normalize_url(reusable_document.url))
+                documents.append(
+                    CampusSourceDocument(
+                        page_url=reusable_document.url,
+                        title=reusable_document.title or "",
+                        text=reusable_document.text,
+                        html=reusable_document.html or "",
+                    )
+                )
+
+        for target_name, query_limit, page_limit in (
+            ("school_chapter_list", 4, 3),
+            ("website_school", 2, 2),
+            ("campus_policy", 2, 2),
+        ):
+            for document in self._build_validation_documents(
+                job,
+                target=target_name,
+                query_limit=query_limit,
+                page_limit=page_limit,
+                require_official_school=True,
+            ):
+                normalized = _normalize_url(document.url or f"{target_name}:{document.title}:{document.query}")
+                if normalized in seen_urls or not document.url:
+                    continue
+                seen_urls.add(normalized)
+                documents.append(
+                    CampusSourceDocument(
+                        page_url=document.url,
+                        title=document.title or "",
+                        text=document.text,
+                        html=document.html or "",
+                    )
+                )
+
+        if not documents:
+            return None
+
+        campus_index = build_campus_status_index(school_name=school_name, documents=documents)
+
+        national_evidence = None
+        source_record = self._load_source_record(job.source_slug) if job.source_slug else None
+        source_list_url = _source_list_url_for_job(job, source_record)
+        if source_list_url:
+            source_document = self._fetch_search_document(source_list_url, provider="nationals_directory")
+            if source_document is not None and source_document.url:
+                national_evidence = infer_national_status_from_page(
+                    fraternity_name=fraternity_name,
+                    school_name=school_name,
+                    page_url=source_document.url,
+                    title=source_document.title or "",
+                    text=source_document.text,
+                    html=source_document.html or "",
+                )
+
+        decision = decide_chapter_status(
+            fraternity_name=fraternity_name,
+            fraternity_slug=job.fraternity_slug,
+            school_name=school_name,
+            index=campus_index,
+            national_evidence=national_evidence,
+        )
+        evidence_url = None
+        if campus_index.sources:
+            evidence_url = campus_index.sources[0].source_url
+        source_snippet = documents[0].text[:400] if documents else None
+        return self._persist_status_decision(
+            job,
+            status_decision=decision,
+            campus_index=campus_index,
+            evidence_url=evidence_url,
+            source_snippet=source_snippet,
+        )
+
+    def _get_or_resolve_status_decision(self, job: FieldJob) -> ChapterStatusDecision | None:
+        cached = self._status_decision_cache.get(job.chapter_id)
+        if cached is not None:
+            return cached
+        decision = None
+        if hasattr(self._repository, "get_latest_chapter_status_decision"):
+            decision = self._repository.get_latest_chapter_status_decision(job.chapter_id)
+        if decision is not None:
+            self._status_decision_cache[job.chapter_id] = decision
+            return decision
+        decision = self._build_status_decision(job)
+        if decision is not None:
+            self._status_decision_cache[job.chapter_id] = decision
+        return decision
 
     def _existing_inactive_chapter_result(self, job: FieldJob) -> FieldJobResult | None:
         state_key = FIELD_JOB_TO_STATE_KEY.get(job.field_name)
@@ -2113,17 +2425,43 @@ class FieldJobEngine:
         )
 
     def _resolve_activity_gate(self, job: FieldJob, *, target_field: str) -> FieldJobResult | None:
-        school_policy = self._get_or_resolve_school_policy(job)
-        if school_policy.school_policy_status == "banned":
-            self._trace("campus_policy_validation", status="banned", school=self._school_name_for_job(job))
-            return self._mark_chapter_inactive(job, target_field=target_field, decision=school_policy)
+        status_decision = self._get_or_resolve_status_decision(job)
+        if status_decision is not None:
+            decision = self._activity_decision_from_status_decision(
+                status_decision,
+                evidence_url=str(status_decision.decision_trace.get("winning_evidence_id") or "") or None,
+                source_snippet=str(status_decision.decision_trace.get("final_status_basis") or "") or None,
+            )
+            if status_decision.final_status == ChapterStatusFinal.INACTIVE:
+                self._trace("status_engine_validation", status="inactive", school=self._school_name_for_job(job))
+                return self._mark_chapter_inactive(job, target_field=target_field, decision=decision)
+            if status_decision.final_status == ChapterStatusFinal.ACTIVE:
+                self._trace("status_engine_validation", status="active", school=self._school_name_for_job(job))
+                return None
+            if status_decision.final_status == ChapterStatusFinal.REVIEW:
+                self._trace("status_engine_validation", status="review", school=self._school_name_for_job(job))
+            else:
+                self._trace("status_engine_validation", status="unknown", school=self._school_name_for_job(job))
 
-        chapter_activity = self._get_or_resolve_chapter_activity(job)
-        if chapter_activity.chapter_activity_status == "confirmed_inactive":
-            self._trace("chapter_activity_validation", status="confirmed_inactive", school=self._school_name_for_job(job))
-            return self._mark_chapter_inactive(job, target_field=target_field, decision=chapter_activity)
-        if chapter_activity.chapter_activity_status == "confirmed_active":
-            self._trace("chapter_activity_validation", status="confirmed_active", school=self._school_name_for_job(job))
+        if job.field_name != FIELD_JOB_VERIFY_SCHOOL:
+            if not self._repository.has_pending_field_job(job.chapter_id, FIELD_JOB_VERIFY_SCHOOL):
+                try:
+                    if job.crawl_run_id is not None and job.source_slug:
+                        self._repository.create_field_jobs(
+                            chapter_id=job.chapter_id,
+                            crawl_run_id=job.crawl_run_id,
+                            chapter_slug=job.chapter_slug,
+                            source_slug=job.source_slug,
+                            missing_fields=[FIELD_JOB_VERIFY_SCHOOL],
+                        )
+                except Exception:
+                    pass
+            raise RetryableJobError(
+                "Status verification must complete before contact enrichment",
+                backoff_seconds=self._dependency_wait_seconds,
+                preserve_attempt=True,
+                reason_code="status_dependency_unmet",
+            )
         return None
 
     def _get_or_resolve_authoritative_bundle(self, job: FieldJob) -> AuthoritativeBundle:
@@ -2612,31 +2950,58 @@ class FieldJobEngine:
                 ),
             )
         if chapter_school and not candidate_school:
-            school_policy = self._get_or_resolve_school_policy(job)
-            if school_policy.school_policy_status == "banned":
-                self._trace("campus_policy_validation", status="banned", school=self._school_name_for_job(job))
-                return self._mark_chapter_inactive(job, target_field="university_name", decision=school_policy)
-
-            chapter_activity = self._get_or_resolve_chapter_activity(job)
-            if chapter_activity.chapter_activity_status == "confirmed_inactive":
-                self._trace("chapter_activity_validation", status="confirmed_inactive", school=self._school_name_for_job(job))
-                return self._mark_chapter_inactive(job, target_field="university_name", decision=chapter_activity)
-            if chapter_activity.chapter_activity_status == "confirmed_active":
-                self._trace("chapter_activity_validation", status="confirmed_active", school=self._school_name_for_job(job))
-                return FieldJobResult(
-                    chapter_updates={},
-                    completed_payload={
-                        "status": "verified",
-                        "university_name": job.university_name or "",
-                        "reasonCode": chapter_activity.reason_code or "chapter_active",
-                        "resolutionEvidence": self._resolution_evidence_for_activity_decision(
-                            chapter_activity,
-                            decision_stage="chapter_activity_validation",
-                        ),
-                        "decision_trace": self._build_decision_trace_summary(),
-                    },
-                    field_state_updates={"university_name": "found"},
+            status_decision = self._get_or_resolve_status_decision(job)
+            if status_decision is not None:
+                decision = self._activity_decision_from_status_decision(
+                    status_decision,
+                    evidence_url=str(status_decision.decision_trace.get("winning_evidence_id") or "") or None,
+                    source_snippet=str(status_decision.decision_trace.get("final_status_basis") or "") or None,
                 )
+                if status_decision.final_status == ChapterStatusFinal.INACTIVE:
+                    self._trace("status_engine_validation", status="inactive", school=self._school_name_for_job(job))
+                    return self._mark_chapter_inactive(job, target_field="university_name", decision=decision)
+                if status_decision.final_status == ChapterStatusFinal.ACTIVE:
+                    self._trace("status_engine_validation", status="active", school=self._school_name_for_job(job))
+                    return FieldJobResult(
+                        chapter_updates={},
+                        completed_payload={
+                            "status": "verified",
+                            "university_name": job.university_name or "",
+                            "reasonCode": status_decision.reason_code,
+                            "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                                decision,
+                                decision_stage="chapter_status_engine",
+                            ),
+                            "decision_trace": self._build_decision_trace_summary(),
+                        },
+                        field_state_updates={"university_name": "found"},
+                    )
+                if status_decision.final_status == ChapterStatusFinal.REVIEW:
+                    return FieldJobResult(
+                        chapter_updates={},
+                        completed_payload={
+                            "status": "review_required",
+                            "reasonCode": status_decision.reason_code,
+                            "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                                decision,
+                                decision_stage="chapter_status_engine",
+                            ),
+                            "decision_trace": self._build_decision_trace_summary(),
+                        },
+                        review_item=ReviewItemCandidate(
+                            item_type="school_match_mismatch",
+                            reason="Status engine could not produce a safe active/inactive school verification decision",
+                            source_slug=job.payload.get("sourceSlug") if isinstance(job.payload.get("sourceSlug"), str) else None,
+                            chapter_slug=job.chapter_slug,
+                            payload={
+                                "statusDecisionId": status_decision.id,
+                                "reasonCode": status_decision.reason_code,
+                                "conflictFlags": list(status_decision.conflict_flags),
+                            },
+                        ),
+                    )
+
+            school_policy = self._get_or_resolve_school_policy(job)
             if school_policy.school_policy_status == "allowed":
                 self._trace("campus_policy_validation", status="allowed", school=self._school_name_for_job(job))
                 return FieldJobResult(
@@ -4067,7 +4432,7 @@ class FieldJobEngine:
         patch: dict[str, object] = {}
         if exc.reason_code in {"transient_network", "provider_low_signal", "provider_degraded"}:
             queue_state = "blocked_provider"
-        elif exc.reason_code in {"dependency_wait", "website_required"}:
+        elif exc.reason_code in {"dependency_wait", "website_required", "status_dependency_unmet"}:
             queue_state = "blocked_dependency"
         else:
             queue_state = "actionable"

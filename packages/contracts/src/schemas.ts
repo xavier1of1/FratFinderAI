@@ -52,6 +52,49 @@ export const fieldJobPayloadSchema = z.object({
   payload: z.record(z.unknown()).default({})
 });
 
+export const chapterStatusDecisionSchema = z.object({
+  finalStatus: z.enum(["active", "inactive", "unknown", "review"]),
+  schoolRecognitionStatus: z.enum([
+    "recognized",
+    "probationary_recognition",
+    "active_under_conduct_sanction",
+    "seeking_recognition",
+    "interim_suspension",
+    "suspended",
+    "closed",
+    "dismissed",
+    "expelled",
+    "unrecognized",
+    "banned_no_greek_life",
+    "not_found_on_conclusive_roster",
+    "unknown"
+  ]),
+  nationalStatus: z.enum([
+    "active",
+    "associate",
+    "colony",
+    "inactive",
+    "dormant",
+    "closed",
+    "not_listed_on_active_only_directory",
+    "not_listed_on_all_status_directory",
+    "unknown"
+  ]).default("unknown"),
+  reasonCode: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+  evidenceIds: z.array(z.string()).default([]),
+  decisionTrace: z.record(z.unknown()).default({}),
+  conflictFlags: z.array(z.string()).default([]),
+  reviewRequired: z.boolean().default(false)
+}).superRefine((value, ctx) => {
+  if ((value.finalStatus === "active" || value.finalStatus === "inactive") && value.evidenceIds.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "active/inactive decisions require evidenceIds"
+    });
+  }
+});
+
 export type CrawlRunStatus = z.infer<typeof crawlRunStatusSchema>;
 export type ReviewStatus = z.infer<typeof reviewStatusSchema>;
 export type FieldJobStatus = z.infer<typeof fieldJobStatusSchema>;
@@ -59,3 +102,4 @@ export type CanonicalChapter = z.infer<typeof canonicalChapterSchema>;
 export type ChapterProvenance = z.infer<typeof chapterProvenanceSchema>;
 export type ReviewItemPayload = z.infer<typeof reviewItemPayloadSchema>;
 export type FieldJobPayload = z.infer<typeof fieldJobPayloadSchema>;
+export type ChapterStatusDecision = z.infer<typeof chapterStatusDecisionSchema>;
