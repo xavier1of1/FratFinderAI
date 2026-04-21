@@ -14,10 +14,11 @@ import requests
 
 from fratfinder_crawler.adapters import AdapterRegistry
 from fratfinder_crawler.adaptive import AdaptivePolicy
-from fratfinder_crawler.config import Settings
+from fratfinder_crawler.config import Settings, resolved_env_file_path, settings_deprecation_warnings
 from fratfinder_crawler.db.connection import get_connection
 from fratfinder_crawler.db import CrawlerRepository, RequestGraphRepository
 from fratfinder_crawler.discovery import discover_source
+from fratfinder_crawler.field_job_support import job_supporting_page_ready
 from fratfinder_crawler.field_jobs import FIELD_JOB_FIND_EMAIL, FIELD_JOB_FIND_WEBSITE, FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
@@ -41,6 +42,11 @@ from fratfinder_crawler.orchestration import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+_SUPPORTED_CRAWL_RUNTIME_MODES = {"adaptive_shadow", "adaptive_assisted"}
+_SUPPORTED_LIVE_CRAWL_RUNTIME_MODES = {"adaptive_assisted"}
+_SUPPORTED_FIELD_JOB_RUNTIME_MODES = {"langgraph_primary"}
+_SUPPORTED_GRAPH_DURABILITY_MODES = {"exit", "async", "sync"}
 
 
 class CrawlService:
@@ -109,7 +115,7 @@ class CrawlService:
         return result
 
     def run_legacy(self, source_slug: str | None = None) -> dict[str, int]:
-        return self.run(source_slug=source_slug, runtime_mode="legacy")
+        raise RuntimeError("The legacy crawl runtime has been removed from new executions. Use runtime_mode='adaptive_assisted' instead.")
 
     def run_request(
         self,
@@ -120,6 +126,7 @@ class CrawlService:
         field_job_runtime_mode: str | None = None,
         graph_durability: str | None = None,
     ) -> dict[str, object]:
+        self._assert_live_runtime_configuration()
         effective_crawl_runtime_mode = self._resolve_v3_crawl_runtime_mode(crawl_runtime_mode)
         effective_field_job_runtime_mode = self._resolve_v3_field_job_runtime_mode(field_job_runtime_mode)
         effective_graph_durability = self._resolve_field_job_graph_durability(
@@ -168,6 +175,7 @@ class CrawlService:
         poll_seconds: int | None = None,
         runtime_mode: str = "v3_request_supervisor",
     ) -> dict[str, object]:
+        self._assert_live_runtime_configuration()
         batch_limit = max(1, int(limit if limit is not None else self._settings.crawler_v3_request_batch_limit))
         effective_poll_seconds = max(
             1,
@@ -340,6 +348,7 @@ class CrawlService:
         graph_durability: str | None = None,
         run_preflight: bool = True,
     ) -> dict[str, object]:
+        self._assert_live_runtime_configuration()
         batch_limit = max(1, int(limit if limit is not None else self._settings.crawler_v3_request_batch_limit))
         effective_poll_seconds = max(1, int(poll_seconds if poll_seconds is not None else 15))
         effective_runtime_mode = self._resolve_field_job_runtime_mode(runtime_mode)
@@ -796,7 +805,7 @@ class CrawlService:
     def run_adaptive(
         self,
         source_slug: str | None = None,
-        runtime_mode: str = "adaptive_shadow",
+        runtime_mode: str = "adaptive_assisted",
         policy_mode: str = "live",
     ) -> dict[str, int]:
         return self.run(source_slug=source_slug, runtime_mode=runtime_mode, policy_mode=policy_mode)
@@ -1517,18 +1526,28 @@ class CrawlService:
         }
 
     def _resolve_runtime_mode(self, runtime_mode: str | None) -> str:
-        mode = (runtime_mode or self._settings.crawler_runtime_mode or "legacy").strip().lower()
-        allowed = {"legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"}
-        if mode not in allowed:
-            return "legacy"
-        if mode != "legacy" and not self._settings.crawler_adaptive_enabled and runtime_mode is None:
-            return "legacy"
+        mode = str(runtime_mode or "").strip().lower()
+        if not mode:
+            return "adaptive_assisted"
+        if mode not in _SUPPORTED_CRAWL_RUNTIME_MODES:
+            raise ValueError(
+                f"Unsupported crawl runtime `{mode}`. Supported values: {', '.join(sorted(_SUPPORTED_CRAWL_RUNTIME_MODES))}."
+            )
         return mode
 
     def _resolve_v3_crawl_runtime_mode(self, runtime_mode: str | None = None) -> str:
-        mode = (runtime_mode or self._settings.crawler_v3_crawl_runtime_mode or "adaptive_primary").strip().lower()
-        if mode not in {"legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"}:
-            return "adaptive_primary"
+        explicit_mode = str(runtime_mode or "").strip().lower()
+        if explicit_mode:
+            if explicit_mode not in _SUPPORTED_LIVE_CRAWL_RUNTIME_MODES:
+                raise ValueError(
+                    "Unsupported live request crawl runtime "
+                    f"`{explicit_mode}`. Supported values: {', '.join(sorted(_SUPPORTED_LIVE_CRAWL_RUNTIME_MODES))}."
+                )
+            return explicit_mode
+
+        mode = str(getattr(self._settings, "crawler_v3_crawl_runtime_mode", "") or "").strip().lower()
+        if not mode or mode not in _SUPPORTED_LIVE_CRAWL_RUNTIME_MODES:
+            return "adaptive_assisted"
         return mode
 
     def _resolve_v3_field_job_runtime_mode(self, runtime_mode: str | None = None) -> str:
@@ -1542,8 +1561,6 @@ class CrawlService:
         policy_mode: str = "live",
         policy_version: str | None = None,
     ):
-        if runtime_mode == "legacy":
-            return CrawlOrchestrator(repository, HttpClient(self._settings), AdapterRegistry())
         return AdaptiveCrawlOrchestrator(
             repository,
             HttpClient(self._settings),
@@ -1555,16 +1572,62 @@ class CrawlService:
         )
 
     def _resolve_field_job_runtime_mode(self, runtime_mode: str | None = None) -> str:
-        mode = (runtime_mode or self._settings.crawler_field_job_runtime_mode or "langgraph_primary").strip().lower()
-        if mode not in {"legacy", "langgraph_shadow", "langgraph_primary"}:
+        explicit_mode = str(runtime_mode or "").strip().lower()
+        if explicit_mode:
+            if explicit_mode not in _SUPPORTED_FIELD_JOB_RUNTIME_MODES:
+                raise ValueError(
+                    "Unsupported field-job runtime "
+                    f"`{explicit_mode}`. Supported values: {', '.join(sorted(_SUPPORTED_FIELD_JOB_RUNTIME_MODES))}."
+                )
+            return explicit_mode
+
+        mode = str(getattr(self._settings, "crawler_field_job_runtime_mode", "") or "").strip().lower()
+        if not mode or mode not in _SUPPORTED_FIELD_JOB_RUNTIME_MODES:
             return "langgraph_primary"
         return mode
 
     def _resolve_field_job_graph_durability(self, graph_durability: str | None = None) -> str:
-        durability = (graph_durability or self._settings.crawler_field_job_graph_durability or "sync").strip().lower()
-        if durability not in {"exit", "async", "sync"}:
+        explicit_durability = str(graph_durability or "").strip().lower()
+        if explicit_durability:
+            if explicit_durability not in _SUPPORTED_GRAPH_DURABILITY_MODES:
+                raise ValueError(
+                    "Unsupported field-job graph durability "
+                    f"`{explicit_durability}`. Supported values: {', '.join(sorted(_SUPPORTED_GRAPH_DURABILITY_MODES))}."
+                )
+            return explicit_durability
+
+        durability = str(getattr(self._settings, "crawler_field_job_graph_durability", "") or "").strip().lower()
+        if not durability or durability not in _SUPPORTED_GRAPH_DURABILITY_MODES:
             return "sync"
         return durability
+
+    def _runtime_configuration_issues(self) -> list[str]:
+        issues: list[str] = []
+        configured_live_crawl_runtime = str(getattr(self._settings, "crawler_v3_crawl_runtime_mode", "") or "").strip().lower()
+        configured_field_job_runtime = str(getattr(self._settings, "crawler_field_job_runtime_mode", "") or "").strip().lower()
+        configured_graph_durability = str(getattr(self._settings, "crawler_field_job_graph_durability", "") or "").strip().lower()
+
+        if configured_live_crawl_runtime and configured_live_crawl_runtime not in _SUPPORTED_LIVE_CRAWL_RUNTIME_MODES:
+            issues.append(
+                "Configured live request crawl runtime "
+                f"`{configured_live_crawl_runtime}` is unsupported. Use `adaptive_assisted`."
+            )
+        if configured_field_job_runtime and configured_field_job_runtime not in _SUPPORTED_FIELD_JOB_RUNTIME_MODES:
+            issues.append(
+                "Configured field-job runtime "
+                f"`{configured_field_job_runtime}` is unsupported. Use `langgraph_primary`."
+            )
+        if configured_graph_durability and configured_graph_durability not in _SUPPORTED_GRAPH_DURABILITY_MODES:
+            issues.append(
+                "Configured field-job graph durability "
+                f"`{configured_graph_durability}` is unsupported. Use one of {', '.join(sorted(_SUPPORTED_GRAPH_DURABILITY_MODES))}."
+            )
+        return issues
+
+    def _assert_live_runtime_configuration(self) -> None:
+        issues = self._runtime_configuration_issues()
+        if issues:
+            raise ValueError("Invalid live runtime configuration: " + " ".join(issues))
 
     def _resolve_field_job_policy_pack(self, source_slug: str | None) -> dict[str, object]:
         if not source_slug:
@@ -2156,6 +2219,7 @@ class CrawlService:
         runtime_mode: str | None = None,
         graph_durability: str | None = None,
     ) -> dict[str, object]:
+        self._assert_live_runtime_configuration()
         effective_workers = workers or self._settings.crawler_field_job_max_workers
         effective_runtime_mode = self._resolve_field_job_runtime_mode(runtime_mode)
         effective_graph_durability = self._resolve_field_job_graph_durability(graph_durability)
@@ -2633,26 +2697,10 @@ class CrawlService:
         field_name: str | None,
         limit: int,
     ) -> dict[str, object]:
-        if runtime_mode == "legacy":
-            result = engine.process(limit=limit)
-            result["runtime_fallback_count"] = 0
-            result["runtime_mode_used"] = "legacy"
-            return result
+        if runtime_mode not in _SUPPORTED_FIELD_JOB_RUNTIME_MODES:
+            raise ValueError(f"Unsupported field-job runtime mode for live execution: {runtime_mode}")
         if not repository.field_job_graph_tables_ready():
-            log_event(
-                LOGGER,
-                "field_job_graph_runtime_fallback_missing_tables",
-                level=logging.WARNING,
-                runtime_mode=runtime_mode,
-                worker_id=worker_id,
-                source_slug=source_slug,
-                field_name=field_name,
-                error="field-job graph tables are unavailable",
-            )
-            result = engine.process(limit=limit)
-            result["runtime_fallback_count"] = 1
-            result["runtime_mode_used"] = "legacy"
-            return result
+            raise RuntimeError("Field-job LangGraph tables are unavailable; no live legacy fallback is permitted.")
         graph_runtime = FieldJobGraphRuntime(
             repository=repository,
             engine=engine,
@@ -2670,7 +2718,7 @@ class CrawlService:
         except Exception as exc:  # pragma: no cover - runtime guardrail
             log_event(
                 LOGGER,
-                "field_job_graph_runtime_fallback_exception",
+                "field_job_graph_runtime_failed",
                 level=logging.WARNING,
                 runtime_mode=runtime_mode,
                 worker_id=worker_id,
@@ -2678,10 +2726,7 @@ class CrawlService:
                 field_name=field_name,
                 error=str(exc),
             )
-            result = engine.process(limit=limit)
-            result["runtime_fallback_count"] = 1
-            result["runtime_mode_used"] = "legacy"
-            return result
+            raise
 
     def search_preflight(self, probes: int | None = None) -> dict[str, object]:
         if not self._settings.crawler_search_enabled:
@@ -2702,6 +2747,13 @@ class CrawlService:
         successes = 0
         probe_outcomes: list[dict[str, object]] = []
         provider_health: dict[str, dict[str, object]] = {}
+
+        def record_provider_attempts(provider_attempts: list[dict[str, object]]) -> None:
+            for attempt in provider_attempts:
+                provider = str(attempt.get("provider") or "unknown")
+                bucket = provider_health.setdefault(provider, _empty_provider_health_bucket())
+                _record_provider_attempt_in_bucket(bucket, attempt)
+
         for query in selected_queries:
             try:
                 results = search_client.search(query, max_results=min(3, self._settings.crawler_search_max_results))
@@ -2717,22 +2769,7 @@ class CrawlService:
                         "provider_attempts": provider_attempts,
                     }
                 )
-                for attempt in provider_attempts:
-                    provider = str(attempt.get("provider") or "unknown")
-                    bucket = provider_health.setdefault(
-                        provider,
-                        {"attempts": 0, "successes": 0, "unavailable": 0, "request_error": 0, "skipped": 0},
-                    )
-                    bucket["attempts"] = int(bucket["attempts"]) + 1
-                    status = str(attempt.get("status") or "")
-                    if status == "success":
-                        bucket["successes"] = int(bucket["successes"]) + 1
-                    elif status == "unavailable":
-                        bucket["unavailable"] = int(bucket["unavailable"]) + 1
-                    elif status == "request_error":
-                        bucket["request_error"] = int(bucket["request_error"]) + 1
-                    elif status == "skipped":
-                        bucket["skipped"] = int(bucket["skipped"]) + 1
+                record_provider_attempts(provider_attempts)
             except (SearchUnavailableError, requests.RequestException) as exc:
                 provider_attempts = search_client.consume_last_provider_attempts()
                 probe_outcomes.append(
@@ -2744,41 +2781,24 @@ class CrawlService:
                         "provider_attempts": provider_attempts,
                     }
                 )
-                for attempt in provider_attempts:
-                    provider = str(attempt.get("provider") or "unknown")
-                    bucket = provider_health.setdefault(
-                        provider,
-                        {"attempts": 0, "successes": 0, "unavailable": 0, "request_error": 0, "skipped": 0},
-                    )
-                    bucket["attempts"] = int(bucket["attempts"]) + 1
-                    status = str(attempt.get("status") or "")
-                    if status == "success":
-                        bucket["successes"] = int(bucket["successes"]) + 1
-                    elif status == "unavailable":
-                        bucket["unavailable"] = int(bucket["unavailable"]) + 1
-                    elif status == "request_error":
-                        bucket["request_error"] = int(bucket["request_error"]) + 1
-                    elif status == "skipped":
-                        bucket["skipped"] = int(bucket["skipped"]) + 1
+                record_provider_attempts(provider_attempts)
 
         success_rate = successes / probe_count if probe_count else 0.0
+        threshold = float(self._settings.crawler_search_preflight_min_success_rate)
         for provider, bucket in provider_health.items():
             attempts = max(1, int(bucket["attempts"]))
             bucket["success_rate"] = round(float(bucket["successes"]) / attempts, 4)
+            provider_healthy, health_reason = _provider_payload_health_status(bucket, min_success_rate=threshold)
+            bucket["healthy"] = provider_healthy
+            bucket["health_reason"] = health_reason
 
-        provider_mode = self._settings.crawler_search_provider.lower()
         provider_window_success_rate = _provider_window_success_rate(provider_health)
-        primary_provider_success = any(
-            int(provider_health.get(provider, {}).get("successes", 0)) > 0
-            for provider in ("searxng_json", "tavily_api", "serper_api")
-        )
-        healthy = success_rate >= self._settings.crawler_search_preflight_min_success_rate
-        if provider_mode in {"auto_free", "searxng_json", "tavily_api", "serper_api"}:
-            if any(provider in provider_health for provider in ("searxng_json", "tavily_api", "serper_api")):
-                healthy = healthy and primary_provider_success
-        provider_window_min_success_rate = min(0.25, float(self._settings.crawler_search_preflight_min_success_rate))
-        if provider_health:
-            healthy = healthy and provider_window_success_rate >= provider_window_min_success_rate
+        viable_providers = [
+            provider_name
+            for provider_name, bucket in provider_health.items()
+            if bool(bucket.get("healthy", False))
+        ]
+        healthy = success_rate >= threshold or bool(viable_providers)
         captured_at = _utc_now_iso()
         snapshot = {
             "captured_at": captured_at,
@@ -2787,17 +2807,13 @@ class CrawlService:
             "provider_window_success_rate": provider_window_success_rate,
             "successes": successes,
             "probes": probe_count,
-            "min_success_rate": self._settings.crawler_search_preflight_min_success_rate,
+            "min_success_rate": threshold,
             "provider_health": provider_health,
             "probe_outcomes": probe_outcomes,
+            "viable_providers": viable_providers,
         }
         if not healthy:
-            if provider_health and provider_window_success_rate < provider_window_min_success_rate:
-                snapshot["reason"] = "provider_window_success_below_threshold"
-            elif provider_mode in {"auto_free", "searxng_json", "tavily_api", "serper_api"} and not primary_provider_success:
-                snapshot["reason"] = "primary_provider_success_missing"
-            else:
-                snapshot["reason"] = "probe_success_below_threshold"
+            snapshot["reason"] = "probe_success_below_threshold"
         snapshot["provider_window_state"] = _provider_window_state_from_preflight(snapshot)
         log_event(LOGGER, "search_preflight_completed", **snapshot)
         return snapshot
@@ -3492,6 +3508,116 @@ class CrawlService:
 
         return {"ok": True, "service": "crawler", "probe": "readiness"}
 
+    def doctor(self) -> dict[str, object]:
+        warnings = list(settings_deprecation_warnings())
+        blocking_issues = self._runtime_configuration_issues()
+        configured_crawl_runtime = str(self._settings.crawler_runtime_mode or "").strip().lower()
+        configured_live_crawl_runtime = str(self._settings.crawler_v3_crawl_runtime_mode or "").strip().lower()
+        configured_field_job_runtime = str(self._settings.crawler_field_job_runtime_mode or "").strip().lower()
+
+        effective_crawl_runtime = self._resolve_runtime_mode(None)
+        effective_live_crawl_runtime = self._resolve_v3_crawl_runtime_mode(None)
+        effective_field_job_runtime = self._resolve_field_job_runtime_mode(None)
+
+        if configured_crawl_runtime:
+            warnings.append(
+                f"Configured crawl runtime `{configured_crawl_runtime}` no longer controls new live executions; using `{effective_crawl_runtime}` unless an explicit runtime override is supplied."
+            )
+        if configured_live_crawl_runtime and configured_live_crawl_runtime != effective_live_crawl_runtime:
+            warnings.append(
+                f"Configured live request crawl runtime `{configured_live_crawl_runtime}` is not supported; live request execution will fail fast until it is corrected."
+            )
+        if configured_field_job_runtime and configured_field_job_runtime != effective_field_job_runtime:
+            warnings.append(
+                f"Configured field-job runtime `{configured_field_job_runtime}` is not supported; live field-job execution will fail fast until it is corrected."
+            )
+        if self._settings.crawler_v3_enabled:
+            warnings.append("`CRAWLER_V3_ENABLED` is no longer used to select the live execution path.")
+        if self._settings.crawler_adaptive_enabled:
+            warnings.append("`CRAWLER_ADAPTIVE_ENABLED` no longer gates live runtime selection; runtime choice is explicit.")
+        warnings.extend(blocking_issues)
+
+        queue: dict[str, int] = {}
+        field_workers: dict[str, int] = {}
+        request_workers: dict[str, int] = {}
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            queue = repository.get_field_job_queue_counts()
+            field_workers = repository.get_field_job_worker_process_stats("contact_resolution")
+            request_workers = repository.get_field_job_worker_process_stats("request")
+
+        return {
+            "ok": len(blocking_issues) == 0,
+            "envFile": resolved_env_file_path(),
+            "effectiveSettings": {
+                "appEnv": self._settings.app_env,
+                "searchProvider": self._settings.crawler_search_provider,
+                "searchProviderOrderFree": _provider_order_from_settings(self._settings),
+                "crawlRuntimeMode": effective_crawl_runtime,
+                "liveRequestCrawlRuntimeMode": effective_live_crawl_runtime,
+                "fieldJobRuntimeMode": effective_field_job_runtime,
+                "fieldJobGraphDurability": self._resolve_field_job_graph_durability(None),
+            },
+            "runtimeCompatibility": {
+                "configuredCrawlRuntimeMode": configured_crawl_runtime,
+                "effectiveCrawlRuntimeMode": effective_crawl_runtime,
+                "configuredLiveRequestCrawlRuntimeMode": configured_live_crawl_runtime,
+                "effectiveLiveRequestCrawlRuntimeMode": effective_live_crawl_runtime,
+                "configuredFieldJobRuntimeMode": configured_field_job_runtime,
+                "effectiveFieldJobRuntimeMode": effective_field_job_runtime,
+                "liveRequestSupportsAdaptiveShadow": False,
+                "blockingIssues": blocking_issues,
+            },
+            "providerReachability": _provider_reachability(self._settings),
+            "queue": queue,
+            "workerLiveness": {
+                "fieldJobs": field_workers,
+                "requests": request_workers,
+                "alertOpen": bool(int(queue.get("actionable_jobs", 0) or 0) > 0 and int(field_workers.get("active_workers", 0) or 0) <= 0),
+            },
+            "warnings": warnings,
+        }
+
+
+
+def _provider_reachability(settings: Settings) -> dict[str, dict[str, object]]:
+    reachability: dict[str, dict[str, object]] = {}
+    providers = list(dict.fromkeys([*_provider_order_from_settings(settings), "searxng_json", "serper_api", "tavily_api", "brave_api"]))
+    timeout = max(1.0, min(float(settings.crawler_http_timeout_seconds), 3.0))
+
+    for provider in providers:
+        payload: dict[str, object] = {"configured": True, "reachable": None, "detail": ""}
+        if provider == "searxng_json":
+            base_url = str(settings.crawler_search_searxng_base_url or "").strip()
+            payload["configured"] = bool(base_url)
+            if not base_url:
+                payload["detail"] = "not configured"
+            else:
+                try:
+                    response = requests.get(
+                        f"{base_url.rstrip('/')}/search",
+                        params={"q": "fratfinder health check", "format": "json"},
+                        timeout=timeout,
+                        verify=settings.crawler_http_verify_ssl,
+                    )
+                    payload["reachable"] = response.status_code < 500
+                    payload["detail"] = f"search http {response.status_code}"
+                except requests.RequestException as exc:
+                    payload["reachable"] = False
+                    payload["detail"] = str(exc)
+        elif provider == "serper_api":
+            payload["configured"] = bool((settings.crawler_search_serper_api_key or "").strip())
+            payload["detail"] = "api key configured" if payload["configured"] else "missing api key"
+        elif provider == "tavily_api":
+            payload["configured"] = bool((settings.crawler_search_tavily_api_key or "").strip())
+            payload["detail"] = "api key configured" if payload["configured"] else "missing api key"
+        elif provider == "brave_api":
+            payload["configured"] = bool((settings.crawler_search_brave_api_key or "").strip())
+            payload["detail"] = "api key configured" if payload["configured"] else "missing api key"
+        else:
+            payload["detail"] = "public provider in fallback chain"
+        reachability[provider] = payload
+    return reachability
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
@@ -3784,8 +3910,68 @@ def _provider_order_from_settings(settings: Settings) -> list[str]:
             if token and token not in base_order:
                 base_order.append(token)
     if not base_order:
-        base_order = ["searxng_json", "serper_api", "tavily_api", "duckduckgo_html", "bing_html", "brave_html"]
+        base_order = ["searxng_json", "duckduckgo_html", "bing_html"]
     return base_order
+
+
+def _empty_provider_health_bucket() -> dict[str, object]:
+    return {
+        "attempts": 0,
+        "successes": 0,
+        "unavailable": 0,
+        "request_error": 0,
+        "skipped": 0,
+        "low_signal": 0,
+        "challenge_or_anomaly": 0,
+        "failure_types": {},
+    }
+
+
+def _record_provider_attempt_in_bucket(bucket: dict[str, object], attempt: dict[str, object]) -> None:
+    bucket["attempts"] = int(bucket.get("attempts", 0) or 0) + 1
+    status = str(attempt.get("status") or "")
+    if status == "success":
+        bucket["successes"] = int(bucket.get("successes", 0) or 0) + 1
+    elif status == "unavailable":
+        bucket["unavailable"] = int(bucket.get("unavailable", 0) or 0) + 1
+    elif status == "request_error":
+        bucket["request_error"] = int(bucket.get("request_error", 0) or 0) + 1
+    elif status == "skipped":
+        bucket["skipped"] = int(bucket.get("skipped", 0) or 0) + 1
+    elif status == "low_signal":
+        bucket["low_signal"] = int(bucket.get("low_signal", 0) or 0) + 1
+
+    failure_type = str(attempt.get("failure_type") or "").strip()
+    if failure_type:
+        failure_types = dict(bucket.get("failure_types") or {})
+        failure_types[failure_type] = int(failure_types.get(failure_type, 0) or 0) + 1
+        bucket["failure_types"] = failure_types
+        if failure_type == "challenge_or_anomaly":
+            bucket["challenge_or_anomaly"] = int(bucket.get("challenge_or_anomaly", 0) or 0) + 1
+
+
+def _provider_payload_health_status(payload: dict[str, object], *, min_success_rate: float) -> tuple[bool, str]:
+    attempts = int(payload.get("attempts", 0) or 0)
+    successes = int(payload.get("successes", 0) or 0)
+    success_rate = float(payload.get("success_rate", 0.0) or 0.0)
+    request_error_count = int(payload.get("request_error", 0) or 0)
+    unavailable_count = int(payload.get("unavailable", 0) or 0)
+    low_signal_count = int(payload.get("low_signal", 0) or 0)
+    challenge_count = int(payload.get("challenge_or_anomaly", 0) or 0)
+
+    if attempts <= 0:
+        return False, "no_attempts"
+    if successes > 0 and success_rate >= min_success_rate:
+        return True, "meets_success_threshold"
+    if low_signal_count >= attempts and successes == 0:
+        return False, "low_signal_only"
+    if challenge_count > 0 and successes == 0:
+        return False, "challenge_or_anomaly"
+    if request_error_count >= attempts and successes == 0:
+        return False, "request_error_only"
+    if unavailable_count >= attempts and successes == 0:
+        return False, "provider_unavailable"
+    return False, "below_success_threshold"
 
 
 def _all_attempted_providers_below_threshold(
@@ -3937,10 +4123,11 @@ def _provider_window_state_from_preflight(
         successes = int(payload.get("successes", 0) or 0)
         request_errors = int(payload.get("request_error", 0) or 0)
         unavailable = int(payload.get("unavailable", 0) or 0)
-        challenge_guess = 0
-        for key in payload.keys():
-            if "challenge" in str(key).lower() or "anomaly" in str(key).lower():
-                challenge_guess += int(payload.get(key, 0) or 0)
+        challenge_guess = int(payload.get("challenge_or_anomaly", 0) or 0)
+        if challenge_guess <= 0:
+            for key in payload.keys():
+                if "challenge" in str(key).lower() or "anomaly" in str(key).lower():
+                    challenge_guess += int(payload.get(key, 0) or 0)
         attempt_count += attempts
         success_count += successes
         request_error_count += request_errors
@@ -4129,25 +4316,7 @@ def _queue_health_payload(
 
 
 def _job_supporting_page_ready(job: FieldJob) -> bool:
-    field_states = dict(job.field_states or {})
-    website_state = str(field_states.get("website_url") or "").strip().lower()
-    if job.website_url and website_state not in {"", "missing", "low_confidence"}:
-        return True
-    contact_resolution = job.payload.get("contactResolution") if isinstance(job.payload.get("contactResolution"), dict) else {}
-    supporting_page_url = str(contact_resolution.get("supportingPageUrl") or "").strip()
-    supporting_page_scope = str(contact_resolution.get("supportingPageScope") or contact_resolution.get("pageScope") or "").strip().lower()
-    if supporting_page_url and supporting_page_scope in {
-        "chapter_site",
-        "school_affiliation_page",
-        "nationals_chapter_page",
-    }:
-        return True
-    if website_state == "confirmed_absent":
-        if job.contact_email or job.instagram_url:
-            return True
-        if supporting_page_url and supporting_page_scope in {"school_affiliation_page", "nationals_chapter_page"}:
-            return True
-    return False
+    return job_supporting_page_ready(job)
 
 
 def _build_enrichment_shadow_context(job: FieldJob, provider_window_state: dict[str, object] | None) -> dict[str, object]:

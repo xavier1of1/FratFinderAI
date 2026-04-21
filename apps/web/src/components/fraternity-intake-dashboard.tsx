@@ -69,8 +69,53 @@ async function fetchRequests(): Promise<FraternityCrawlRequest[]> {
   return sortRequests(payload.data);
 }
 
-export function FraternityIntakeDashboard({ initialRequests }: { initialRequests: FraternityCrawlRequest[] }) {
+async function fetchRequestCounts(): Promise<{
+  total: number;
+  draft: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  canceled: number;
+}> {
+  const response = await fetch("/api/fraternity-crawl-requests/summary", { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<{
+    total: number;
+    draft: number;
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    canceled: number;
+  }>;
+
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch request counts: ${response.status}`);
+  }
+
+  return payload.data;
+}
+
+export function FraternityIntakeDashboard({
+  initialRequests,
+  summaryCounts
+}: {
+  initialRequests: FraternityCrawlRequest[];
+  summaryCounts: {
+    total: number;
+    draft: number;
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    canceled: number;
+  };
+}) {
   const [requests, setRequests] = useState<FraternityCrawlRequest[]>(sortRequests(initialRequests));
+  const [counts, setCounts] = useState(summaryCounts);
   const [selectedId, setSelectedId] = useState<string | null>(initialRequests[0]?.id ?? null);
   const [statusFilter, setStatusFilter] = useState<FraternityCrawlRequestStatus | "all">("all");
   const [fraternityName, setFraternityName] = useState("");
@@ -114,8 +159,9 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
   async function refresh(selectNewest = false) {
     setIsRefreshing(true);
     try {
-      const data = await fetchRequests();
+      const [data, nextCounts] = await Promise.all([fetchRequests(), fetchRequestCounts()]);
       setRequests(data);
+      setCounts(nextCounts);
       if (selectNewest && data[0]) {
         setSelectedId(data[0].id);
       } else if (selectedId && !data.some((item) => item.id === selectedId)) {
@@ -224,7 +270,7 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
     }
   }
 
-  const activeCount = requests.filter((item) => item.status === "queued" || item.status === "running").length;
+  const activeCount = counts.queued + counts.running;
   const selectedFields = selectedRequest?.progress.fields;
   const selectedTotals = selectedRequest?.progress.totals ?? { queued: 0, running: 0, done: 0, failed: 0 };
   const selectedSourceQuality = selectedRequest?.progress.analytics?.sourceQuality;
@@ -305,7 +351,7 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
         <div className="metrics">
           <div className="metricCard">
             <p className="metricLabel">Total Requests</p>
-            <p className="metricValue">{requests.length}</p>
+            <p className="metricValue">{counts.total}</p>
           </div>
           <div className="metricCard">
             <p className="metricLabel">Queued / Running</p>
@@ -317,7 +363,7 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
           </div>
           <div className="metricCard">
             <p className="metricLabel">Awaiting Confirmation</p>
-            <p className="metricValue">{requests.filter((item) => item.stage === "awaiting_confirmation").length}</p>
+            <p className="metricValue">{counts.draft}</p>
           </div>
         </div>
       </section>
@@ -325,6 +371,7 @@ export function FraternityIntakeDashboard({ initialRequests }: { initialRequests
       <section className="benchmarkLayout">
         <article className="panel">
           <h2>All Requests</h2>
+          <p className="sectionDescription">The list below shows the most recent 200 requests. Summary cards above reflect full-platform totals.</p>
 
           <div className="buttonRow">
             <button type="button" className={`buttonSecondary ${statusFilter === "all" ? "isActiveFilter" : ""}`} onClick={() => setStatusFilter("all")}>All</button>

@@ -12,20 +12,20 @@ import type {
 } from "../types";
 
 
-function envRuntimeModeDefault(): "legacy" | "adaptive_shadow" | "adaptive_assisted" | "adaptive_primary" {
+function envRuntimeModeDefault(): "adaptive_shadow" | "adaptive_assisted" {
   const value = String(process.env.BENCHMARK_CRAWL_RUNTIME_MODE ?? "adaptive_assisted").trim();
-  if (value === "legacy" || value === "adaptive_shadow" || value === "adaptive_assisted" || value === "adaptive_primary") {
+  if (value === "adaptive_shadow" || value === "adaptive_assisted") {
     return value;
   }
   return "adaptive_assisted";
 }
 
-function envFieldJobRuntimeModeDefault(): "legacy" | "langgraph_shadow" | "langgraph_primary" {
-  const value = String(process.env.BENCHMARK_FIELD_JOB_RUNTIME_MODE ?? "legacy").trim();
-  if (value === "legacy" || value === "langgraph_shadow" || value === "langgraph_primary") {
+function envFieldJobRuntimeModeDefault(): "langgraph_primary" {
+  const value = String(process.env.BENCHMARK_FIELD_JOB_RUNTIME_MODE ?? "langgraph_primary").trim();
+  if (value === "langgraph_primary") {
     return value;
   }
-  return "legacy";
+  return "langgraph_primary";
 }
 
 function envFieldJobGraphDurabilityDefault(): "exit" | "async" | "sync" {
@@ -90,14 +90,11 @@ function normalizeBenchmarkConfig(fieldName: BenchmarkFieldName, sourceSlug: str
   const raw = typeof config === "object" && config !== null ? (config as Partial<BenchmarkRunConfig>) : {};
 
   const runtimeMode =
-    raw.crawlRuntimeMode === "legacy" ||
-    raw.crawlRuntimeMode === "adaptive_shadow" ||
-    raw.crawlRuntimeMode === "adaptive_assisted" ||
-    raw.crawlRuntimeMode === "adaptive_primary"
+    raw.crawlRuntimeMode === "adaptive_shadow" || raw.crawlRuntimeMode === "adaptive_assisted"
       ? raw.crawlRuntimeMode
       : envRuntimeModeDefault();
 
-  const fieldJobRuntimeMode = raw.fieldJobRuntimeMode === "legacy" || raw.fieldJobRuntimeMode === "langgraph_shadow" || raw.fieldJobRuntimeMode === "langgraph_primary" ? raw.fieldJobRuntimeMode : envFieldJobRuntimeModeDefault();
+  const fieldJobRuntimeMode = raw.fieldJobRuntimeMode === "langgraph_primary" ? raw.fieldJobRuntimeMode : envFieldJobRuntimeModeDefault();
   const fieldJobGraphDurability = raw.fieldJobGraphDurability === "exit" || raw.fieldJobGraphDurability === "async" || raw.fieldJobGraphDurability === "sync" ? raw.fieldJobGraphDurability : envFieldJobGraphDurabilityDefault();
 
   return {
@@ -272,6 +269,42 @@ export async function listBenchmarkRuns(limit = 100): Promise<BenchmarkRunListIt
   );
 
   return rows.map(mapBenchmarkRow);
+}
+
+export async function getBenchmarkRunCounts(): Promise<{
+  total: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+}> {
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{
+    total: string | number;
+    queued: string | number;
+    running: string | number;
+    succeeded: string | number;
+    failed: string | number;
+  }>(
+    `
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'queued')::int AS queued,
+        COUNT(*) FILTER (WHERE status = 'running')::int AS running,
+        COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+      FROM benchmark_runs
+    `
+  );
+
+  const row = rows[0];
+  return {
+    total: Number(row?.total ?? 0),
+    queued: Number(row?.queued ?? 0),
+    running: Number(row?.running ?? 0),
+    succeeded: Number(row?.succeeded ?? 0),
+    failed: Number(row?.failed ?? 0)
+  };
 }
 
 export async function failStaleBenchmarkRuns(maxAgeMinutes = 10): Promise<number> {

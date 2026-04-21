@@ -3,6 +3,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import fratfinder_crawler.pipeline as pipeline_module
+import pytest
 
 from fratfinder_crawler.config import Settings
 from fratfinder_crawler.models import FieldJob
@@ -182,7 +183,7 @@ def test_provider_window_success_rate_aggregates_provider_health():
     ) == 0.3333
 
 
-def test_search_preflight_marks_provider_window_degraded_when_only_one_provider_is_working(monkeypatch):
+def test_search_preflight_remains_healthy_when_probe_success_is_strong_even_if_fallback_attempts_fail(monkeypatch):
     class FakeSearchClient:
         def __init__(self, settings):
             self.settings = settings
@@ -216,23 +217,70 @@ def test_search_preflight_marks_provider_window_degraded_when_only_one_provider_
 
     assert snapshot["success_rate"] == 1.0
     assert snapshot["provider_window_success_rate"] == 0.1667
-    assert snapshot["healthy"] is False
-    assert snapshot["reason"] == "provider_window_success_below_threshold"
+    assert snapshot["healthy"] is True
+    assert snapshot["viable_providers"] == ["bing_html"]
 
 
-def test_resolve_field_job_runtime_mode_defaults_to_langgraph_primary_for_unknown():
+def test_search_preflight_tracks_provider_specific_failure_modes(monkeypatch):
+    class FakeSearchClient:
+        def __init__(self, settings):
+            self.settings = settings
+            self._attempts = [
+                {"provider": "bing_html", "status": "success", "result_count": 3},
+                {"provider": "searxng_json", "status": "low_signal", "result_count": 3, "failure_type": "low_signal_fallback"},
+                {"provider": "duckduckgo_html", "status": "unavailable", "failure_type": "challenge_or_anomaly"},
+            ]
+
+        def search(self, query: str, max_results: int | None = None):
+            _ = query, max_results
+            return [SimpleNamespace(url="https://example.edu", title="Example", snippet="Example")]
+
+        def consume_last_provider_attempts(self):
+            return list(self._attempts)
+
+    monkeypatch.setattr(pipeline_module, "SearchClient", FakeSearchClient)
+
+    service = CrawlService(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="auto",
+            CRAWLER_SEARCH_PREFLIGHT_MIN_SUCCESS_RATE="0.25",
+        )
+    )
+
+    snapshot = service.search_preflight(probes=1)
+
+    bing = snapshot["provider_health"]["bing_html"]
+    searxng = snapshot["provider_health"]["searxng_json"]
+    duckduckgo = snapshot["provider_health"]["duckduckgo_html"]
+
+    assert bing["healthy"] is True
+    assert bing["health_reason"] == "meets_success_threshold"
+    assert searxng["low_signal"] == 1
+    assert searxng["failure_types"]["low_signal_fallback"] == 1
+    assert searxng["healthy"] is False
+    assert searxng["health_reason"] == "low_signal_only"
+    assert duckduckgo["challenge_or_anomaly"] == 1
+    assert duckduckgo["failure_types"]["challenge_or_anomaly"] == 1
+    assert duckduckgo["healthy"] is False
+    assert duckduckgo["health_reason"] == "challenge_or_anomaly"
+
+
+def test_resolve_field_job_runtime_mode_rejects_unknown_values():
     service = CrawlService(SimpleNamespace(crawler_field_job_runtime_mode="langgraph_primary", crawler_field_job_graph_durability="sync"))
-    assert service._resolve_field_job_runtime_mode("unsupported") == "langgraph_primary"
+    with pytest.raises(ValueError, match="Unsupported field-job runtime"):
+        service._resolve_field_job_runtime_mode("unsupported")
 
 
 def test_resolve_field_job_runtime_mode_uses_settings_default():
-    service = CrawlService(SimpleNamespace(crawler_field_job_runtime_mode="langgraph_shadow", crawler_field_job_graph_durability="sync"))
-    assert service._resolve_field_job_runtime_mode(None) == "langgraph_shadow"
+    service = CrawlService(SimpleNamespace(crawler_field_job_runtime_mode="langgraph_primary", crawler_field_job_graph_durability="sync"))
+    assert service._resolve_field_job_runtime_mode(None) == "langgraph_primary"
 
 
-def test_resolve_field_job_graph_durability_defaults_to_sync_for_unknown():
+def test_resolve_field_job_graph_durability_rejects_unknown_values():
     service = CrawlService(SimpleNamespace(crawler_field_job_runtime_mode="legacy", crawler_field_job_graph_durability="sync"))
-    assert service._resolve_field_job_graph_durability("invalid") == "sync"
+    with pytest.raises(ValueError, match="Unsupported field-job graph durability"):
+        service._resolve_field_job_graph_durability("invalid")
 
 
 def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
@@ -291,7 +339,7 @@ def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
         crawler_v3_request_worker_runtime_owner="python_request_worker",
         crawler_v3_request_worker_lease_seconds=180,
         crawler_v3_request_worker_heartbeat_seconds=30,
-        crawler_v3_crawl_runtime_mode="adaptive_primary",
+        crawler_v3_crawl_runtime_mode="adaptive_assisted",
         crawler_v3_field_job_runtime_mode="langgraph_primary",
         crawler_v3_field_job_graph_durability="sync",
     )
@@ -859,6 +907,23 @@ def test_throughput_helper_provider_window_logic_reorders_and_detects_degradatio
     provider_window_state = _provider_window_state_from_preflight(snapshot)
     assert provider_window_state["general_web_search"]["attempt_count"] == 14
     assert provider_window_state["authoritative_fetch"]["healthy"] is True
+
+    explicit_challenge_snapshot = {
+        "healthy": False,
+        "provider_health": {
+            "duckduckgo_html": {
+                "attempts": 4,
+                "successes": 0,
+                "unavailable": 4,
+                "request_error": 0,
+                "challenge_or_anomaly": 3,
+                "success_rate": 0.0,
+            }
+        },
+    }
+    degraded_window = _provider_window_state_from_preflight(explicit_challenge_snapshot)
+    assert degraded_window["general_web_search"]["challenge_or_anomaly_count"] == 3
+    assert degraded_window["general_web_search"]["providers"][0]["challenge_or_anomaly_count"] == 3
 
 
 def test_throughput_helper_merges_chunk_results_and_supporting_page_readiness():

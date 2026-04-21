@@ -457,7 +457,7 @@ class RequestSupervisorGraphRuntime:
                 "graph_status": "failed",
                 "terminal_reason": "missing_source_slug",
             }
-        crawl_runtime_mode = str(state.get("crawl_runtime_mode_used") or self._crawl_runtime_mode or "legacy")
+        crawl_runtime_mode = str(state.get("crawl_runtime_mode_used") or self._crawl_runtime_mode or "adaptive_assisted")
         crawl_policy_version = request.config.get("crawlPolicyVersion")
         progress = _update_progress_graph(
             state.get("progress") or request.progress,
@@ -560,30 +560,6 @@ class RequestSupervisorGraphRuntime:
                 "terminal_reason": "crawl_run_missing",
             }
         if int(crawl_run.get("records_seen", 0) or 0) <= 0:
-            next_runtime = _next_v3_retry_runtime(state.get("crawl_runtime_mode_used"))
-            if next_runtime is not None and int(state.get("crawl_retry_count", 0) or 0) < 1:
-                self._request_repository.append_request_event(
-                    request.id,
-                    "runtime_retry",
-                    "V3 crawl produced zero records; retrying source with a stricter alternate V3 policy path",
-                    {
-                        "sourceSlug": request.source_slug,
-                        "fromRuntime": state.get("crawl_runtime_mode_used"),
-                        "toRuntime": next_runtime,
-                        "crawlRunId": crawl_run.get("id"),
-                    },
-                )
-                return {
-                    "request": request,
-                    "progress": progress,
-                    "crawl_run": crawl_run,
-                    "field_snapshot": field_snapshot,
-                    "crawl_runtime_mode_used": next_runtime,
-                    "crawl_retry_count": int(state.get("crawl_retry_count", 0) or 0) + 1,
-                    "retry_crawl": True,
-                    "recovery_reason": None,
-                    "source_quality": source_quality,
-                }
             return {
                 "request": request,
                 "progress": progress,
@@ -814,14 +790,15 @@ class RequestSupervisorGraphRuntime:
         cycle = int(state.get("cycle") or 0) + 1
         preflight_snapshot = self._search_preflight()
         for provider, payload in (preflight_snapshot.get("provider_health") or {}).items():
+            provider_healthy, snapshot_payload = _provider_snapshot_payload(preflight_snapshot, payload)
             self._request_repository.insert_provider_health_snapshot(
                 request_id=request.id,
                 source_slug=request.source_slug,
                 provider=str(provider),
-                healthy=bool(preflight_snapshot.get("healthy", False)),
+                healthy=provider_healthy,
                 success_rate=float(payload.get("success_rate", 0.0) or 0.0),
                 probe_count=int(payload.get("attempts", 0) or 0),
-                payload=payload,
+                payload=snapshot_payload,
             )
         result = self._process_field_jobs(
             limit=int(effective_config.get("fieldJobLimitPerCycle", 1)),
@@ -1404,15 +1381,6 @@ def _current_source_quality(request: FraternityCrawlRequestRecord) -> dict[str, 
     return quality
 
 
-def _next_v3_retry_runtime(runtime_mode: str | None) -> str | None:
-    normalized = str(runtime_mode or "").strip().lower()
-    if normalized == "adaptive_primary":
-        return "adaptive_assisted"
-    if normalized == "adaptive_assisted":
-        return "adaptive_shadow"
-    return None
-
-
 def _evaluate_source_url(url: str | None) -> dict[str, Any]:
     blocked_hosts = {
         "wikipedia.org",
@@ -1577,6 +1545,50 @@ def _build_progress_snapshot(
         "analytics": analytics or {},
         "graph": graph or {},
     }
+
+
+def _provider_snapshot_payload(
+    preflight_snapshot: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+) -> tuple[bool, dict[str, Any]]:
+    provider_payload = dict(payload or {})
+    min_success_rate = float((preflight_snapshot or {}).get("min_success_rate", 0.0) or 0.0)
+    attempts = int(provider_payload.get("attempts", 0) or 0)
+    successes = int(provider_payload.get("successes", 0) or 0)
+    success_rate = float(provider_payload.get("success_rate", 0.0) or 0.0)
+    low_signal_count = int(provider_payload.get("low_signal", 0) or 0)
+    challenge_count = int(provider_payload.get("challenge_or_anomaly", 0) or 0)
+    request_error_count = int(provider_payload.get("request_error", 0) or 0)
+    unavailable_count = int(provider_payload.get("unavailable", 0) or 0)
+
+    if attempts <= 0:
+        provider_healthy = False
+        provider_health_reason = "no_attempts"
+    elif successes > 0 and success_rate >= min_success_rate:
+        provider_healthy = True
+        provider_health_reason = "meets_success_threshold"
+    elif low_signal_count >= attempts and successes == 0:
+        provider_healthy = False
+        provider_health_reason = "low_signal_only"
+    elif challenge_count > 0 and successes == 0:
+        provider_healthy = False
+        provider_health_reason = "challenge_or_anomaly"
+    elif request_error_count >= attempts and successes == 0:
+        provider_healthy = False
+        provider_health_reason = "request_error_only"
+    elif unavailable_count >= attempts and successes == 0:
+        provider_healthy = False
+        provider_health_reason = "provider_unavailable"
+    else:
+        provider_healthy = False
+        provider_health_reason = "below_success_threshold"
+
+    provider_payload["provider_healthy"] = provider_healthy
+    provider_payload["provider_health_reason"] = provider_health_reason
+    provider_payload["batch_healthy"] = bool((preflight_snapshot or {}).get("healthy", False))
+    provider_payload["preflight_min_success_rate"] = min_success_rate
+    provider_payload["viable_provider"] = bool(provider_payload.get("healthy", provider_healthy))
+    return provider_healthy, provider_payload
 
 
 def _compute_adaptive_enrichment_config(config: dict[str, Any], progress: dict[str, Any], cycle_state: dict[str, int]) -> dict[str, int]:

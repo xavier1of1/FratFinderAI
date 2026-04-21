@@ -1,14 +1,14 @@
 import { MetricCard } from "@/components/metric-card";
 import { PageIntro } from "@/components/page-intro";
 import { TagPill } from "@/components/tag-pill";
-import { fetchFromApi } from "@/lib/api-client";
+import { getNationalProfileCounts, listNationalProfiles } from "@/lib/repositories/nationals-profile-repository";
 import type { NationalProfile } from "@/lib/types";
 
 export default async function NationalsPage() {
-  const profiles = await fetchFromApi<NationalProfile[]>("/api/nationals?limit=250");
-  const withEmail = profiles.filter((item) => Boolean(item.contactEmail)).length;
-  const withInstagram = profiles.filter((item) => Boolean(item.instagramUrl)).length;
-  const withPhone = profiles.filter((item) => Boolean(item.phone)).length;
+  const [profiles, counts] = await Promise.all([
+    listNationalProfiles(250) as Promise<NationalProfile[]>,
+    getNationalProfileCounts()
+  ]);
 
   return (
     <div className="sectionStack">
@@ -16,17 +16,17 @@ export default async function NationalsPage() {
         eyebrow="Nationals"
         title="First-class nationals profiles and contact truth"
         description="Use this page to inspect what the system knows about each national organization separately from chapter rows. Generic nationals contact belongs here unless the page is explicitly chapter-specific."
-        meta={[`${profiles.length} organizations`, `${withEmail} with email`, `${withInstagram} with Instagram`, `${withPhone} with phone`]}
+        meta={[`${counts.total} organizations`, `${counts.withEmail} with email`, `${counts.withInstagram} with Instagram`, `${counts.withPhone} with phone`]}
       />
 
       <section className="panel">
         <h2>Nationals Coverage</h2>
-        <p className="sectionDescription">This surface is the new source of truth for national-level contact and provenance so chapter rows do not silently inherit generic HQ data.</p>
+        <p className="sectionDescription">This surface is the new source of truth for national-level contact and provenance so chapter rows do not silently inherit generic HQ data. The table below shows the first 250 profiles while the KPIs reflect full-platform totals.</p>
         <div className="metrics">
-          <MetricCard label="Profiles" value={profiles.length} />
-          <MetricCard label="With Email" value={withEmail} />
-          <MetricCard label="With Instagram" value={withInstagram} />
-          <MetricCard label="With Phone" value={withPhone} />
+          <MetricCard label="Profiles" value={counts.total} />
+          <MetricCard label="With Email" value={counts.withEmail} />
+          <MetricCard label="With Instagram" value={counts.withInstagram} />
+          <MetricCard label="With Phone" value={counts.withPhone} />
         </div>
       </section>
 

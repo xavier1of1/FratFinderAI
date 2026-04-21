@@ -10,8 +10,9 @@ from fratfinder_crawler.models import FIELD_JOB_TYPES
 from fratfinder_crawler.pipeline import CrawlService
 
 
-ADAPTIVE_RUNTIME_CHOICES = ["adaptive_shadow", "adaptive_assisted", "adaptive_primary"]
-FIELD_JOB_RUNTIME_CHOICES = ["legacy", "langgraph_shadow", "langgraph_primary"]
+CRAWL_RUNTIME_CHOICES = ["adaptive_shadow", "adaptive_assisted"]
+LIVE_CRAWL_RUNTIME_CHOICES = ["adaptive_assisted"]
+FIELD_JOB_RUNTIME_CHOICES = ["langgraph_primary"]
 REQUEST_RUNTIME_CHOICES = ["v3_request_supervisor"]
 
 
@@ -23,29 +24,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--source-slug", help="Only crawl one source slug", default=None)
     run_parser.add_argument(
         "--runtime-mode",
-        choices=["legacy", *ADAPTIVE_RUNTIME_CHOICES],
+        choices=CRAWL_RUNTIME_CHOICES,
         default=None,
         help="Override runtime mode for this batch",
     )
     run_parser.add_argument("--policy-mode", choices=["live", "train"], default="live")
 
-    legacy_parser = subparsers.add_parser("run-legacy", help="Run the legacy crawl runtime explicitly")
-    legacy_parser.add_argument("--source-slug", help="Only crawl one source slug", default=None)
-
-    adaptive_parser = subparsers.add_parser("run-adaptive", help="Run the adaptive crawl runtime explicitly")
-    adaptive_parser.add_argument("--source-slug", help="Only crawl one source slug", default=None)
-    adaptive_parser.add_argument(
-        "--runtime-mode",
-        choices=ADAPTIVE_RUNTIME_CHOICES,
-        default="adaptive_shadow",
-        help="Adaptive runtime mode to execute",
-    )
-    adaptive_parser.add_argument("--policy-mode", choices=["live", "train"], default="live")
-
     request_parser = subparsers.add_parser("run-request", help="Run one fraternity crawl request through the V3 request graph")
     request_parser.add_argument("--request-id", required=True)
     request_parser.add_argument("--runtime-mode", choices=REQUEST_RUNTIME_CHOICES, default="v3_request_supervisor")
-    request_parser.add_argument("--crawl-runtime-mode", choices=["legacy", *ADAPTIVE_RUNTIME_CHOICES], default=None)
+    request_parser.add_argument("--crawl-runtime-mode", choices=LIVE_CRAWL_RUNTIME_CHOICES, default=None)
     request_parser.add_argument("--field-job-runtime-mode", choices=FIELD_JOB_RUNTIME_CHOICES, default=None)
     request_parser.add_argument("--graph-durability", choices=["exit", "async", "sync"], default=None)
 
@@ -85,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     preflight_parser = subparsers.add_parser("search-preflight", help="Run search provider health probes")
     preflight_parser.add_argument("--probes", type=int, default=None, help="Number of probe queries to run")
+
+    subparsers.add_parser("doctor", help="Report effective crawler settings, env resolution, provider reachability, and worker liveness")
 
     baseline_parser = subparsers.add_parser("system-baseline", help="Capture a live baseline snapshot for accuracy, queue state, and provider health")
     baseline_parser.add_argument("--skip-preflight", action="store_true", help="Skip search preflight in the baseline snapshot")
@@ -154,13 +144,13 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser = subparsers.add_parser("crawl-export-observations", help="Export adaptive crawl observations")
     export_parser.add_argument("--source-slug", default=None)
     export_parser.add_argument("--crawl-session-id", default=None)
-    export_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    export_parser.add_argument("--runtime-mode", choices=CRAWL_RUNTIME_CHOICES, default=None)
     export_parser.add_argument("--window-days", type=int, default=None)
     export_parser.add_argument("--limit", type=int, default=None)
 
     replay_parser = subparsers.add_parser("crawl-replay-policy", help="Summarize observed adaptive policy outcomes")
     replay_parser.add_argument("--source-slug", default=None)
-    replay_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    replay_parser.add_argument("--runtime-mode", choices=CRAWL_RUNTIME_CHOICES, default=None)
     replay_parser.add_argument("--window-days", type=int, default=None)
     replay_parser.add_argument("--limit", type=int, default=None)
 
@@ -171,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     epoch_parser.add_argument("--epochs", type=int, default=None)
     epoch_parser.add_argument("--train-sources", default=None, help="Comma-separated source slugs for train epochs")
     epoch_parser.add_argument("--eval-sources", default=None, help="Comma-separated source slugs for eval epochs")
-    epoch_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    epoch_parser.add_argument("--runtime-mode", choices=CRAWL_RUNTIME_CHOICES, default=None)
     epoch_parser.add_argument("--cohort-label", default="target-cohort")
     epoch_parser.add_argument("--policy-version", default=None)
     epoch_parser.add_argument("--replay-window-days", type=int, default=None)
@@ -185,7 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     loop_parser.add_argument("--epochs-per-round", type=int, default=None)
     loop_parser.add_argument("--train-sources", default=None)
     loop_parser.add_argument("--eval-sources", default=None)
-    loop_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    loop_parser.add_argument("--runtime-mode", choices=CRAWL_RUNTIME_CHOICES, default=None)
     loop_parser.add_argument("--cohort-label", default="target-cohort")
     loop_parser.add_argument("--report-dir", default="docs/reports")
     loop_parser.add_argument("--eval-enrichment-limit-per-source", type=int, default=None)
@@ -193,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     replay_window_parser = subparsers.add_parser("adaptive-replay-window", help="Export adaptive replay window observations and rewards")
     replay_window_parser.add_argument("--source-slugs", required=True, help="Comma-separated source slugs")
-    replay_window_parser.add_argument("--runtime-mode", choices=ADAPTIVE_RUNTIME_CHOICES, default=None)
+    replay_window_parser.add_argument("--runtime-mode", choices=CRAWL_RUNTIME_CHOICES, default=None)
     replay_window_parser.add_argument("--window-days", type=int, default=None)
     replay_window_parser.add_argument("--limit", type=int, default=None)
 
@@ -215,16 +205,6 @@ def main() -> None:
 
     if args.command == "run":
         result = service.run(source_slug=args.source_slug, runtime_mode=args.runtime_mode, policy_mode=args.policy_mode)
-        print(json.dumps(result, indent=2))
-        return
-
-    if args.command == "run-legacy":
-        result = service.run_legacy(source_slug=args.source_slug)
-        print(json.dumps(result, indent=2))
-        return
-
-    if args.command == "run-adaptive":
-        result = service.run_adaptive(source_slug=args.source_slug, runtime_mode=args.runtime_mode, policy_mode=args.policy_mode)
         print(json.dumps(result, indent=2))
         return
 
@@ -279,6 +259,11 @@ def main() -> None:
     if args.command == "search-preflight":
         result = service.search_preflight(probes=args.probes)
         print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "doctor":
+        result = service.doctor()
+        print(json.dumps(result, indent=2, default=str))
         return
 
     if args.command == "system-baseline":
@@ -420,9 +405,9 @@ def main() -> None:
         train_source_slugs = [value.strip() for value in str(train_raw).split(",") if value.strip()]
         eval_source_slugs = [value.strip() for value in str(eval_raw).split(",") if value.strip()]
         if not train_source_slugs:
-            raise ValueError("adaptive-train-eval requires train sources via --train-sources or Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS")
+            raise ValueError("adaptive-train-eval requires train sources via --train-sources or CRAWLER_ADAPTIVE_TRAIN_SOURCE_SLUGS")
         if not eval_source_slugs:
-            raise ValueError("adaptive-train-eval requires eval sources via --eval-sources or Agent:ADAPTIVE_EVAL_SOURCE_SLUGS")
+            raise ValueError("adaptive-train-eval requires eval sources via --eval-sources or CRAWLER_ADAPTIVE_EVAL_SOURCE_SLUGS")
         result = service.adaptive_train_eval(
             epochs=epochs,
             train_source_slugs=train_source_slugs,
@@ -447,9 +432,9 @@ def main() -> None:
         train_source_slugs = [value.strip() for value in str(train_raw).split(",") if value.strip()]
         eval_source_slugs = [value.strip() for value in str(eval_raw).split(",") if value.strip()]
         if not train_source_slugs:
-            raise ValueError("adaptive-train-loop requires train sources via --train-sources or Agent:ADAPTIVE_TRAIN_SOURCE_SLUGS")
+            raise ValueError("adaptive-train-loop requires train sources via --train-sources or CRAWLER_ADAPTIVE_TRAIN_SOURCE_SLUGS")
         if not eval_source_slugs:
-            raise ValueError("adaptive-train-loop requires eval sources via --eval-sources or Agent:ADAPTIVE_EVAL_SOURCE_SLUGS")
+            raise ValueError("adaptive-train-loop requires eval sources via --eval-sources or CRAWLER_ADAPTIVE_EVAL_SOURCE_SLUGS")
         result = service.adaptive_train_loop(
             rounds=args.rounds,
             epochs_per_round=epochs_per_round,

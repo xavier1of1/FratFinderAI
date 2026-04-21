@@ -10,7 +10,7 @@ def test_supervisor_returns_zero_when_no_chunks():
 
     runtime = FieldJobSupervisorGraphRuntime(
         worker_limits=[],
-        runtime_mode="legacy",
+        runtime_mode="langgraph_primary",
         graph_durability="sync",
         source_slug=None,
         field_name=None,
@@ -24,7 +24,7 @@ def test_supervisor_returns_zero_when_no_chunks():
     assert result["requeued"] == 0
     assert result["failed_terminal"] == 0
     assert result["runtime_fallback_count"] == 0
-    assert result["runtime_mode_used"] == "legacy"
+    assert result["runtime_mode_used"] == "langgraph_primary"
     assert result["provider_degraded_deferred"] == 0
     assert result["dependency_wait_deferred"] == 0
     assert result["supporting_page_resolved"] == 0
@@ -61,7 +61,7 @@ def test_supervisor_aggregates_chunk_results():
 
     runtime = FieldJobSupervisorGraphRuntime(
         worker_limits=[2, 1],
-        runtime_mode="langgraph_shadow",
+        runtime_mode="langgraph_primary",
         graph_durability="async",
         source_slug="sigma-chi-main",
         field_name="find_email",
@@ -75,7 +75,7 @@ def test_supervisor_aggregates_chunk_results():
     assert result["requeued"] == 3
     assert result["failed_terminal"] == 0
     assert result["runtime_fallback_count"] == 0
-    assert result["runtime_mode_used"] == "langgraph_shadow"
+    assert result["runtime_mode_used"] == "langgraph_primary"
     assert result["provider_degraded_deferred"] == 0
     assert result["dependency_wait_deferred"] == 0
     assert result["supporting_page_resolved"] == 0
@@ -88,5 +88,5 @@ def test_supervisor_aggregates_chunk_results():
     assert len(calls) == 2
     assert sorted(call["worker_index"] for call in calls) == [1, 2]
     assert all(call["total_workers"] == 2 for call in calls)
-    assert all(call["runtime_mode"] == "langgraph_shadow" for call in calls)
+    assert all(call["runtime_mode"] == "langgraph_primary" for call in calls)
     assert all(call["graph_durability"] == "async" for call in calls)

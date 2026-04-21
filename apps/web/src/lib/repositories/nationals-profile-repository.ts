@@ -50,3 +50,35 @@ export async function listNationalProfiles(limit = 250): Promise<NationalProfile
     metadata: row.metadata ?? {}
   }));
 }
+
+export async function getNationalProfileCounts(): Promise<{
+  total: number;
+  withEmail: number;
+  withInstagram: number;
+  withPhone: number;
+}> {
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{
+    total: string | number;
+    withEmail: string | number;
+    withInstagram: string | number;
+    withPhone: string | number;
+  }>(
+    `
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE contact_email IS NOT NULL AND BTRIM(contact_email) <> '')::int AS "withEmail",
+        COUNT(*) FILTER (WHERE instagram_url IS NOT NULL AND BTRIM(instagram_url) <> '')::int AS "withInstagram",
+        COUNT(*) FILTER (WHERE phone IS NOT NULL AND BTRIM(phone) <> '')::int AS "withPhone"
+      FROM national_profiles
+    `
+  );
+
+  const row = rows[0];
+  return {
+    total: Number(row?.total ?? 0),
+    withEmail: Number(row?.withEmail ?? 0),
+    withInstagram: Number(row?.withInstagram ?? 0),
+    withPhone: Number(row?.withPhone ?? 0)
+  };
+}

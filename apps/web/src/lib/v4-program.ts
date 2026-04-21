@@ -35,7 +35,7 @@ export function buildDefaultV4ProgramConfig(): Partial<CampaignRunConfig> {
     preflightRequired: true,
     autoTuningEnabled: true,
     programMode: "v4_rl_improvement",
-    runtimeMode: "adaptive_primary",
+    runtimeMode: "adaptive_assisted",
     fieldJobRuntimeMode: "langgraph_primary",
     frozenSourceSlugs: [...V4_FROZEN_SOURCE_SLUGS],
     trainingRounds: 3,

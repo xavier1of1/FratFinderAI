@@ -90,9 +90,7 @@ function estimateBenchmarkCycleTimeoutMs(config: BenchmarkRunConfig): number {
 
   const perJobMs = perJobMsByField[config.fieldName] ?? 10_000;
   const runtimeMultiplier =
-    config.fieldJobRuntimeMode === "langgraph_shadow" || config.fieldJobRuntimeMode === "langgraph_primary"
-      ? 1.8
-      : 1.0;
+    config.fieldJobRuntimeMode === "langgraph_primary" ? 1.8 : 1.0;
   const requestedWorkers = Math.max(config.workers, 1);
   const effectiveWorkers = Math.max(1, Math.min(requestedWorkers, config.limitPerCycle));
   const predictedProcessingMs = ((config.limitPerCycle * perJobMs) / effectiveWorkers) * runtimeMultiplier;
@@ -102,7 +100,7 @@ function estimateBenchmarkCycleTimeoutMs(config: BenchmarkRunConfig): number {
 }
 
 function isLanggraphRuntime(mode: string | undefined): boolean {
-  return mode === "langgraph_shadow" || mode === "langgraph_primary";
+  return mode === "langgraph_primary";
 }
 
 function delay(ms: number): Promise<void> {
@@ -124,6 +122,15 @@ function findRepositoryRoot(): string {
     currentDir = parentDir;
   }
   return process.cwd();
+}
+
+function buildPythonEnv(repositoryRoot: string): NodeJS.ProcessEnv {
+  const crawlerSrc = path.join(repositoryRoot, "services", "crawler", "src");
+  const existingPythonPath = process.env.PYTHONPATH?.trim();
+  return {
+    ...process.env,
+    PYTHONPATH: existingPythonPath ? `${crawlerSrc}${path.delimiter}${existingPythonPath}` : crawlerSrc,
+  };
 }
 
 function parseTrailingJson<T>(output: string): T {
@@ -201,25 +208,22 @@ async function runAdaptiveCrawlWarmup(config: BenchmarkRunConfig): Promise<Crawl
   }
 
   const runtimeMode = config.crawlRuntimeMode ?? "adaptive_assisted";
-  const args =
-    runtimeMode === "legacy"
-      ? ["-m", "fratfinder_crawler.cli", "run-legacy", "--source-slug", config.sourceSlug]
-      : [
-          "-m",
-          "fratfinder_crawler.cli",
-          "run-adaptive",
-          "--source-slug",
-          config.sourceSlug,
-          "--runtime-mode",
-          runtimeMode
-        ];
+  const args = [
+    "-m",
+    "fratfinder_crawler.cli",
+    "run",
+    "--source-slug",
+    config.sourceSlug,
+    "--runtime-mode",
+    runtimeMode,
+  ];
 
   const workingDirectory = findRepositoryRoot();
 
   return new Promise((resolve, reject) => {
     const child = spawn("python", args, {
       cwd: workingDirectory,
-      env: process.env,
+      env: buildPythonEnv(workingDirectory),
       windowsHide: true
     });
 
@@ -287,7 +291,7 @@ async function runFieldJobCycle(config: BenchmarkRunConfig): Promise<ProcessFiel
   return new Promise((resolve, reject) => {
     const child = spawn("python", args, {
       cwd: workingDirectory,
-      env: process.env,
+      env: buildPythonEnv(workingDirectory),
       windowsHide: true
     });
 
@@ -518,14 +522,14 @@ export async function runBenchmarkExecution(
           const shadow = await computeBenchmarkShadowDiffWindow({
             sourceSlug: config.sourceSlug,
             fieldName: config.fieldName,
-            runtimeMode: config.fieldJobRuntimeMode ?? "langgraph_shadow",
+            runtimeMode: config.fieldJobRuntimeMode ?? "langgraph_primary",
             fromIso: cycleStartedAt,
             toIso: cycleFinishedAt,
           });
           await upsertBenchmarkShadowDiff({
             benchmarkRunId: runId,
             cycle,
-            runtimeMode: config.fieldJobRuntimeMode ?? "langgraph_shadow",
+            runtimeMode: config.fieldJobRuntimeMode ?? "langgraph_primary",
             observedJobs: shadow.observedJobs,
             decisionMismatchCount: shadow.decisionMismatchCount,
             statusMismatchCount: shadow.statusMismatchCount,

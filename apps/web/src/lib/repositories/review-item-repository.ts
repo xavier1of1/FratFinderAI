@@ -50,6 +50,32 @@ export async function listReviewItems(limit = 100): Promise<ReviewItemListItem[]
   return rows;
 }
 
+export async function getReviewItemStatusCounts(): Promise<Record<ReviewStatus, number>> {
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{ status: ReviewStatus; count: string | number }>(
+    `
+      SELECT
+        status,
+        COUNT(*)::int AS count
+      FROM review_items
+      GROUP BY status
+    `
+  );
+
+  const counts: Record<ReviewStatus, number> = {
+    open: 0,
+    triaged: 0,
+    resolved: 0,
+    ignored: 0
+  };
+
+  for (const row of rows) {
+    counts[row.status] = Number(row.count ?? 0);
+  }
+
+  return counts;
+}
+
 export async function listReviewItemAuditLogs(reviewItemId: string): Promise<ReviewItemAuditLog[]> {
   const dbPool = getDbPool();
   const { rows } = await dbPool.query<ReviewItemAuditLog>(

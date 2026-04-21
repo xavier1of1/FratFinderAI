@@ -130,13 +130,22 @@ function findRepositoryRoot(): string {
   return process.cwd();
 }
 
+function buildPythonEnv(repositoryRoot: string): NodeJS.ProcessEnv {
+  const crawlerSrc = path.join(repositoryRoot, "services", "crawler", "src");
+  const existingPythonPath = process.env.PYTHONPATH?.trim();
+  return {
+    ...process.env,
+    PYTHONPATH: existingPythonPath ? `${crawlerSrc}${path.delimiter}${existingPythonPath}` : crawlerSrc,
+  };
+}
+
 async function runPythonCommand(args: string[], timeoutMs: number): Promise<CommandResult> {
   const workingDirectory = findRepositoryRoot();
 
   return new Promise((resolve, reject) => {
     const child = spawn("python", args, {
       cwd: workingDirectory,
-      env: process.env,
+      env: buildPythonEnv(workingDirectory),
       windowsHide: true
     });
 
@@ -483,7 +492,7 @@ async function captureV4ProgramSnapshot(sourceSlugs: string[], windowDays: numbe
   const [queueDiagnostics, reviewReasons, adaptiveInsights] = await Promise.all([
     getFieldJobQueueDiagnostics(sourceSlugs),
     getReviewReasonBreakdown({ sourceSlugs, windowDays, createdAfter, limit: 20 }),
-    getAdaptiveInsights({ sourceSlugs, runtimeMode: "adaptive_primary", windowDays, limit: 25 }),
+    getAdaptiveInsights({ sourceSlugs, runtimeMode: "adaptive_assisted", windowDays, limit: 25 }),
   ]);
 
   return {
@@ -1338,7 +1347,7 @@ async function syncV4LiveTelemetry(run: CampaignRun): Promise<CampaignRun> {
       verifiedWebsiteCount: finalSnapshot.verifiedWebsiteCount,
       topDelayedActions: (await getAdaptiveInsights({
         sourceSlugs,
-        runtimeMode: run.config.runtimeMode ?? "adaptive_primary",
+        runtimeMode: run.config.runtimeMode ?? "adaptive_assisted",
         windowDays: run.config.reviewWindowDays ?? 14,
         limit: 25,
       })).delayedAttribution.slice(0, 8),
@@ -1453,7 +1462,7 @@ async function runV4Prelude(run: CampaignRun): Promise<CampaignRun> {
       round,
       trainSourceSlugs: roundTrainSources,
       evalSourceSlugs: roundEvalSources,
-      runtimeMode: effectiveConfig.runtimeMode ?? "adaptive_primary",
+      runtimeMode: effectiveConfig.runtimeMode ?? "adaptive_assisted",
       policyVersion: stagedPolicyVersion,
       epochsPerRound: effectiveConfig.epochsPerRound ?? 1,
       commandTimeoutMinutes: effectiveConfig.trainingCommandTimeoutMinutes,
@@ -1462,7 +1471,7 @@ async function runV4Prelude(run: CampaignRun): Promise<CampaignRun> {
     const latestSnapshot = (
       await listAdaptivePolicySnapshots({
         policyVersion: stagedPolicyVersion,
-        runtimeMode: effectiveConfig.runtimeMode ?? "adaptive_primary",
+        runtimeMode: effectiveConfig.runtimeMode ?? "adaptive_assisted",
         limit: 1,
       })
     )[0] ?? null;

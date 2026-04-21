@@ -65,7 +65,11 @@ def test_duckduckgo_anomaly_falls_back_to_bing_html():
         )
 
     client = SearchClient(
-        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="duckduckgo_html"),
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="duckduckgo_html",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
+        ),
         get_requester=requester,
     )
 
@@ -92,7 +96,11 @@ def test_duckduckgo_request_exception_falls_back_to_bing_html():
         )
 
     client = SearchClient(
-        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="duckduckgo_html"),
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="duckduckgo_html",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
+        ),
         get_requester=requester,
     )
 
@@ -132,7 +140,11 @@ def test_bing_low_signal_results_fall_back_to_duckduckgo():
         )
 
     client = SearchClient(
-        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="bing_html",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
+        ),
         get_requester=requester,
     )
 
@@ -167,7 +179,11 @@ def test_bing_challenge_page_falls_back_to_duckduckgo():
         )
 
     client = SearchClient(
-        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="bing_html",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
+        ),
         get_requester=requester,
     )
 
@@ -179,7 +195,7 @@ def test_bing_challenge_page_falls_back_to_duckduckgo():
     assert calls[1].startswith("https://lite.duckduckgo.com")
 
 
-def test_bing_and_duckduckgo_fail_then_falls_back_to_brave_html():
+def test_bing_and_duckduckgo_fail_then_falls_back_to_searxng():
     calls: list[str] = []
 
     def requester(url, params, timeout, verify, headers):
@@ -192,32 +208,31 @@ def test_bing_and_duckduckgo_fail_then_falls_back_to_brave_html():
             )
         if "duckduckgo" in url:
             raise requests.ConnectionError("duckduckgo unavailable")
-        if "search.brave.com" in url:
+        if "localhost:8888/search" in url:
             return SimpleNamespace(
                 status_code=200,
-                text=(
-                    "<html><body>"
-                    '<div class="result-wrapper"><a href="https://www.instagram.com/sigmachiuchicago/">UChicago Sigma Chi</a>'
-                    "<p>Instagram profile</p></div>"
-                    "</body></html>"
-                ),
+                text='{"results":[{"title":"UChicago Sigma Chi","url":"https://www.instagram.com/sigmachiuchicago/","content":"Instagram profile"}]}',
+                json=lambda: {"results": [{"title": "UChicago Sigma Chi", "url": "https://www.instagram.com/sigmachiuchicago/", "content": "Instagram profile"}]},
                 raise_for_status=lambda: None,
             )
         raise AssertionError(f"Unexpected URL call: {url}")
 
     client = SearchClient(
-        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="bing_html",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+        ),
         get_requester=requester,
     )
 
     results = client.search('"sigma chi" University of Chicago instagram')
 
     assert len(results) == 1
-    assert results[0].provider == "brave_html"
+    assert results[0].provider == "searxng_json"
     assert results[0].url == "https://www.instagram.com/sigmachiuchicago/"
     assert calls[0].startswith("https://www.bing.com")
-    assert calls[1].startswith("https://lite.duckduckgo.com")
-    assert calls[2].startswith("https://search.brave.com")
+    assert calls[1] == "http://localhost:8888/search"
 
 
 def test_bing_redirect_url_is_decoded():
@@ -264,18 +279,21 @@ def test_auto_provider_prefers_searxng_before_brave_when_available():
     assert calls == ["http://localhost:8888/search"]
 
 
-def test_auto_provider_falls_back_to_brave_when_searxng_unavailable():
+def test_auto_provider_falls_back_to_duckduckgo_when_searxng_unavailable():
     calls: list[str] = []
 
     def requester(url, params, timeout, verify, headers):
         calls.append(url)
         if "localhost:8888/search" in url:
             raise requests.ConnectionError("searx unavailable")
-        if "api.search.brave.com" in url:
+        if "duckduckgo" in url:
             return SimpleNamespace(
                 status_code=200,
-                text='{"web":{"results":[{"title":"Sigma Chi at Demo University","url":"https://example.org/chapter","description":"Official chapter website"}]}}',
-                json=lambda: {"web": {"results": [{"title": "Sigma Chi at Demo University", "url": "https://example.org/chapter", "description": "Official chapter website"}]}},
+                text=(
+                    "<html><body><table>"
+                    "<tr><td><a href=\"//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fchapter\">Sigma Chi at Demo University</a></td></tr>"
+                    "</table></body></html>"
+                ),
                 raise_for_status=lambda: None,
             )
         raise AssertionError(f"Unexpected fallback URL: {url}")
@@ -284,7 +302,6 @@ def test_auto_provider_falls_back_to_brave_when_searxng_unavailable():
         Settings(
             database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
             CRAWLER_SEARCH_PROVIDER="auto",
-            CRAWLER_SEARCH_BRAVE_API_KEY="test-key",
             CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
         ),
         get_requester=requester,
@@ -293,9 +310,34 @@ def test_auto_provider_falls_back_to_brave_when_searxng_unavailable():
     results = client.search("sigma chi demo university website")
 
     assert len(results) == 1
-    assert results[0].provider == "brave_api"
+    assert results[0].provider == "duckduckgo_html"
     assert calls[0] == "http://localhost:8888/search"
-    assert calls[1].startswith("https://api.search.brave.com")
+    assert calls[1].startswith("https://lite.duckduckgo.com")
+
+
+def test_searxng_json_uses_shorter_timeout_and_reports_unresponsive_engines():
+    def requester(url, params, timeout, verify, headers):
+        assert url == "http://localhost:8888/search"
+        assert timeout == 4.0
+        return SimpleNamespace(
+            status_code=200,
+            text='{"results":[],"unresponsive_engines":["google","bing"]}',
+            json=lambda: {"results": [], "unresponsive_engines": ["google", "bing"]},
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="searxng_json",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_HTTP_TIMEOUT_SECONDS=20,
+        ),
+        get_requester=requester,
+    )
+
+    with pytest.raises(SearchUnavailableError, match="unresponsive engines: google, bing"):
+        client.search("sigma chi demo university website")
 
 
 def test_searxng_json_provider_parses_results():
@@ -482,7 +524,11 @@ def test_search_client_caches_duplicate_queries():
         )
 
     client = SearchClient(
-        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="bing_html",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
+        ),
         get_requester=requester,
     )
 
@@ -505,7 +551,11 @@ def test_search_client_does_not_cache_empty_results_by_default():
         )
 
     client = SearchClient(
-        Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder", CRAWLER_SEARCH_PROVIDER="bing_html"),
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="bing_html",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
+        ),
         get_requester=requester,
     )
 
@@ -514,7 +564,7 @@ def test_search_client_does_not_cache_empty_results_by_default():
 
     assert first == []
     assert second == []
-    assert len(calls) == 6
+    assert len(calls) == 4
 
 
 def test_search_client_can_cache_empty_results_when_enabled():
@@ -533,6 +583,7 @@ def test_search_client_can_cache_empty_results_when_enabled():
             database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
             CRAWLER_SEARCH_PROVIDER="bing_html",
             CRAWLER_SEARCH_CACHE_EMPTY_RESULTS=True,
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
         ),
         get_requester=requester,
     )
@@ -542,7 +593,7 @@ def test_search_client_can_cache_empty_results_when_enabled():
 
     assert first == []
     assert second == []
-    assert len(calls) == 3
+    assert len(calls) == 2
 
 
 def test_search_client_opens_circuit_after_repeated_provider_failures():
@@ -599,6 +650,7 @@ def test_bing_circuit_open_still_allows_free_provider_fallback():
             CRAWLER_SEARCH_PROVIDER="bing_html",
             CRAWLER_SEARCH_CIRCUIT_BREAKER_FAILURES=1,
             CRAWLER_SEARCH_CIRCUIT_BREAKER_COOLDOWN_SECONDS=60,
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="",
         ),
         get_requester=requester,
     )

@@ -60,3 +60,35 @@ export async function listCrawlRuns(limit = 100): Promise<CrawlRunListItem[]> {
     chapterSearch: row.chapterSearch ?? null,
   }));
 }
+
+export async function getCrawlRunCounts(): Promise<{
+  total: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+}> {
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{
+    total: string | number;
+    running: string | number;
+    succeeded: string | number;
+    failed: string | number;
+  }>(
+    `
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'running')::int AS running,
+        COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+      FROM crawl_runs
+    `
+  );
+
+  const row = rows[0];
+  return {
+    total: Number(row?.total ?? 0),
+    running: Number(row?.running ?? 0),
+    succeeded: Number(row?.succeeded ?? 0),
+    failed: Number(row?.failed ?? 0)
+  };
+}

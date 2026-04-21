@@ -36,6 +36,13 @@ const createBenchmarkRun = vi.fn(async () => ({
 }));
 const getBenchmarkRun = vi.fn(async () => null);
 const listBenchmarkRuns = vi.fn(async () => []);
+const getBenchmarkRunCounts = vi.fn(async () => ({
+  total: 1,
+  queued: 0,
+  running: 0,
+  succeeded: 1,
+  failed: 0,
+}));
 
 const failStaleCrawlRuns = vi.fn(async () => 0);
 const listCrawlRuns = vi.fn(async () => []);
@@ -82,6 +89,13 @@ const listCampaignRuns = vi.fn(async () => [
     events: [],
   },
 ]);
+const getCampaignRunCounts = vi.fn(async () => ({
+  total: 1,
+  queued: 0,
+  running: 1,
+  succeeded: 0,
+  failed: 0,
+}));
 const createCampaignRun = vi.fn(async () => ({
   id: "campaign-created",
   status: "queued",
@@ -170,9 +184,19 @@ const scheduleFraternityCrawlRequest = vi.fn(async () => undefined);
 const reconcileStaleFraternityCrawlRequests = vi.fn(async () => 0);
 const listFraternityCrawlRequests = vi.fn(async () => []);
 const getFraternityCrawlRequest = vi.fn(async () => null);
+const getFraternityCrawlRequestCounts = vi.fn(async () => ({
+  total: 1,
+  draft: 0,
+  queued: 0,
+  running: 0,
+  succeeded: 1,
+  failed: 0,
+  canceled: 0,
+}));
 
 vi.mock("@/lib/repositories/campaign-run-repository", () => ({
   listCampaignRuns,
+  getCampaignRunCounts,
   createCampaignRun,
   reconcileStaleCampaignRuns,
   getCampaignRun,
@@ -200,6 +224,7 @@ vi.mock("@/lib/repositories/benchmark-repository", () => ({
   failStaleBenchmarkRuns,
   getBenchmarkRun,
   listBenchmarkRuns,
+  getBenchmarkRunCounts,
 }));
 
 vi.mock("@/lib/repositories/crawl-run-repository", () => ({
@@ -232,6 +257,7 @@ vi.mock("@/lib/fraternity-crawl-request-runner", () => ({
 
 vi.mock("@/lib/repositories/fraternity-crawl-request-repository", () => ({
   listFraternityCrawlRequests,
+  getFraternityCrawlRequestCounts,
   getFraternityCrawlRequest,
   reconcileStaleFraternityCrawlRequests,
   createFraternityCrawlRequest: vi.fn(),
@@ -268,12 +294,29 @@ describe("read-only API routes", () => {
     expect(scheduleCampaignRun).not.toHaveBeenCalled();
   });
 
+  it("campaign summary GET is observational only", async () => {
+    const route = await import("./campaign-runs/summary/route");
+    const response = await route.GET();
+    expect(response.status).toBe(200);
+    expect(getCampaignRunCounts).toHaveBeenCalled();
+    expect(reconcileStaleCampaignRuns).not.toHaveBeenCalled();
+    expect(scheduleCampaignRun).not.toHaveBeenCalled();
+  });
+
   it("benchmarks GET does not fail stale runs", async () => {
     const route = await import("./benchmarks/route");
     const response = await route.GET({
       nextUrl: new URL("http://localhost/api/benchmarks?limit=10"),
     } as never);
     expect(response.status).toBe(200);
+    expect(failStaleBenchmarkRuns).not.toHaveBeenCalled();
+  });
+
+  it("benchmark summary GET is observational only", async () => {
+    const route = await import("./benchmarks/summary/route");
+    const response = await route.GET();
+    expect(response.status).toBe(200);
+    expect(getBenchmarkRunCounts).toHaveBeenCalled();
     expect(failStaleBenchmarkRuns).not.toHaveBeenCalled();
   });
 
@@ -361,6 +404,15 @@ describe("read-only API routes", () => {
     expect(reconcileStaleFraternityCrawlRequests).not.toHaveBeenCalled();
     expect(scheduleDueFraternityCrawlRequests).not.toHaveBeenCalled();
     expect(scheduleFraternityCrawlRequest).not.toHaveBeenCalled();
+  });
+
+  it("fraternity crawl request summary GET is observational only", async () => {
+    const route = await import("./fraternity-crawl-requests/summary/route");
+    const response = await route.GET();
+    expect(response.status).toBe(200);
+    expect(getFraternityCrawlRequestCounts).toHaveBeenCalled();
+    expect(reconcileStaleFraternityCrawlRequests).not.toHaveBeenCalled();
+    expect(scheduleDueFraternityCrawlRequests).not.toHaveBeenCalled();
   });
 
   it("benchmarks POST enqueues evaluation work instead of scheduling in-process", async () => {

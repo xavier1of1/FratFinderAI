@@ -8,21 +8,15 @@ import type { BenchmarkFieldName, BenchmarkRunConfig } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const DEFAULT_RUNTIME_MODE = (() => {
+const DEFAULT_RUNTIME_MODE: "adaptive_shadow" | "adaptive_assisted" = (() => {
   const value = String(process.env.BENCHMARK_CRAWL_RUNTIME_MODE ?? "adaptive_assisted").trim();
-  if (value === "legacy" || value === "adaptive_shadow" || value === "adaptive_assisted" || value === "adaptive_primary") {
+  if (value === "adaptive_shadow" || value === "adaptive_assisted") {
     return value;
   }
   return "adaptive_assisted";
 })();
 
-const DEFAULT_FIELD_JOB_RUNTIME_MODE = (() => {
-  const value = String(process.env.BENCHMARK_FIELD_JOB_RUNTIME_MODE ?? "legacy").trim();
-  if (value === "legacy" || value === "langgraph_shadow" || value === "langgraph_primary") {
-    return value;
-  }
-  return "legacy";
-})();
+const DEFAULT_FIELD_JOB_RUNTIME_MODE: "langgraph_primary" = "langgraph_primary";
 
 const DEFAULT_FIELD_JOB_GRAPH_DURABILITY = (() => {
   const value = String(process.env.BENCHMARK_FIELD_JOB_GRAPH_DURABILITY ?? "sync").trim();
@@ -45,8 +39,8 @@ const benchmarkPayloadSchema = z.object({
   limitPerCycle: z.coerce.number().int().min(1).max(500).default(25),
   cycles: z.coerce.number().int().min(1).max(100).default(6),
   pauseMs: z.coerce.number().int().min(0).max(10_000).default(500),
-  crawlRuntimeMode: z.enum(["legacy", "adaptive_shadow", "adaptive_assisted", "adaptive_primary"]).default(DEFAULT_RUNTIME_MODE),
-  fieldJobRuntimeMode: z.enum(["legacy", "langgraph_shadow", "langgraph_primary"]).default(DEFAULT_FIELD_JOB_RUNTIME_MODE),
+  crawlRuntimeMode: z.enum(["adaptive_shadow", "adaptive_assisted"]).default(DEFAULT_RUNTIME_MODE),
+  fieldJobRuntimeMode: z.enum(["langgraph_primary"]).default(DEFAULT_FIELD_JOB_RUNTIME_MODE),
   fieldJobGraphDurability: z.enum(["exit", "async", "sync"]).default(DEFAULT_FIELD_JOB_GRAPH_DURABILITY),
   runAdaptiveCrawlBeforeCycles: z.coerce.boolean().default(DEFAULT_WARMUP),
   isolationMode: z.enum(["shared_live_observed", "strict_live_isolated"]).default("shared_live_observed")

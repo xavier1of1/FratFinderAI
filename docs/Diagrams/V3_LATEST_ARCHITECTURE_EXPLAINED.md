@@ -2,7 +2,7 @@
 
 This document explains the latest implemented crawler architecture in plain language and connects each major behavior to the runtime that is currently in production-like use.
 
-The short version is: V3 keeps the existing request intake model for operators, but moves execution ownership to a Python request worker that runs a LangGraph supervisor flow. The system is now graph-supervised end to end at the request level, while the default crawl core is currently `legacy` for source parity and throughput stability.
+The short version is: V3 keeps the existing request intake model for operators, but moves execution ownership to a Python request worker that runs a LangGraph supervisor flow. The system is now graph-supervised end to end at the request level, while new live crawl executions use `adaptive_assisted` and new live field-job executions use `langgraph_primary`.
 
 ## What Is Running Today
 
@@ -10,7 +10,7 @@ The architecture now has three levels that matter operationally.
 
 The first level is the request interface layer in the web app. Operators still create, confirm, reschedule, and monitor `fraternity_crawl_requests` through the same intake workflow. This keeps the product experience stable and avoids migration pain for users.
 
-The second level is request execution ownership. When `CRAWLER_V3_ENABLED=true`, the web runner intentionally stands down from actively executing requests. A dedicated Python worker process claims queued requests and executes them through the V3 request supervisor graph.
+The second level is request execution ownership. The web runner is now a thin request client that optionally dispatches to Python only in local or development contexts. A dedicated Python worker process remains the single source of truth for queued request execution through the V3 request supervisor graph.
 
 The third level is graph-supervised orchestration and telemetry. Every request run writes graph run metadata, node events, and checkpoints, then projects back into the existing request status/stage model so legacy UI flows still work.
 
@@ -20,7 +20,7 @@ The full crawler behavior now starts when a new fraternity request is queued and
 
 The worker first loads request context and source quality state. If the source is weak or missing, it enters a recovery branch and attempts bounded source discovery/revalidation before any crawl starts. This prevents wasteful runs and improves adaptability for new fraternities where source quality is uncertain.
 
-If source quality is acceptable, the graph enters crawl execution. Crawl is currently launched with `CRAWLER_V3_CRAWL_RUNTIME_MODE=legacy` by default, because live validation showed that adaptive crawl is not yet parity-safe on several large real sources. The important architecture point is that this crawl step is now graph-governed and telemetry-rich, even when the underlying crawl mode is legacy.
+If source quality is acceptable, the graph enters crawl execution. New live requests launch crawl with `adaptive_assisted` by default. The important architecture point is that this crawl step is graph-governed and telemetry-rich, with runtime choice now explicit and constrained rather than silently downgraded through legacy fallbacks.
 
 After crawl completion, the supervisor syncs crawl progress and evaluates whether enrichment should run. If there is queued enrichment work, it executes bounded enrichment cycles and persists cycle telemetry and queue state on each pass. If enrichment is not needed, it moves directly to provisional evaluation and finalization.
 
@@ -114,4 +114,3 @@ flowchart TB
   Ops --> Evid
   Ops --> Prov
 ```
-

@@ -1,17 +1,18 @@
 import { CampaignsDashboard } from "@/components/campaigns-dashboard";
 import { PageIntro } from "@/components/page-intro";
-import { listCampaignRuns } from "@/lib/repositories/campaign-run-repository";
+import { getCampaignRunCounts, listCampaignRuns } from "@/lib/repositories/campaign-run-repository";
 import { listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
 import type { CampaignRun, CrawlRunListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function CampaignsPage() {
-  const [campaigns, runs] = await Promise.all([
+  const [campaigns, runs, counts] = await Promise.all([
     listCampaignRuns(100) as Promise<CampaignRun[]>,
-    listCrawlRuns(800) as Promise<CrawlRunListItem[]>
+    listCrawlRuns(800) as Promise<CrawlRunListItem[]>,
+    getCampaignRunCounts()
   ]);
-  const running = campaigns.filter((item) => item.status === "running" || item.status === "queued").length;
+  const running = counts.running + counts.queued;
   const latest = campaigns[0] ?? null;
 
   return (
@@ -21,12 +22,12 @@ export default async function CampaignsPage() {
         title="Long-run multi-fraternity benchmark campaigns"
         description="Launch 20-fraternity style validation campaigns, watch queue health live, and compare coverage, throughput, and tuning decisions in one place."
         meta={[
-          `${campaigns.length} saved campaigns`,
+          `${counts.total} saved campaigns`,
           `${running} active`,
           latest ? `latest: ${latest.name}` : "no campaigns yet"
         ]}
       />
-      <CampaignsDashboard initialCampaigns={campaigns} initialRuns={runs} />
+      <CampaignsDashboard initialCampaigns={campaigns} initialRuns={runs} summaryCounts={counts} />
     </div>
   );
 }

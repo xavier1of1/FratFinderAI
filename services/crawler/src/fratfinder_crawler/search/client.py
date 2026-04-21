@@ -170,10 +170,7 @@ class SearchClient:
             self._cache_query_results(cache_key, results)
             return results
         if provider == "duckduckgo_html":
-            try:
-                results = self._run_provider_call("duckduckgo_html", lambda: self._search_duckduckgo_html(query, limit))
-            except (SearchUnavailableError, requests.RequestException):
-                results = self._run_provider_call("bing_html", lambda: self._search_bing_html(query, limit), fallback_taken=True)
+            results = self._search_with_provider_chain(query, limit, ["duckduckgo_html", "searxng_json", "bing_html"])
             self._cache_query_results(cache_key, results)
             return results
         if provider == "brave_html":
@@ -184,13 +181,6 @@ class SearchClient:
 
     def _search_auto(self, query: str, max_results: int) -> list[SearchResult]:
         providers = self._free_provider_order()
-        brave_api_key = (self._settings.crawler_search_brave_api_key or "").strip()
-        if brave_api_key:
-            if "searxng_json" in providers:
-                insert_at = providers.index("searxng_json") + 1
-                providers.insert(insert_at, "brave_api")
-            else:
-                providers.insert(0, "brave_api")
         deduped: list[str] = []
         for provider in providers:
             if provider not in deduped:
@@ -204,7 +194,7 @@ class SearchClient:
     def _free_provider_order(self) -> list[str]:
         raw_order = (self._settings.crawler_search_provider_order_free or "").strip()
         if not raw_order:
-            raw_order = "searxng_json,serper_api,tavily_api,duckduckgo_html,bing_html,brave_html"
+            raw_order = "searxng_json,duckduckgo_html,bing_html"
         deduped: list[str] = []
         for token in (part.strip().lower() for part in raw_order.split(",")):
             if not token or token in deduped:
@@ -212,7 +202,7 @@ class SearchClient:
             if token not in _SUPPORTED_PROVIDERS or token in {"auto", "auto_free", "brave_api"}:
                 continue
             deduped.append(token)
-        provider_order = deduped or ["duckduckgo_html", "bing_html", "brave_html"]
+        provider_order = deduped or ["searxng_json", "duckduckgo_html", "bing_html"]
         return self._rank_providers(provider_order)
 
     def _search_with_provider_chain(self, query: str, max_results: int, providers: list[str]) -> list[SearchResult]:
@@ -278,7 +268,7 @@ class SearchClient:
         raise SearchUnavailableError(f"Unsupported provider in chain: {provider}")
 
     def _search_bing_with_free_fallback(self, query: str, max_results: int) -> list[SearchResult]:
-        providers = ["bing_html", "duckduckgo_html", "brave_html"]
+        providers = ["bing_html", "searxng_json", "duckduckgo_html"]
         return self._search_with_provider_chain(query, max_results, providers)
 
     def _cache_query_results(self, cache_key: tuple[str, str, int], results: list[SearchResult]) -> None:
@@ -550,10 +540,11 @@ class SearchClient:
         engines = (self._settings.crawler_search_searxng_engines or "").strip()
         if engines:
             params["engines"] = engines
+        timeout = min(self._settings.crawler_http_timeout_seconds, 4.0)
         response = self._get_requester(
             endpoint,
             params=params,
-            timeout=self._settings.crawler_http_timeout_seconds,
+            timeout=timeout,
             verify=self._settings.crawler_http_verify_ssl,
             headers=self._search_headers(referer=f"{base_url}/"),
         )
@@ -572,6 +563,11 @@ class SearchClient:
             if len(results) >= max_results:
                 break
         if not results:
+            unresponsive_engines = payload.get("unresponsive_engines")
+            if isinstance(unresponsive_engines, list) and unresponsive_engines:
+                raise SearchUnavailableError(
+                    f"SearXNG returned no results and reported unresponsive engines: {', '.join(str(item) for item in unresponsive_engines)}"
+                )
             raise SearchUnavailableError("SearXNG returned no parseable search results")
         return results
 

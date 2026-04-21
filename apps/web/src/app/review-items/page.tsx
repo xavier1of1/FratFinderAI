@@ -2,17 +2,23 @@ import { FieldJobsDashboard } from "@/components/field-jobs-dashboard";
 import { PageIntro } from "@/components/page-intro";
 import { StatusPill } from "@/components/status-pill";
 import { ReviewStatusForm } from "@/components/review-status-form";
+import { getAgentOpsSummary } from "@/lib/repositories/agent-ops-repository";
 import { listFieldJobs } from "@/lib/repositories/field-job-repository";
-import { listReviewItems } from "@/lib/repositories/review-item-repository";
+import { getReviewItemStatusCounts, listReviewItems } from "@/lib/repositories/review-item-repository";
 import type { FieldJobListItem, ReviewItemListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReviewItemsPage() {
-  const [reviewItems, fieldJobs] = await Promise.all([
+  const [reviewItems, fieldJobs, reviewCounts, agentOps] = await Promise.all([
     listReviewItems(200) as Promise<ReviewItemListItem[]>,
-    listFieldJobs(200) as Promise<FieldJobListItem[]>
+    listFieldJobs(200) as Promise<FieldJobListItem[]>,
+    getReviewItemStatusCounts(),
+    getAgentOpsSummary()
   ]);
+
+  const totalReviewItems = reviewCounts.open + reviewCounts.triaged + reviewCounts.resolved + reviewCounts.ignored;
+  const totalFieldJobs = agentOps.fieldJobsQueued + agentOps.fieldJobsRunning + agentOps.fieldJobsUpdated;
 
   return (
     <div className="sectionStack">
@@ -20,12 +26,17 @@ export default async function ReviewItemsPage() {
         eyebrow="Review"
         title="Manual decision queue for low-confidence data"
         description="This page is for triaging ambiguous records and checking the field-job backlog before questionable data reaches the chapter table."
-        meta={[`${reviewItems.length} review items`, `${fieldJobs.length} field jobs`, `${reviewItems.filter((item) => item.status === "open").length} open`]}
+        meta={[
+          `${totalReviewItems} review items`,
+          `${reviewCounts.open} open`,
+          `${totalFieldJobs} total field jobs`,
+          `${agentOps.fieldJobsActionable} actionable`
+        ]}
       />
 
       <section className="panel">
         <h2>Review Queue</h2>
-        <p className="sectionDescription">Resolve ambiguous extractions here, then use the field jobs table below to inspect what enrichment work is still in flight.</p>
+        <p className="sectionDescription">Resolve ambiguous extractions here, then use the field jobs table below to inspect what enrichment work is still in flight. The table shows the most recent 200 review items while the header reflects platform totals.</p>
         <div className="tableWrap">
           <table>
             <thead>
@@ -113,7 +124,7 @@ export default async function ReviewItemsPage() {
 
       <section className="panel">
         <h2>Field Jobs</h2>
-        <p className="sectionDescription">Monitor the queued enrichment work here so you can tell whether the pipeline is discovering websites, emails, and social links as expected.</p>
+        <p className="sectionDescription">Monitor the queued enrichment work here so you can tell whether the pipeline is discovering websites, emails, and social links as expected. The grid streams the most recent 200 jobs while the summary above uses live aggregate counts.</p>
         <FieldJobsDashboard initialJobs={fieldJobs} />
       </section>
     </div>

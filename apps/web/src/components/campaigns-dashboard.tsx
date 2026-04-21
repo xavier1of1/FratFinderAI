@@ -136,6 +136,30 @@ async function fetchCrawlRuns(): Promise<CrawlRunListItem[]> {
   return payload.data;
 }
 
+async function fetchCampaignCounts(): Promise<{
+  total: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+}> {
+  const response = await fetch("/api/campaign-runs/summary", { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<{
+    total: number;
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  }>;
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch campaign summary: ${response.status}`);
+  }
+  return payload.data;
+}
+
 async function fetchAdaptiveInsights(sourceSlugs: string[]): Promise<AdaptiveInsights> {
   const query = new URLSearchParams();
   if (sourceSlugs.length > 0) {
@@ -179,13 +203,22 @@ function extractCampaignSourceSlugs(campaign: CampaignRun): string[] {
 
 export function CampaignsDashboard({
   initialCampaigns,
-  initialRuns
+  initialRuns,
+  summaryCounts
 }: {
   initialCampaigns: CampaignRun[];
   initialRuns: CrawlRunListItem[];
+  summaryCounts: {
+    total: number;
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  };
 }) {
   const [campaigns, setCampaigns] = useState<CampaignRun[]>(sortCampaigns(initialCampaigns));
   const [crawlRuns, setCrawlRuns] = useState<CrawlRunListItem[]>(initialRuns);
+  const [counts, setCounts] = useState(summaryCounts);
   const [selectedId, setSelectedId] = useState<string | null>(initialCampaigns[0]?.id ?? null);
   const [selectedCampaignDetail, setSelectedCampaignDetail] = useState<CampaignRun | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -226,10 +259,7 @@ export function CampaignsDashboard({
     return selectedCampaignSummary;
   }, [selectedCampaignDetail, selectedCampaignSummary]);
 
-  const activeCount = useMemo(
-    () => campaigns.filter((item) => item.status === "queued" || item.status === "running").length,
-    [campaigns]
-  );
+  const activeCount = counts.queued + counts.running;
   const runtimeDrift = useMemo(() => {
     if (!selectedCampaign) {
       return false;
@@ -241,9 +271,10 @@ export function CampaignsDashboard({
   async function refreshCampaigns(options?: { selectNewest?: boolean }) {
     setIsRefreshing(true);
     try {
-      const [campaignData, runData] = await Promise.all([fetchCampaigns(), fetchCrawlRuns()]);
+      const [campaignData, runData, countsData] = await Promise.all([fetchCampaigns(), fetchCrawlRuns(), fetchCampaignCounts()]);
       setCampaigns(campaignData);
       setCrawlRuns(runData);
+      setCounts(countsData);
       const selectedStillExists = selectedId ? campaignData.some((item) => item.id === selectedId) : false;
       let nextSelectedId = selectedId;
       if (options?.selectNewest && campaignData[0]) {
@@ -459,7 +490,7 @@ export function CampaignsDashboard({
         <div className="heroGrid">
           <div>
             <div className="metrics">
-              <MetricCard label="Saved Campaigns" value={campaigns.length} />
+              <MetricCard label="Saved Campaigns" value={counts.total} />
               <MetricCard label="Running / Queued" value={activeCount} />
               <MetricCard label="Latest Any-Contact" value={latestSummary ? formatPercent(latestSummary.anyContactSuccessRate) : "n/a"} />
               <MetricCard label="Best Any-Contact" value={formatPercent(bestAnyContact)} />

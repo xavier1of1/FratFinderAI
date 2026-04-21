@@ -112,7 +112,7 @@ Process missing-field jobs for one source only:
 
 ```bash
 python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25
-python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25 --runtime-mode langgraph_shadow --graph-durability sync
+python -m fratfinder_crawler.cli process-field-jobs --source-slug sigma-chi-main --field-name find_instagram --workers 8 --limit 25 --runtime-mode langgraph_primary --graph-durability sync
 ```
 
 Run database migrations (including `0017_field_job_langgraph_runtime.sql`) before using `langgraph_*` field-job runtime modes.
@@ -142,12 +142,12 @@ Revalidate one verified seed (manual/operator-driven):
 python -m fratfinder_crawler.cli revalidate-verified-source --fraternity-slug sigma-chi
 ```
 
-Run the new dual-track crawl runtimes explicitly:
+Run the supported crawl runtime explicitly:
 
 ```bash
-python -m fratfinder_crawler.cli run-legacy --source-slug sigma-chi-main
-python -m fratfinder_crawler.cli run-adaptive --source-slug sigma-chi-main --runtime-mode adaptive_shadow --policy-mode live
-python -m fratfinder_crawler.cli run-adaptive --source-slug sigma-chi-main --runtime-mode adaptive_assisted --policy-mode train
+python -m fratfinder_crawler.cli run --source-slug sigma-chi-main --runtime-mode adaptive_assisted --policy-mode live
+python -m fratfinder_crawler.cli run --source-slug sigma-chi-main --runtime-mode adaptive_shadow --policy-mode train
+python -m fratfinder_crawler.cli doctor
 ```
 
 Inspect adaptive crawl telemetry and policy summaries:
@@ -164,21 +164,21 @@ python -m fratfinder_crawler.cli adaptive-policy-diff --snapshot-a 101 --snapsho
 
 Agentic RL tuning env vars (V2.1):
 
-- `Agent:ADAPTIVE_LIVE_EPSILON` (default `0.02`)
-- `Agent:ADAPTIVE_TRAIN_EPSILON` (default `0.12`)
-- `Agent:ADAPTIVE_REWARD_GAMMA` (default `0.85`)
-- `Agent:ADAPTIVE_TRACE_HOPS` (default `4`)
-- `Agent:ADAPTIVE_REPLAY_WINDOW_DAYS` (default `7`)
-- `Agent:ADAPTIVE_REPLAY_BATCH_SIZE` (default `500`)
-- `Agent:ADAPTIVE_EVAL_ENRICHMENT_LIMIT_PER_SOURCE` (default `120`)
-- `Agent:FIELD_JOB_RUNTIME_MODE` (default `legacy`, options: `legacy`, `langgraph_shadow`, `langgraph_primary`)
-- `Agent:FIELD_JOB_GRAPH_DURABILITY` (default `sync`, options: `exit`, `async`, `sync`)
-- `Agent:ADAPTIVE_EVAL_ENRICHMENT_WORKERS` (default `4`)
-- `Agent:ADAPTIVE_EVAL_ENRICHMENT_RUN_PREFLIGHT` (default `true`)
-- `Agent:ADAPTIVE_EVAL_ENRICHMENT_REQUIRE_HEALTHY_SEARCH` (default `true`)
-- `Agent:ADAPTIVE_RISK_TIMEOUT_WEIGHT` (default `0.75`)
-- `Agent:ADAPTIVE_RISK_REQUEUE_WEIGHT` (default `0.35`)
-- `Agent:ADAPTIVE_BALANCED_KPI_WEIGHTS` (default `{"coverage":0.45,"throughput":0.2,"queue":0.2,"reliability":0.15}`)
+- `CRAWLER_ADAPTIVE_LIVE_EPSILON` (default `0.02`)
+- `CRAWLER_ADAPTIVE_TRAIN_EPSILON` (default `0.12`)
+- `CRAWLER_ADAPTIVE_REWARD_GAMMA` (default `0.85`)
+- `CRAWLER_ADAPTIVE_TRACE_HOPS` (default `4`)
+- `CRAWLER_ADAPTIVE_REPLAY_WINDOW_DAYS` (default `7`)
+- `CRAWLER_ADAPTIVE_REPLAY_BATCH_SIZE` (default `500`)
+- `CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_LIMIT_PER_SOURCE` (default `120`)
+- `CRAWLER_FIELD_JOB_RUNTIME_MODE` (default `langgraph_primary`, options: `langgraph_primary`)
+- `CRAWLER_FIELD_JOB_GRAPH_DURABILITY` (default `sync`, options: `exit`, `async`, `sync`)
+- `CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_WORKERS` (default `4`)
+- `CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_RUN_PREFLIGHT` (default `true`)
+- `CRAWLER_ADAPTIVE_EVAL_ENRICHMENT_REQUIRE_HEALTHY_SEARCH` (default `true`)
+- `CRAWLER_ADAPTIVE_RISK_TIMEOUT_WEIGHT` (default `0.75`)
+- `CRAWLER_ADAPTIVE_RISK_REQUEUE_WEIGHT` (default `0.35`)
+- `CRAWLER_ADAPTIVE_BALANCED_KPI_WEIGHTS` (default `{"coverage":0.45,"throughput":0.2,"queue":0.2,"reliability":0.15}`)
 - `CRAWLER_FRONTIER_HIGH_YIELD_RECORD_THRESHOLD` (default `60`)
 - `CRAWLER_FRONTIER_MIN_PAGES_FOR_HIGH_YIELD_STOP` (default `2`)
 
@@ -195,13 +195,14 @@ When chapter website, email, or Instagram data is not present on the national so
 Relevant env settings:
 
 - `CRAWLER_SEARCH_ENABLED=true` enables search-backed enrichment for missing fields.
-- `CRAWLER_SEARCH_PROVIDER=auto` is now the recommended default: it starts with SearXNG (`searxng_json`) when configured, then uses the free-provider order (`tavily_api -> serper_api -> duckduckgo_html -> bing_html -> brave_html`), and inserts `brave_api` early when a Brave API key is present.
-- `CRAWLER_SEARCH_PROVIDER=auto_free` remains available for a strict free-only chain (`searxng_json -> tavily_api -> serper_api -> duckduckgo_html -> bing_html -> brave_html`) and skips providers that are not configured.
+- `CRAWLER_SEARCH_PROVIDER=auto` is the recommended default: it starts with SearXNG (`searxng_json`) when configured, then follows the configured free-provider order.
+- The recommended free chain is `searxng_json -> duckduckgo_html -> bing_html`. This keeps the local SearXNG instance first while still falling through cleanly when it is temporarily unavailable.
+- `CRAWLER_SEARCH_PROVIDER=auto_free` remains available for the same free-only chain and skips providers that are not configured.
 - `CRAWLER_SEARCH_PROVIDER=bing_html` remains available for explicit local-only testing when you want to bypass Brave.
 - `CRAWLER_SEARCH_PROVIDER_ORDER_FREE` overrides the `auto_free` chain when you need custom ordering.
 - `CRAWLER_SEARCH_SEARXNG_BASE_URL` points to a SearXNG JSON endpoint (for example `http://localhost:8888`).
 - `CRAWLER_SEARCH_SEARXNG_ENGINES` optionally pins SearXNG engines per query.
-- `CRAWLER_SEARCH_TAVILY_API_KEY` and `CRAWLER_SEARCH_SERPER_API_KEY` enable free-tier API fallbacks behind SearXNG.
+- `CRAWLER_SEARCH_TAVILY_API_KEY` and `CRAWLER_SEARCH_SERPER_API_KEY` remain available as explicit opt-in providers when you want to expand beyond the default free chain.
 - `CRAWLER_SEARCH_MIN_REQUEST_INTERVAL_MS` enables lightweight per-worker pacing between search requests (set this above `0` when providers start challenging high-frequency traffic).
 - `CRAWLER_SEARCH_PROVIDER_PACING_MS_*` applies provider-specific pacing overrides (`SEARXNG_JSON`, `TAVILY_API`, `SERPER_API`, `DUCKDUCKGO_HTML`, `BING_HTML`, `BRAVE_HTML`) without changing global pacing.
 - `CRAWLER_SEARCH_NEGATIVE_COOLDOWN_DAYS` controls how long Bing-backed jobs cool down after a clean no-result pass so hopeless chapters do not get reprocessed every day.

@@ -520,6 +520,82 @@ def test_request_graph_runs_enrichment_cycle_until_queue_drains():
     assert request_repository.provider_health_snapshots[0]["provider"] == "searxng_json"
 
 
+def test_request_graph_persists_provider_specific_health_not_just_batch_health():
+    request = _request()
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 1, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_email", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_instagram", "queued": 0, "running": 0, "done": 0, "failed": 0},
+    ]
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 778,
+            "status": "succeeded",
+            "pages_processed": 5,
+            "records_seen": 4,
+            "records_upserted": 4,
+            "review_items_created": 0,
+            "field_jobs_created": 1,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    def process_field_jobs(**_: object) -> dict[str, int]:
+        request_repository.field_snapshots["alpha-main"] = [
+            {"field": "find_website", "queued": 0, "running": 0, "done": 1, "failed": 0},
+            {"field": "find_email", "queued": 0, "running": 0, "done": 0, "failed": 0},
+            {"field": "find_instagram", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        ]
+        return {"processed": 1, "requeued": 0, "failed_terminal": 0, "runtime_mode_used": "langgraph_primary"}
+
+    runtime = _build_runtime(
+        request_repository,
+        _FakeCrawlerRepository(),
+        run_crawl=run_crawl,
+        process_field_jobs=process_field_jobs,
+        search_preflight=lambda: {
+            "healthy": True,
+            "min_success_rate": 0.25,
+            "provider_health": {
+                "searxng_json": {
+                    "attempts": 4,
+                    "successes": 0,
+                    "request_error": 4,
+                    "unavailable": 0,
+                    "low_signal": 0,
+                    "challenge_or_anomaly": 0,
+                    "success_rate": 0.0,
+                },
+                "bing_html": {
+                    "attempts": 4,
+                    "successes": 2,
+                    "request_error": 0,
+                    "unavailable": 0,
+                    "low_signal": 0,
+                    "challenge_or_anomaly": 0,
+                    "success_rate": 0.5,
+                },
+            },
+        },
+    )
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert len(request_repository.provider_health_snapshots) == 2
+    searxng_snapshot = request_repository.provider_health_snapshots[0]
+    bing_snapshot = request_repository.provider_health_snapshots[1]
+    assert searxng_snapshot["provider"] == "searxng_json"
+    assert searxng_snapshot["healthy"] is False
+    assert searxng_snapshot["payload"]["provider_healthy"] is False
+    assert searxng_snapshot["payload"]["provider_health_reason"] == "request_error_only"
+    assert searxng_snapshot["payload"]["batch_healthy"] is True
+    assert bing_snapshot["provider"] == "bing_html"
+    assert bing_snapshot["healthy"] is True
+    assert bing_snapshot["payload"]["provider_healthy"] is True
+    assert bing_snapshot["payload"]["provider_health_reason"] == "meets_success_threshold"
+
+
 def test_request_graph_completes_when_only_deferred_queue_remains():
     request = _request()
     request_repository = _FakeRequestRepository(request)
@@ -742,7 +818,7 @@ def test_request_graph_completes_early_when_small_residual_queue_stalls_even_if_
     assert summary["queueRemaining"] == 14
 
 
-def test_request_graph_retries_zero_record_v3_crawl_with_alternate_policy():
+def test_request_graph_zero_record_v3_crawl_routes_to_source_recovery_without_runtime_downgrade():
     request = _request()
     request_repository = _FakeRequestRepository(request)
     request_repository.field_snapshots["alpha-main"] = [
@@ -755,26 +831,15 @@ def test_request_graph_retries_zero_record_v3_crawl_with_alternate_policy():
     def run_crawl(**kwargs: object) -> dict[str, object]:
         runtime_mode = str(kwargs["runtime_mode"])
         crawl_runtime_calls.append(runtime_mode)
-        if runtime_mode == "adaptive_primary":
-            request_repository.latest_crawl_runs["alpha-main"] = {
-                "id": 901,
-                "status": "succeeded",
-                "pages_processed": 4,
-                "records_seen": 0,
-                "records_upserted": 0,
-                "review_items_created": 0,
-                "field_jobs_created": 0,
-            }
-        else:
-            request_repository.latest_crawl_runs["alpha-main"] = {
-                "id": 902,
-                "status": "succeeded",
-                "pages_processed": 2,
-                "records_seen": 3,
-                "records_upserted": 3,
-                "review_items_created": 0,
-                "field_jobs_created": 0,
-            }
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 901,
+            "status": "succeeded",
+            "pages_processed": 4,
+            "records_seen": 0,
+            "records_upserted": 0,
+            "review_items_created": 0,
+            "field_jobs_created": 0,
+        }
         return {"runtime_mode": runtime_mode}
 
     runtime = RequestSupervisorGraphRuntime(
@@ -782,7 +847,7 @@ def test_request_graph_retries_zero_record_v3_crawl_with_alternate_policy():
         crawler_repository=_FakeCrawlerRepository(),
         worker_id="test-worker",
         runtime_mode="v3_request_supervisor",
-        crawl_runtime_mode="adaptive_primary",
+        crawl_runtime_mode="adaptive_assisted",
         field_job_runtime_mode="langgraph_primary",
         field_job_graph_durability="sync",
         free_recovery_attempts=3,
@@ -795,11 +860,11 @@ def test_request_graph_retries_zero_record_v3_crawl_with_alternate_policy():
 
     summary = runtime.run(request.id)
 
-    assert crawl_runtime_calls == ["adaptive_primary", "adaptive_assisted"]
-    assert summary["status"] == "succeeded"
-    assert summary["crawlRuntimeModeUsed"] == "adaptive_assisted"
-    assert request_repository.request.progress["crawlRun"]["recordsSeen"] == 3
-    assert any(event_type == "runtime_retry" for event_type, _ in request_repository.events)
+    assert crawl_runtime_calls == ["adaptive_assisted"]
+    assert summary["status"] == "paused"
+    assert summary["terminalReason"] == "awaiting_confirmation"
+    assert request_repository.request.progress["crawlRun"]["recordsSeen"] == 0
+    assert not any(event_type == "runtime_retry" for event_type, _ in request_repository.events)
 
 
 def test_request_graph_passes_crawl_policy_version_to_v3_crawl():

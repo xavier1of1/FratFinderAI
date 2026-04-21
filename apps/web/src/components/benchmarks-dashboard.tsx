@@ -63,7 +63,7 @@ type BenchmarkFormState = {
   limitPerCycle: number;
   cycles: number;
   pauseMs: number;
-  fieldJobRuntimeMode: "legacy" | "langgraph_shadow" | "langgraph_primary";
+  fieldJobRuntimeMode: "langgraph_primary";
   fieldJobGraphDurability: "exit" | "async" | "sync";
 };
 
@@ -217,6 +217,32 @@ async function fetchBenchmarkAlerts(params: {
 
   return payload.data;
 }
+
+async function fetchBenchmarkCounts(): Promise<{
+  total: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+}> {
+  const response = await fetch("/api/benchmarks/summary", { cache: "no-store" });
+  const payload = (await response.json()) as ApiEnvelope<{
+    total: number;
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  }>;
+
+  if (!response.ok || !payload.success) {
+    if (!payload.success) {
+      throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    }
+    throw new Error(`Failed to fetch benchmark summary: ${response.status}`);
+  }
+
+  return payload.data;
+}
 async function fetchBenchmarkAlertSummary(): Promise<BenchmarkAlertSummary> {
   const response = await fetch("/api/benchmarks/alerts/summary", { cache: "no-store" });
   const payload = (await response.json()) as ApiEnvelope<BenchmarkAlertSummary>;
@@ -273,14 +299,23 @@ async function fetchGraphRunDetail(runId: number): Promise<FieldJobGraphRunDetai
 export function BenchmarksDashboard({
   initialBenchmarks,
   initialRuns,
-  activeCampaignCount = 0
+  activeCampaignCount = 0,
+  summaryCounts
 }: {
   initialBenchmarks: BenchmarkRunListItem[];
   initialRuns: CrawlRunListItem[];
   activeCampaignCount?: number;
+  summaryCounts: {
+    total: number;
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  };
 }) {
   const [benchmarks, setBenchmarks] = useState<BenchmarkRunListItem[]>(sortBenchmarks(initialBenchmarks));
   const [crawlRuns, setCrawlRuns] = useState<CrawlRunListItem[]>(initialRuns);
+  const [counts, setCounts] = useState(summaryCounts);
   const [adaptiveEpochs, setAdaptiveEpochs] = useState<AdaptiveEpochMetric[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialBenchmarks[0]?.id ?? null);
   const [selectedDetail, setSelectedDetail] = useState<BenchmarkRunDetailResponse | null>(null);
@@ -304,7 +339,7 @@ export function BenchmarksDashboard({
     limitPerCycle: 24,
     cycles: 6,
     pauseMs: 500,
-    fieldJobRuntimeMode: "legacy",
+    fieldJobRuntimeMode: "langgraph_primary",
     fieldJobGraphDurability: "sync"
   });
 
@@ -320,24 +355,23 @@ export function BenchmarksDashboard({
     return benchmarks.find((item) => item.id === selectedId) ?? benchmarks[0] ?? null;
   }, [benchmarks, selectedId]);
 
-  const runningCount = useMemo(
-    () => benchmarks.filter((item) => item.status === "running" || item.status === "queued").length,
-    [benchmarks]
-  );
+  const runningCount = counts.queued + counts.running;
 
   async function refreshBenchmarkList(options?: { selectNewest?: boolean }) {
     setIsRefreshing(true);
     try {
-      const [benchmarkData, runData, epochData, alertSummary] = await Promise.all([
+      const [benchmarkData, runData, epochData, alertSummary, countsData] = await Promise.all([
         fetchBenchmarks(),
         fetchCrawlRuns(),
         fetchAdaptiveEpochs(),
         fetchBenchmarkAlertSummary(),
+        fetchBenchmarkCounts(),
       ]);
       setBenchmarks(benchmarkData);
       setCrawlRuns(runData);
       setAdaptiveEpochs(epochData);
       setGlobalAlertSummary(alertSummary);
+      setCounts(countsData);
 
       const selectedStillExists = selectedId ? benchmarkData.some((item) => item.id === selectedId) : false;
       if (options?.selectNewest && benchmarkData[0]) {
@@ -401,7 +435,7 @@ export function BenchmarksDashboard({
           fetchGraphRuns({
             sourceSlug: benchmark.sourceSlug,
             fieldName: benchmark.fieldName,
-            runtimeMode: benchmark.config.fieldJobRuntimeMode ?? "legacy",
+            runtimeMode: benchmark.config.fieldJobRuntimeMode ?? "langgraph_primary",
           }),
           fetchBenchmarkAlerts({
             benchmarkRunId: benchmark.id,
@@ -638,7 +672,7 @@ export function BenchmarksDashboard({
         <div className="heroGrid">
           <div>
             <div className="metrics">
-              <MetricCard label="Saved Benchmarks" value={benchmarks.length} />
+              <MetricCard label="Saved Benchmarks" value={counts.total} />
               <MetricCard label="Running / Queued" value={runningCount} />
               <MetricCard label="Active Campaigns" value={activeCampaignCount} />
               <MetricCard label="Latest Throughput" value={summary ? `${formatNumber(summary.jobsPerMinute, 1)} jobs/min` : "n/a"} />
@@ -777,12 +811,10 @@ export function BenchmarksDashboard({
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    fieldJobRuntimeMode: event.target.value as "legacy" | "langgraph_shadow" | "langgraph_primary"
+                    fieldJobRuntimeMode: event.target.value as "langgraph_primary"
                   }))
                 }
               >
-                <option value="legacy">legacy</option>
-                <option value="langgraph_shadow">langgraph_shadow</option>
                 <option value="langgraph_primary">langgraph_primary</option>
               </select>
             </div>

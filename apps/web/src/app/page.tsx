@@ -3,13 +3,12 @@ import { PageIntro } from "@/components/page-intro";
 import { StatusPill } from "@/components/status-pill";
 import { TagPill } from "@/components/tag-pill";
 import { APP_VERSION_LABEL } from "@/lib/platform-version";
-import type { AgentOpsSummary, CampaignRun, ChapterListItem, CrawlRunListItem, FieldJobListItem, ReviewItemListItem } from "@/lib/types";
+import type { AgentOpsSummary, CrawlRunListItem } from "@/lib/types";
 import { getAgentOpsSummary } from "@/lib/repositories/agent-ops-repository";
-import { listCampaignRuns } from "@/lib/repositories/campaign-run-repository";
-import { listChapters } from "@/lib/repositories/chapter-repository";
-import { listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
-import { listFieldJobs } from "@/lib/repositories/field-job-repository";
-import { listReviewItems } from "@/lib/repositories/review-item-repository";
+import { getCampaignRunCounts } from "@/lib/repositories/campaign-run-repository";
+import { getChapterListMetadata } from "@/lib/repositories/chapter-repository";
+import { getCrawlRunCounts, listCrawlRuns } from "@/lib/repositories/crawl-run-repository";
+import { getReviewItemStatusCounts } from "@/lib/repositories/review-item-repository";
 
 const pageGuide = [
   {
@@ -57,16 +56,18 @@ const pageGuide = [
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [chapters, runs, reviewItems, fieldJobs, campaigns, agentOps] = await Promise.all([
-    listChapters({ limit: 5, offset: 0 }) as Promise<ChapterListItem[]>,
-    listCrawlRuns(8) as Promise<CrawlRunListItem[]>,
-    listReviewItems(8) as Promise<ReviewItemListItem[]>,
-    listFieldJobs(8) as Promise<FieldJobListItem[]>,
-    listCampaignRuns(8) as Promise<CampaignRun[]>,
+  const [chapterMetadata, runs, crawlRunCounts, reviewCounts, campaignCounts, agentOps] = await Promise.all([
+    getChapterListMetadata({}),
+    listCrawlRuns(1) as Promise<CrawlRunListItem[]>,
+    getCrawlRunCounts(),
+    getReviewItemStatusCounts(),
+    getCampaignRunCounts(),
     getAgentOpsSummary() as Promise<AgentOpsSummary>
   ]);
 
   const latestRun = runs[0];
+  const activeCampaigns = campaignCounts.queued + campaignCounts.running;
+  const queueHealthy = agentOps.fieldJobsActionable === 0 || agentOps.fieldJobWorkerAlertOpen === 0;
 
   return (
     <div className="sectionStack">
@@ -75,25 +76,48 @@ export default async function OverviewPage() {
         title={`${APP_VERSION_LABEL} command center for sourcing, agents, and review`}
         description={`Use this page to get your bearings fast: whether the ${APP_VERSION_LABEL} worker queue is healthy, how much data is loaded, and where operator attention is needed next.`}
         meta={[
-          `${chapters.length} preview chapters`,
-          `${runs.length} recent runs`,
-          `${campaigns.filter((item) => item.status === "running" || item.status === "queued").length} active campaigns`,
-          agentOps.requestQueueQueued === 0 && agentOps.requestQueueRunning === 0 ? `${APP_VERSION_LABEL} queue clear` : `${APP_VERSION_LABEL} queue active`
+          `${chapterMetadata.totalCount} total chapters`,
+          `${crawlRunCounts.total} total crawl runs`,
+          `${activeCampaigns} active campaigns`,
+          queueHealthy ? `${APP_VERSION_LABEL} queue healthy` : `${APP_VERSION_LABEL} queue needs attention`
         ]}
       />
 
       <section className="panel">
         <h2>System Snapshot</h2>
+        <p className="sectionDescription">These cards are sourced from aggregate backend queries, not preview-list lengths, so they reflect the real system state.</p>
         <div className="metrics">
-          <MetricCard label="Chapters" value={chapters.length} />
-          <MetricCard label="Recent Runs" value={runs.length} />
-          <MetricCard label="Campaigns" value={campaigns.length} />
-          <MetricCard label="Open Reviews" value={reviewItems.filter((item) => item.status === "open").length} />
-          <MetricCard label="Queued Jobs" value={fieldJobs.filter((item) => item.status === "queued").length} />
-          <MetricCard label="V3 Graph Runs" value={agentOps.graphRunsTotal} />
+          <MetricCard label="Total Chapters" value={agentOps.accuracyRecovery.totalChapters} />
+          <MetricCard label="Complete Rows" value={agentOps.accuracyRecovery.completeRows} />
+          <MetricCard label="Active Rows With Any Contact" value={agentOps.accuracyRecovery.activeRowsWithAnyContact} />
+          <MetricCard label="Open Reviews" value={reviewCounts.open} />
+          <MetricCard label="Total Crawl Runs" value={crawlRunCounts.total} />
+          <MetricCard label="Active Campaigns" value={activeCampaigns} />
+          <MetricCard label="Queued Field Jobs" value={agentOps.fieldJobsQueued} />
+          <MetricCard label="Actionable Field Jobs" value={agentOps.fieldJobsActionable} />
           <MetricCard label="Queued Requests" value={agentOps.requestQueueQueued} />
           <MetricCard label="Provisional Chapters" value={agentOps.provisionalOpen} />
         </div>
+      </section>
+
+      <section className="panel">
+        <h2>Accuracy And Queue Health</h2>
+        <div className="metrics">
+          <MetricCard label="Chapter-Specific Contact Rows" value={agentOps.accuracyRecovery.chapterSpecificContactRows} />
+          <MetricCard label="Nationals-Only Contact Rows" value={agentOps.accuracyRecovery.nationalsOnlyContactRows} />
+          <MetricCard label="Validated Inactive Rows" value={agentOps.accuracyRecovery.inactiveValidatedRows} />
+          <MetricCard label="Confirmed-Absent Websites" value={agentOps.accuracyRecovery.confirmedAbsentWebsiteRows} />
+          <MetricCard label="Blocked Provider Jobs" value={agentOps.fieldJobsBlockedProvider} />
+          <MetricCard label="Blocked Dependency Jobs" value={agentOps.fieldJobsBlockedDependency} />
+          <MetricCard label="Repair Backlog" value={agentOps.fieldJobsRepairBacklog} />
+          <MetricCard label="Field Workers Active" value={agentOps.fieldJobWorkersActive} />
+        </div>
+        <p>
+          <StatusPill status={queueHealthy ? "healthy" : "warning"} /> <span className="muted"> Queue:</span>{" "}
+          {queueHealthy
+            ? "actionable work is covered by active workers or there is no hot backlog."
+            : "actionable work exists without enough active workers, so the operator alert path is open."}
+        </p>
       </section>
 
       <section className="panel">

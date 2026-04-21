@@ -88,7 +88,7 @@ const DEFAULT_CONFIG: CampaignRunConfig = {
   autoTuningEnabled: true,
   controlFraternitySlugs: [],
   programMode: "standard",
-  runtimeMode: "adaptive_primary",
+  runtimeMode: "adaptive_assisted",
   fieldJobRuntimeMode: "langgraph_primary",
   frozenSourceSlugs: [],
   trainingRounds: 3,
@@ -125,6 +125,42 @@ const EMPTY_SUMMARY: CampaignRunSummary = {
   checkpointCount: 0
 };
 
+export async function getCampaignRunCounts(): Promise<{
+  total: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+}> {
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{
+    total: string | number;
+    queued: string | number;
+    running: string | number;
+    succeeded: string | number;
+    failed: string | number;
+  }>(
+    `
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'queued')::int AS queued,
+        COUNT(*) FILTER (WHERE status = 'running')::int AS running,
+        COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+      FROM campaign_runs
+    `
+  );
+
+  const row = rows[0];
+  return {
+    total: Number(row?.total ?? 0),
+    queued: Number(row?.queued ?? 0),
+    running: Number(row?.running ?? 0),
+    succeeded: Number(row?.succeeded ?? 0),
+    failed: Number(row?.failed ?? 0)
+  };
+}
+
 function normalizeConfig(config: unknown): CampaignRunConfig {
   if (!config || typeof config !== "object") {
     return { ...DEFAULT_CONFIG };
@@ -156,18 +192,11 @@ function normalizeConfig(config: unknown): CampaignRunConfig {
       : DEFAULT_CONFIG.controlFraternitySlugs,
     programMode: value.programMode === "v4_rl_improvement" ? "v4_rl_improvement" : DEFAULT_CONFIG.programMode,
     runtimeMode:
-      value.runtimeMode === "legacy" ||
       value.runtimeMode === "adaptive_shadow" ||
-      value.runtimeMode === "adaptive_assisted" ||
-      value.runtimeMode === "adaptive_primary"
+      value.runtimeMode === "adaptive_assisted"
         ? value.runtimeMode
         : DEFAULT_CONFIG.runtimeMode,
-    fieldJobRuntimeMode:
-      value.fieldJobRuntimeMode === "legacy" ||
-      value.fieldJobRuntimeMode === "langgraph_shadow" ||
-      value.fieldJobRuntimeMode === "langgraph_primary"
-        ? value.fieldJobRuntimeMode
-        : DEFAULT_CONFIG.fieldJobRuntimeMode,
+    fieldJobRuntimeMode: value.fieldJobRuntimeMode === "langgraph_primary" ? value.fieldJobRuntimeMode : DEFAULT_CONFIG.fieldJobRuntimeMode,
     frozenSourceSlugs: Array.isArray(value.frozenSourceSlugs)
       ? value.frozenSourceSlugs.map((item) => String(item).trim()).filter(Boolean)
       : DEFAULT_CONFIG.frozenSourceSlugs,

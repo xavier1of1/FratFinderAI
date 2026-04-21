@@ -181,6 +181,50 @@ export async function listFraternityCrawlRequests(limit = 100): Promise<Fraterni
   return rows.map((row) => mapRequestRow(row, eventsByRequestId.get(row.id) ?? []));
 }
 
+export async function getFraternityCrawlRequestCounts(): Promise<{
+  total: number;
+  draft: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  canceled: number;
+}> {
+  const dbPool = getDbPool();
+  const { rows } = await dbPool.query<{
+    total: string | number;
+    draft: string | number;
+    queued: string | number;
+    running: string | number;
+    succeeded: string | number;
+    failed: string | number;
+    canceled: string | number;
+  }>(
+    `
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'draft')::int AS draft,
+        COUNT(*) FILTER (WHERE status = 'queued')::int AS queued,
+        COUNT(*) FILTER (WHERE status = 'running')::int AS running,
+        COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+        COUNT(*) FILTER (WHERE status = 'canceled')::int AS canceled
+      FROM fraternity_crawl_requests
+    `
+  );
+
+  const row = rows[0];
+  return {
+    total: Number(row?.total ?? 0),
+    draft: Number(row?.draft ?? 0),
+    queued: Number(row?.queued ?? 0),
+    running: Number(row?.running ?? 0),
+    succeeded: Number(row?.succeeded ?? 0),
+    failed: Number(row?.failed ?? 0),
+    canceled: Number(row?.canceled ?? 0)
+  };
+}
+
 export async function getFraternityCrawlRequest(id: string): Promise<FraternityCrawlRequest | null> {
   const dbPool = getDbPool();
   const { rows } = await dbPool.query<FraternityCrawlRequestRow>(
