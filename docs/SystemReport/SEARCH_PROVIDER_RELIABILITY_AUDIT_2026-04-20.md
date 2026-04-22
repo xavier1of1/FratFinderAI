@@ -4,6 +4,18 @@ Date: `2026-04-20`
 
 Primary question: should FratFinderAI preserve and fix the current search-provider stack, or replace it with a new solution?
 
+## Implementation Update
+
+As of `2026-04-21`, the codebase now includes:
+
+- provider-specific attempt telemetry persisted in a normalized `search_provider_attempts` table
+- endpoint-aware SearXNG attempt metadata including `provider_endpoint`, `latency_ms`, and `http_status`
+- `CRAWLER_SEARCH_SEARXNG_BASE_URLS` support for ordered multi-endpoint failover
+- a canonical provider catalog that keeps `serper_api`, `tavily_api`, `brave_api`, and `dataforseo_api` opt-in only
+- a `search-provider-smoke` CLI for isolated provider evaluation
+
+This audit remains directionally valid, but readers should interpret older telemetry caveats in light of those newer implementation changes.
+
 ## Executive Summary
 
 The short answer is:

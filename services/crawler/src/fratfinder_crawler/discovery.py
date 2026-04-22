@@ -1201,6 +1201,9 @@ def discover_source(
         for query in queries:
             try:
                 results = search_client.search(query, max_results=max_candidates)
+                consume_attempts = getattr(search_client, "consume_last_provider_attempts", None)
+                provider_attempts = list(consume_attempts()) if callable(consume_attempts) else []
+                _persist_discovery_provider_attempts(repository, provider_attempts, query=query, fraternity_slug=slug)
                 raw_results.extend(results)
             except Exception as exc:
                 provider_attempts: list[dict[str, Any]] = []
@@ -1210,6 +1213,7 @@ def discover_source(
                         provider_attempts = list(consume_attempts())
                     except Exception:
                         provider_attempts = []
+                _persist_discovery_provider_attempts(repository, provider_attempts, query=query, fraternity_slug=slug)
                 trace.append(
                     {
                         "step": "search_query_error",
@@ -1447,4 +1451,46 @@ def discover_source(
         selected_candidate_rationale=selected_candidate_rationale,
         resolution_trace=trace,
     )
+
+
+def _persist_discovery_provider_attempts(
+    repository: DiscoveryRepository | None,
+    provider_attempts: list[dict[str, Any]],
+    *,
+    query: str,
+    fraternity_slug: str,
+) -> None:
+    if repository is None or not provider_attempts:
+        return
+    insert_many = getattr(repository, "insert_search_provider_attempts", None)
+    if not callable(insert_many):
+        return
+    try:
+        insert_many(
+            [
+                {
+                    "context_type": "crawl",
+                    "context_id": "source_discovery",
+                    "request_id": None,
+                    "source_slug": fraternity_slug,
+                    "field_job_id": None,
+                    "provider": attempt.get("provider"),
+                    "provider_endpoint": attempt.get("provider_endpoint"),
+                    "query": query,
+                    "status": attempt.get("status"),
+                    "failure_type": attempt.get("failure_type"),
+                    "http_status": attempt.get("http_status"),
+                    "latency_ms": attempt.get("latency_ms"),
+                    "result_count": attempt.get("result_count"),
+                    "fallback_taken": bool(attempt.get("fallback_taken", False)),
+                    "metadata": {
+                        "providerContext": "source_discovery",
+                        "circuitOpen": bool(attempt.get("circuit_open", False)),
+                    },
+                }
+                for attempt in provider_attempts
+            ]
+        )
+    except Exception:  # pragma: no cover - additive telemetry should not break source discovery
+        return
 

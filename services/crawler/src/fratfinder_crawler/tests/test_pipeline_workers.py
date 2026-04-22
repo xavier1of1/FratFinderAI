@@ -889,7 +889,7 @@ def test_throughput_helper_provider_window_logic_reorders_and_detects_degradatio
         },
     }
 
-    assert _provider_order_from_settings(settings) == ["searxng_json", "serper_api", "bing_html", "duckduckgo_html"]
+    assert _provider_order_from_settings(settings) == ["searxng_json", "bing_html", "duckduckgo_html"]
     reordered = _reorder_search_settings_from_window(settings, snapshot, min_success_rate=0.25)
     assert _provider_order_from_settings(reordered)[:2] == ["bing_html", "duckduckgo_html"]
     assert not _all_attempted_providers_below_threshold(snapshot, settings, min_success_rate=0.25)

@@ -7,6 +7,8 @@ from pathlib import Path
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fratfinder_crawler.provider_catalog import canonical_free_provider_order_csv
+
 
 _REPO_MARKERS = ("pnpm-workspace.yaml", ".git")
 
@@ -91,7 +93,7 @@ class Settings(BaseSettings):
     crawler_search_enabled: bool = Field(default=True, alias="CRAWLER_SEARCH_ENABLED")
     crawler_search_provider: str = Field(default="auto", alias="CRAWLER_SEARCH_PROVIDER")
     crawler_search_provider_order_free: str = Field(
-        default="searxng_json,duckduckgo_html,bing_html",
+        default=canonical_free_provider_order_csv(),
         alias="CRAWLER_SEARCH_PROVIDER_ORDER_FREE",
     )
     crawler_search_max_results: int = Field(default=5, alias="CRAWLER_SEARCH_MAX_RESULTS")
@@ -135,9 +137,14 @@ class Settings(BaseSettings):
     crawler_search_instagram_enable_handle_queries: bool = Field(default=True, alias="CRAWLER_SEARCH_INSTAGRAM_ENABLE_HANDLE_QUERIES")
     crawler_search_instagram_direct_probe_enabled: bool = Field(default=False, alias="CRAWLER_SEARCH_INSTAGRAM_DIRECT_PROBE_ENABLED")
     crawler_search_searxng_base_url: str | None = Field(default=None, alias="CRAWLER_SEARCH_SEARXNG_BASE_URL")
+    crawler_search_searxng_base_urls: str | None = Field(default=None, alias="CRAWLER_SEARCH_SEARXNG_BASE_URLS")
     crawler_search_searxng_engines: str | None = Field(default=None, alias="CRAWLER_SEARCH_SEARXNG_ENGINES")
     crawler_search_tavily_api_key: str | None = Field(default=None, alias="CRAWLER_SEARCH_TAVILY_API_KEY")
     crawler_search_serper_api_key: str | None = Field(default=None, alias="CRAWLER_SEARCH_SERPER_API_KEY")
+    crawler_search_dataforseo_login: str | None = Field(default=None, alias="CRAWLER_SEARCH_DATAFORSEO_LOGIN")
+    crawler_search_dataforseo_password: str | None = Field(default=None, alias="CRAWLER_SEARCH_DATAFORSEO_PASSWORD")
+    crawler_search_dataforseo_location_name: str = Field(default="United States", alias="CRAWLER_SEARCH_DATAFORSEO_LOCATION_NAME")
+    crawler_search_dataforseo_language_name: str = Field(default="English", alias="CRAWLER_SEARCH_DATAFORSEO_LANGUAGE_NAME")
     crawler_discovery_verified_min_confidence: float = Field(default=0.65, alias="CRAWLER_DISCOVERY_VERIFIED_MIN_CONFIDENCE")
     crawler_navigation_max_hops_per_stub: int = Field(default=2, alias="CRAWLER_NAV_MAX_HOPS_PER_STUB")
     crawler_navigation_max_pages_per_run: int = Field(default=60, alias="CRAWLER_NAV_MAX_PAGES_PER_RUN")

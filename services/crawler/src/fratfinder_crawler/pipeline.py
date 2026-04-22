@@ -40,6 +40,12 @@ from fratfinder_crawler.orchestration import (
     FieldJobSupervisorGraphRuntime,
     RequestSupervisorGraphRuntime,
 )
+from fratfinder_crawler.provider_catalog import (
+    PROVIDER_CATALOG,
+    canonical_free_provider_order,
+    normalize_free_provider_order,
+    provider_names,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -2742,8 +2748,6 @@ class CrawlService:
         query_pool = _SEARCH_PREFLIGHT_QUERIES
         probe_count = max(1, min(len(query_pool), probes or self._settings.crawler_search_preflight_probe_count))
         selected_queries = query_pool[:probe_count]
-        search_client = SearchClient(self._settings)
-
         successes = 0
         probe_outcomes: list[dict[str, object]] = []
         provider_health: dict[str, dict[str, object]] = {}
@@ -2754,34 +2758,53 @@ class CrawlService:
                 bucket = provider_health.setdefault(provider, _empty_provider_health_bucket())
                 _record_provider_attempt_in_bucket(bucket, attempt)
 
-        for query in selected_queries:
-            try:
-                results = search_client.search(query, max_results=min(3, self._settings.crawler_search_max_results))
-                provider_attempts = search_client.consume_last_provider_attempts()
-                success = len(results) > 0
-                if success:
-                    successes += 1
-                probe_outcomes.append(
-                    {
-                        "query": query,
-                        "success": success,
-                        "result_count": len(results),
-                        "provider_attempts": provider_attempts,
-                    }
-                )
-                record_provider_attempts(provider_attempts)
-            except (SearchUnavailableError, requests.RequestException) as exc:
-                provider_attempts = search_client.consume_last_provider_attempts()
-                probe_outcomes.append(
-                    {
-                        "query": query,
-                        "success": False,
-                        "result_count": 0,
-                        "error": str(exc),
-                        "provider_attempts": provider_attempts,
-                    }
-                )
-                record_provider_attempts(provider_attempts)
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            search_client = SearchClient(self._settings)
+            for query in selected_queries:
+                try:
+                    results = search_client.search(query, max_results=min(3, self._settings.crawler_search_max_results))
+                    provider_attempts = search_client.consume_last_provider_attempts()
+                    _persist_search_provider_attempts(
+                        repository,
+                        provider_attempts,
+                        context_type="preflight",
+                        context_id="search_preflight",
+                        source_slug=None,
+                        query=query,
+                    )
+                    success = len(results) > 0
+                    if success:
+                        successes += 1
+                    probe_outcomes.append(
+                        {
+                            "query": query,
+                            "success": success,
+                            "result_count": len(results),
+                            "provider_attempts": provider_attempts,
+                        }
+                    )
+                    record_provider_attempts(provider_attempts)
+                except (SearchUnavailableError, requests.RequestException) as exc:
+                    provider_attempts = search_client.consume_last_provider_attempts()
+                    _persist_search_provider_attempts(
+                        repository,
+                        provider_attempts,
+                        context_type="preflight",
+                        context_id="search_preflight",
+                        source_slug=None,
+                        query=query,
+                    )
+                    probe_outcomes.append(
+                        {
+                            "query": query,
+                            "success": False,
+                            "result_count": 0,
+                            "error": str(exc),
+                            "provider_attempts": provider_attempts,
+                        }
+                    )
+                    record_provider_attempts(provider_attempts)
 
         success_rate = successes / probe_count if probe_count else 0.0
         threshold = float(self._settings.crawler_search_preflight_min_success_rate)
@@ -3510,6 +3533,7 @@ class CrawlService:
 
     def doctor(self) -> dict[str, object]:
         warnings = list(settings_deprecation_warnings())
+        _, provider_order_warnings = normalize_free_provider_order(self._settings.crawler_search_provider_order_free)
         blocking_issues = self._runtime_configuration_issues()
         configured_crawl_runtime = str(self._settings.crawler_runtime_mode or "").strip().lower()
         configured_live_crawl_runtime = str(self._settings.crawler_v3_crawl_runtime_mode or "").strip().lower()
@@ -3535,6 +3559,7 @@ class CrawlService:
             warnings.append("`CRAWLER_V3_ENABLED` is no longer used to select the live execution path.")
         if self._settings.crawler_adaptive_enabled:
             warnings.append("`CRAWLER_ADAPTIVE_ENABLED` no longer gates live runtime selection; runtime choice is explicit.")
+        warnings.extend(provider_order_warnings)
         warnings.extend(blocking_issues)
 
         queue: dict[str, int] = {}
@@ -3553,6 +3578,11 @@ class CrawlService:
                 "appEnv": self._settings.app_env,
                 "searchProvider": self._settings.crawler_search_provider,
                 "searchProviderOrderFree": _provider_order_from_settings(self._settings),
+                "automaticChainProviders": provider_names(automatic_chain_allowed=True),
+                "optInOnlyProviders": [
+                    name for name, metadata in PROVIDER_CATALOG.items() if not metadata.automatic_chain_allowed and not metadata.deprecated
+                ],
+                "deprecatedProviders": [name for name, metadata in PROVIDER_CATALOG.items() if metadata.deprecated],
                 "crawlRuntimeMode": effective_crawl_runtime,
                 "liveRequestCrawlRuntimeMode": effective_live_crawl_runtime,
                 "fieldJobRuntimeMode": effective_field_job_runtime,
@@ -3578,39 +3608,156 @@ class CrawlService:
             "warnings": warnings,
         }
 
+    def search_provider_smoke(
+        self,
+        *,
+        provider: str,
+        query_set_file: str | None = None,
+        max_queries: int | None = None,
+        output_path: str | None = None,
+        delay_ms: int | None = None,
+    ) -> dict[str, object]:
+        normalized_provider = str(provider or "").strip().lower()
+        if normalized_provider not in PROVIDER_CATALOG:
+            raise ValueError(f"Unsupported smoke-test provider: {provider}")
+
+        queries = _load_search_provider_smoke_queries(query_set_file)
+        if max_queries is not None:
+            queries = queries[: max(1, int(max_queries))]
+        report = self._run_search_provider_smoke_cohort(
+            provider=normalized_provider,
+            queries=queries,
+            persist_context_id=f"search_provider_smoke:{normalized_provider}",
+            delay_ms=delay_ms,
+        )
+        baseline_provider = "bing_html" if normalized_provider != "bing_html" else "duckduckgo_html"
+        baseline_report = self._run_search_provider_smoke_cohort(
+            provider=baseline_provider,
+            queries=queries,
+            persist_context_id=None,
+            delay_ms=delay_ms,
+        )
+        gates = _search_provider_smoke_promotion_gates(report, baseline_report)
+        output = {
+            "captured_at": _utc_now_iso(),
+            "provider": normalized_provider,
+            "baselineProvider": baseline_provider,
+            "queryCount": len(queries),
+            "report": report,
+            "baseline": baseline_report,
+            "promotionGates": gates,
+        }
+        if output_path:
+            path = Path(output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
+            output["outputPath"] = str(path)
+        return output
+
+    def _run_search_provider_smoke_cohort(
+        self,
+        *,
+        provider: str,
+        queries: list[dict[str, str]],
+        persist_context_id: str | None,
+        delay_ms: int | None,
+    ) -> dict[str, object]:
+        smoke_settings = self._settings.model_copy(update={"crawler_search_provider": provider})
+        search_client = SearchClient(smoke_settings)
+        query_records: list[dict[str, object]] = []
+        all_attempts: list[dict[str, object]] = []
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            for item in queries:
+                category = str(item.get("category") or "unknown")
+                query = str(item.get("query") or "").strip()
+                if not query:
+                    continue
+                error_message: str | None = None
+                results: list[object] = []
+                try:
+                    results = search_client.search(query, max_results=min(5, smoke_settings.crawler_search_max_results))
+                except (SearchUnavailableError, requests.RequestException) as exc:
+                    error_message = str(exc)
+                provider_attempts = search_client.consume_last_provider_attempts()
+                all_attempts.extend(provider_attempts)
+                if persist_context_id is not None:
+                    _persist_search_provider_attempts(
+                        repository,
+                        provider_attempts,
+                        context_type="crawl",
+                        context_id=persist_context_id,
+                        source_slug=None,
+                        query=query,
+                        metadata={"category": category, "smokeProvider": provider},
+                    )
+                query_classification = _classify_smoke_query_results(results)
+                query_records.append(
+                    {
+                        "category": category,
+                        "query": query,
+                        "success": bool(results),
+                        "error": error_message,
+                        "resultCount": len(results),
+                        "providerAttempts": provider_attempts,
+                        "classifiers": query_classification,
+                        "topUrls": [getattr(result, "url", None) for result in results[:3]],
+                    }
+                )
+                if delay_ms and delay_ms > 0:
+                    time.sleep(max(0.0, float(delay_ms) / 1000.0))
+
+        return {
+            "provider": provider,
+            "queries": query_records,
+            "metrics": _summarize_search_provider_smoke_metrics(provider, query_records, all_attempts),
+        }
+
 
 
 def _provider_reachability(settings: Settings) -> dict[str, dict[str, object]]:
     reachability: dict[str, dict[str, object]] = {}
-    providers = list(dict.fromkeys([*_provider_order_from_settings(settings), "searxng_json", "serper_api", "tavily_api", "brave_api"]))
-    timeout = max(1.0, min(float(settings.crawler_http_timeout_seconds), 3.0))
+    providers = list(dict.fromkeys([*_provider_order_from_settings(settings), *provider_names()]))
+    timeout = max(1.0, min(float(settings.crawler_http_timeout_seconds), 4.0))
 
     for provider in providers:
-        payload: dict[str, object] = {"configured": True, "reachable": None, "detail": ""}
+        metadata = PROVIDER_CATALOG.get(provider)
+        payload: dict[str, object] = {
+            "configured": True,
+            "reachable": None,
+            "detail": "",
+            "providerKind": metadata.provider_kind if metadata else "unknown",
+            "automaticChainAllowed": bool(metadata.automatic_chain_allowed) if metadata else False,
+            "deprecated": bool(metadata.deprecated) if metadata else False,
+            "requiresKey": bool(metadata.requires_key) if metadata else False,
+        }
         if provider == "searxng_json":
-            base_url = str(settings.crawler_search_searxng_base_url or "").strip()
-            payload["configured"] = bool(base_url)
-            if not base_url:
+            endpoints = _searxng_endpoints_from_settings(settings)
+            payload["configured"] = bool(endpoints)
+            payload["endpoints"] = [_probe_searxng_endpoint(endpoint, settings, timeout=timeout) for endpoint in endpoints]
+            if not endpoints:
                 payload["detail"] = "not configured"
             else:
-                try:
-                    response = requests.get(
-                        f"{base_url.rstrip('/')}/search",
-                        params={"q": "fratfinder health check", "format": "json"},
-                        timeout=timeout,
-                        verify=settings.crawler_http_verify_ssl,
-                    )
-                    payload["reachable"] = response.status_code < 500
-                    payload["detail"] = f"search http {response.status_code}"
-                except requests.RequestException as exc:
-                    payload["reachable"] = False
-                    payload["detail"] = str(exc)
+                endpoints_payload = payload["endpoints"] if isinstance(payload.get("endpoints"), list) else []
+                healthy_endpoints = [item for item in endpoints_payload if bool(item.get("reachable"))]
+                payload["reachable"] = bool(healthy_endpoints)
+                payload["detail"] = (
+                    f"{len(healthy_endpoints)}/{len(endpoints_payload)} configured endpoint(s) reachable"
+                    if endpoints_payload
+                    else "not configured"
+                )
         elif provider == "serper_api":
             payload["configured"] = bool((settings.crawler_search_serper_api_key or "").strip())
             payload["detail"] = "api key configured" if payload["configured"] else "missing api key"
         elif provider == "tavily_api":
             payload["configured"] = bool((settings.crawler_search_tavily_api_key or "").strip())
             payload["detail"] = "api key configured" if payload["configured"] else "missing api key"
+        elif provider == "dataforseo_api":
+            payload["configured"] = bool((getattr(settings, "crawler_search_dataforseo_login", "") or "").strip()) and bool(
+                (getattr(settings, "crawler_search_dataforseo_password", "") or "").strip()
+            )
+            payload["detail"] = "credentials configured" if payload["configured"] else "missing login/password"
         elif provider == "brave_api":
             payload["configured"] = bool((settings.crawler_search_brave_api_key or "").strip())
             payload["detail"] = "api key configured" if payload["configured"] else "missing api key"
@@ -3618,6 +3765,124 @@ def _provider_reachability(settings: Settings) -> dict[str, dict[str, object]]:
             payload["detail"] = "public provider in fallback chain"
         reachability[provider] = payload
     return reachability
+
+
+def _persist_search_provider_attempts(
+    repository: CrawlerRepository,
+    provider_attempts: list[dict[str, object]],
+    *,
+    context_type: str,
+    context_id: str | None,
+    source_slug: str | None,
+    query: str | None,
+    request_id: str | None = None,
+    field_job_id: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    if not provider_attempts:
+        return
+    insert_many = getattr(repository, "insert_search_provider_attempts", None)
+    if not callable(insert_many):
+        return
+    try:
+        insert_many(
+            [
+                {
+                    "context_type": context_type,
+                    "context_id": context_id,
+                    "request_id": request_id,
+                    "source_slug": source_slug,
+                    "field_job_id": field_job_id,
+                    "provider": attempt.get("provider"),
+                    "provider_endpoint": attempt.get("provider_endpoint"),
+                    "query": query,
+                    "status": attempt.get("status"),
+                    "failure_type": attempt.get("failure_type"),
+                    "http_status": attempt.get("http_status"),
+                    "latency_ms": attempt.get("latency_ms"),
+                    "result_count": attempt.get("result_count"),
+                    "fallback_taken": bool(attempt.get("fallback_taken", False)),
+                    "metadata": {
+                        **dict(metadata or {}),
+                        "circuitOpen": bool(attempt.get("circuit_open", False)),
+                    },
+                }
+                for attempt in provider_attempts
+            ]
+        )
+    except Exception:  # pragma: no cover - additive telemetry should not break search execution
+        return
+
+
+def _searxng_endpoints_from_settings(settings: Settings) -> list[str]:
+    endpoints: list[str] = []
+    raw_multi = str(getattr(settings, "crawler_search_searxng_base_urls", "") or "").strip()
+    if raw_multi:
+        for token in raw_multi.split(","):
+            value = str(token or "").strip().rstrip("/")
+            if value and value not in endpoints:
+                endpoints.append(value)
+    single = str(getattr(settings, "crawler_search_searxng_base_url", "") or "").strip().rstrip("/")
+    if not endpoints and single:
+        endpoints.append(single)
+    return endpoints
+
+
+def _probe_searxng_endpoint(endpoint: str, settings: Settings, *, timeout: float) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "baseUrl": endpoint,
+        "configured": True,
+        "reachable": False,
+        "jsonParseable": False,
+        "resultBearing": False,
+        "healthReason": "endpoint_down",
+        "latencyMs": None,
+        "httpStatus": None,
+    }
+    started_at = time.monotonic()
+    try:
+        response = requests.get(
+            f"{endpoint.rstrip('/')}/search",
+            params={"q": "fratfinder health check", "format": "json"},
+            timeout=timeout,
+            verify=settings.crawler_http_verify_ssl,
+        )
+        payload["httpStatus"] = int(getattr(response, "status_code", 0) or 0)
+        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
+        if response.status_code == 403:
+            payload["healthReason"] = "json_disabled"
+            return payload
+        response.raise_for_status()
+        body = response.json() if hasattr(response, "json") else json.loads(getattr(response, "text", "{}") or "{}")
+        payload["reachable"] = True
+        payload["jsonParseable"] = isinstance(body, dict)
+        results = body.get("results") if isinstance(body, dict) else None
+        payload["resultBearing"] = isinstance(results, list) and len(results) > 0
+        unresponsive_engines = body.get("unresponsive_engines") if isinstance(body, dict) else None
+        if isinstance(unresponsive_engines, list) and unresponsive_engines and not payload["resultBearing"]:
+            payload["healthReason"] = "engine_unresponsive"
+        elif payload["resultBearing"]:
+            payload["healthReason"] = "healthy"
+        else:
+            payload["healthReason"] = "empty_results"
+    except requests.Timeout:
+        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
+        payload["healthReason"] = "timeout"
+    except requests.ConnectionError as exc:
+        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
+        message = str(exc).lower()
+        payload["healthReason"] = "dns_error" if ("getaddrinfo" in message or "name or service not known" in message or "dns" in message) else "endpoint_down"
+        payload["detail"] = str(exc)
+    except requests.RequestException as exc:
+        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
+        payload["healthReason"] = "request_error_only"
+        payload["detail"] = str(exc)
+    except (ValueError, json.JSONDecodeError) as exc:
+        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
+        payload["reachable"] = True
+        payload["healthReason"] = "json_disabled"
+        payload["detail"] = str(exc)
+    return payload
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
@@ -3657,6 +3922,198 @@ def _resolve_repo_root() -> Path:
         if (parent / "pnpm-workspace.yaml").exists():
             return parent
     return Path.cwd()
+
+
+def _load_search_provider_smoke_queries(query_set_file: str | None = None) -> list[dict[str, str]]:
+    if not query_set_file:
+        return _default_search_provider_smoke_queries()
+    path = Path(query_set_file)
+    raw = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".jsonl":
+        queries = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    else:
+        queries = json.loads(raw)
+    if not isinstance(queries, list):
+        raise ValueError("search-provider-smoke query set must be a JSON array or JSONL sequence")
+    normalized: list[dict[str, str]] = []
+    for item in queries:
+        if not isinstance(item, dict):
+            continue
+        query = str(item.get("query") or "").strip()
+        category = str(item.get("category") or "custom")
+        if query:
+            normalized.append({"category": category, "query": query})
+    return normalized
+
+
+def _default_search_provider_smoke_queries() -> list[dict[str, str]]:
+    fraternities = [
+        "sigma chi",
+        "delta chi",
+        "lambda chi alpha",
+        "phi gamma delta",
+        "theta chi",
+        "phi delta theta",
+        "pi kappa alpha",
+        "sigma phi epsilon",
+        "alpha tau omega",
+        "kappa sigma",
+    ]
+    schools = [
+        "University of Virginia",
+        "Purdue University",
+        "Louisiana State University",
+        "University of Florida",
+        "Penn State",
+        "William and Mary",
+        "Virginia Tech",
+        "University of Denver",
+        "Mississippi State University",
+        "University of Delaware",
+    ]
+
+    queries: list[dict[str, str]] = []
+    for index in range(30):
+        fraternity = fraternities[index % len(fraternities)]
+        school = schools[index % len(schools)]
+        queries.append({"category": "national_source_discovery", "query": f'"{fraternity}" chapter directory'})
+        queries.append({"category": "official_school_status", "query": f'site:.edu "{fraternity}" "{school}" greek life'})
+        queries.append({"category": "chapter_website_discovery", "query": f'"{fraternity}" "{school}" chapter website'})
+        queries.append({"category": "instagram_profile_discovery", "query": f'"{fraternity}" "{school}" instagram'})
+        queries.append({"category": "email_supporting_page_recovery", "query": f'"{fraternity}" "{school}" contact email'})
+        if index < 20:
+            queries.append({"category": "negative_low_signal_trap", "query": f'{fraternity} meaning slang forum'})
+    return queries
+
+
+def _classify_smoke_query_results(results: list[object]) -> dict[str, bool]:
+    official_school = False
+    national_directory = False
+    unsafe_candidate = False
+    for result in results:
+        url = str(getattr(result, "url", "") or "")
+        title = str(getattr(result, "title", "") or "")
+        snippet = str(getattr(result, "snippet", "") or "")
+        host = (urlparse(url).netloc or "").lower()
+        path = (urlparse(url).path or "").lower()
+        combined = f"{title} {snippet} {url}".lower()
+        if host.endswith(".edu") or any(marker in combined for marker in ("greek life", "fraternity and sorority life", "recognized chapters", "student organizations")):
+            official_school = True
+        if any(marker in path for marker in ("chapter-directory", "find-a-chapter", "chapters", "chapter-listing")) or (
+            not host.endswith(".edu") and any(marker in combined for marker in ("chapter directory", "find a chapter", "our chapters"))
+        ):
+            national_directory = True
+        if any(blocked in host for blocked in ("reddit.com", "quora.com", "wikipedia.org", "facebook.com")):
+            unsafe_candidate = True
+    accepted_evidence = official_school or national_directory
+    review_required = bool(results) and not accepted_evidence and not unsafe_candidate
+    return {
+        "officialSchoolResult": official_school,
+        "nationalDirectoryResult": national_directory,
+        "acceptedEvidence": accepted_evidence,
+        "reviewRequired": review_required,
+        "unsafeCandidate": unsafe_candidate and not accepted_evidence,
+    }
+
+
+def _provider_estimated_cost_per_1000(provider: str) -> float:
+    cost_table = {
+        "searxng_json": 0.0,
+        "bing_html": 0.0,
+        "duckduckgo_html": 0.0,
+        "brave_html": 0.0,
+        "serper_api": 1.0,
+        "tavily_api": 8.0,
+        "brave_api": 5.0,
+        "dataforseo_api": 0.6,
+    }
+    return float(cost_table.get(provider, 0.0))
+
+
+def _percentile(values: list[int], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    index = max(0, min(len(ordered) - 1, int(round((len(ordered) - 1) * percentile))))
+    return float(ordered[index])
+
+
+def _summarize_search_provider_smoke_metrics(
+    provider: str,
+    query_records: list[dict[str, object]],
+    provider_attempts: list[dict[str, object]],
+) -> dict[str, object]:
+    query_count = len(query_records)
+    attempt_count = len(provider_attempts)
+    success_queries = sum(1 for record in query_records if bool(record.get("success")))
+    official_school_queries = sum(1 for record in query_records if bool((record.get("classifiers") or {}).get("officialSchoolResult")))
+    national_directory_queries = sum(1 for record in query_records if bool((record.get("classifiers") or {}).get("nationalDirectoryResult")))
+    accepted_evidence_queries = sum(1 for record in query_records if bool((record.get("classifiers") or {}).get("acceptedEvidence")))
+    review_required_queries = sum(1 for record in query_records if bool((record.get("classifiers") or {}).get("reviewRequired")))
+    unsafe_candidate_queries = sum(1 for record in query_records if bool((record.get("classifiers") or {}).get("unsafeCandidate")))
+    request_error_attempts = sum(1 for attempt in provider_attempts if str(attempt.get("status") or "") == "request_error")
+    unavailable_attempts = sum(1 for attempt in provider_attempts if str(attempt.get("status") or "") == "unavailable")
+    low_signal_attempts = sum(1 for attempt in provider_attempts if str(attempt.get("status") or "") == "low_signal")
+    challenge_attempts = sum(
+        1
+        for attempt in provider_attempts
+        if str(attempt.get("failure_type") or "") == "challenge_or_anomaly"
+    )
+    latency_values = [int(attempt.get("latency_ms") or 0) for attempt in provider_attempts if attempt.get("latency_ms") is not None]
+    estimated_cost_per_1000 = _provider_estimated_cost_per_1000(provider)
+    estimated_total_cost = (estimated_cost_per_1000 / 1000.0) * query_count
+    return {
+        "raw_success_rate": round(success_queries / query_count, 4) if query_count else 0.0,
+        "request_error_rate": round(request_error_attempts / attempt_count, 4) if attempt_count else 0.0,
+        "unavailable_rate": round(unavailable_attempts / attempt_count, 4) if attempt_count else 0.0,
+        "challenge_anomaly_rate": round(challenge_attempts / attempt_count, 4) if attempt_count else 0.0,
+        "low_signal_rate": round(low_signal_attempts / attempt_count, 4) if attempt_count else 0.0,
+        "median_latency_ms": round(_percentile(latency_values, 0.5), 2),
+        "p95_latency_ms": round(_percentile(latency_values, 0.95), 2),
+        "official_school_result_rate": round(official_school_queries / query_count, 4) if query_count else 0.0,
+        "national_directory_result_rate": round(national_directory_queries / query_count, 4) if query_count else 0.0,
+        "accepted_evidence_rate": round(accepted_evidence_queries / query_count, 4) if query_count else 0.0,
+        "review_required_rate": round(review_required_queries / query_count, 4) if query_count else 0.0,
+        "unsafe_candidate_rate": round(unsafe_candidate_queries / query_count, 4) if query_count else 0.0,
+        "cost_per_1000_queries": estimated_cost_per_1000,
+        "cost_per_accepted_evidence": round(estimated_total_cost / accepted_evidence_queries, 4) if accepted_evidence_queries else None,
+        "query_count": query_count,
+        "attempt_count": attempt_count,
+    }
+
+
+def _search_provider_smoke_promotion_gates(
+    report: dict[str, object],
+    baseline_report: dict[str, object],
+) -> dict[str, object]:
+    metrics = dict(report.get("metrics") or {})
+    baseline_metrics = dict(baseline_report.get("metrics") or {})
+    accepted_evidence_improved = float(metrics.get("accepted_evidence_rate") or 0.0) >= float(
+        baseline_metrics.get("accepted_evidence_rate") or 0.0
+    )
+    unsafe_candidate_ok = float(metrics.get("unsafe_candidate_rate") or 0.0) <= float(
+        baseline_metrics.get("unsafe_candidate_rate") or 0.0
+    )
+    stable_auth_quota_behavior = float(metrics.get("request_error_rate") or 0.0) < 0.5 and float(
+        metrics.get("unavailable_rate") or 0.0
+    ) < 0.5
+    sustainable_cost = float(metrics.get("cost_per_1000_queries") or 0.0) <= 10.0
+    return {
+        "acceptedEvidenceImprovedOrEqual": accepted_evidence_improved,
+        "unsafeCandidateRateNotWorse": unsafe_candidate_ok,
+        "stableAuthQuotaBehavior": stable_auth_quota_behavior,
+        "sustainableCost": sustainable_cost,
+        "passed": all(
+            [
+                accepted_evidence_improved,
+                unsafe_candidate_ok,
+                stable_auth_quota_behavior,
+                sustainable_cost,
+            ]
+        ),
+    }
 
 
 def _default_epoch_report_path() -> str:
@@ -3776,12 +4233,7 @@ def _search_settings_from_preflight(settings: Settings, preflight_snapshot: dict
 
     base_order: list[str] = []
     raw_order = (settings.crawler_search_provider_order_free or "").strip()
-    if raw_order:
-        for token in (part.strip().lower() for part in raw_order.split(",")):
-            if token and token not in base_order:
-                base_order.append(token)
-    if not base_order:
-        base_order = ["searxng_json", "serper_api", "tavily_api", "duckduckgo_html", "bing_html", "brave_html"]
+    base_order, _warnings = normalize_free_provider_order(raw_order)
 
     successful: list[tuple[str, float, int, int, int]] = []
     neutral: list[str] = []
@@ -3903,15 +4355,8 @@ def _field_job_batch_delta_payload(before_metrics, after_metrics, *, processed: 
 
 
 def _provider_order_from_settings(settings: Settings) -> list[str]:
-    raw_order = str(getattr(settings, "crawler_search_provider_order_free", "") or "").strip()
-    base_order: list[str] = []
-    if raw_order:
-        for token in (part.strip().lower() for part in raw_order.split(",")):
-            if token and token not in base_order:
-                base_order.append(token)
-    if not base_order:
-        base_order = ["searxng_json", "duckduckgo_html", "bing_html"]
-    return base_order
+    order, _warnings = normalize_free_provider_order(str(getattr(settings, "crawler_search_provider_order_free", "") or "").strip())
+    return order or canonical_free_provider_order()
 
 
 def _empty_provider_health_bucket() -> dict[str, object]:

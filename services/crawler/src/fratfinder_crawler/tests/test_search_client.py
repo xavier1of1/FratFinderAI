@@ -375,32 +375,30 @@ def test_searxng_json_provider_parses_results():
     assert results[0].url == "https://example.org/chapter"
 
 
-def test_auto_free_prefers_searxng_then_tavily_before_html_fallbacks():
+def test_auto_free_ignores_opt_in_api_providers_and_uses_html_fallbacks():
     get_calls: list[str] = []
-    post_calls: list[str] = []
 
     def requester(url, params, timeout, verify, headers):
         get_calls.append(url)
-        raise requests.ConnectionError("searx unavailable")
-
-    def post_requester(url, json, timeout, verify, headers):
-        post_calls.append(url)
-        if "api.tavily.com" in url:
+        if "localhost:8888/search" in url:
+            raise requests.ConnectionError("searx unavailable")
+        if "duckduckgo" in url:
             return SimpleNamespace(
                 status_code=200,
-                text='{"results":[{"title":"Sigma Chi Demo","url":"https://example.org/chapter","content":"Official chapter website"}]}',
-                json=lambda: {
-                    "results": [
-                        {
-                            "title": "Sigma Chi Demo",
-                            "url": "https://example.org/chapter",
-                            "content": "Official chapter website",
-                        }
-                    ]
-                },
+                text=(
+                    "<html><body><table>"
+                    "<tr><td><a href=\"//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fchapter\">Sigma Chi Demo</a></td></tr>"
+                    "</table></body></html>"
+                ),
                 raise_for_status=lambda: None,
             )
-        raise AssertionError(f"Unexpected post URL: {url}")
+        if "bing.com" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text="""<html><body><ol><li class="b_algo"><h2><a href="https://example.org/chapter">Sigma Chi Demo</a></h2><div class="b_caption"><p>Official chapter website</p></div></li></ol></body></html>""",
+                raise_for_status=lambda: None,
+            )
+        raise AssertionError(f"Unexpected URL: {url}")
 
     client = SearchClient(
         Settings(
@@ -411,15 +409,14 @@ def test_auto_free_prefers_searxng_then_tavily_before_html_fallbacks():
             CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,tavily_api,duckduckgo_html,bing_html",
         ),
         get_requester=requester,
-        post_requester=post_requester,
     )
 
     results = client.search("sigma chi demo university website")
 
     assert len(results) == 1
-    assert results[0].provider == "tavily_api"
-    assert get_calls == ["http://localhost:8888/search"]
-    assert post_calls == ["https://api.tavily.com/search"]
+    assert results[0].provider == "duckduckgo_html"
+    assert get_calls[0] == "http://localhost:8888/search"
+    assert any(call.startswith("https://lite.duckduckgo.com") for call in get_calls)
 
 
 def test_auto_free_skips_unconfigured_api_providers_and_uses_duckduckgo_html():
@@ -620,8 +617,6 @@ def test_search_client_opens_circuit_after_repeated_provider_failures():
     with pytest.raises(SearchUnavailableError):
         client.search("sigma chi demo university website")
 
-    # Calls fan out across free-provider fallbacks until all providers trip
-    # their own circuit thresholds.
     assert len(calls) == 6
 
 
@@ -703,5 +698,48 @@ def test_auto_free_reorders_toward_successful_provider_after_failures():
     assert first[0].provider == "bing_html"
     assert second[0].provider == "bing_html"
     assert calls[0] == "http://localhost:8888/search"
-    assert calls[3].startswith("https://www.bing.com")
-    assert calls[4].startswith("https://www.bing.com")
+    assert calls[1].startswith("https://www.bing.com")
+    assert calls[2].startswith("https://www.bing.com")
+
+
+def test_searxng_json_provider_fails_over_to_secondary_endpoint():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        if url == "http://primary:8888/search":
+            raise requests.ConnectionError("connection refused")
+        if url == "http://secondary:8888/search":
+            return SimpleNamespace(
+                status_code=200,
+                text='{"results":[{"title":"Sigma Chi Demo","url":"https://example.org/chapter","content":"Official chapter site"}]}',
+                json=lambda: {
+                    "results": [
+                        {
+                            "title": "Sigma Chi Demo",
+                            "url": "https://example.org/chapter",
+                            "content": "Official chapter site",
+                        }
+                    ]
+                },
+                raise_for_status=lambda: None,
+            )
+        raise AssertionError(f"Unexpected URL call: {url}")
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="searxng_json",
+            CRAWLER_SEARCH_SEARXNG_BASE_URLS="http://primary:8888,http://secondary:8888",
+        ),
+        get_requester=requester,
+    )
+
+    results = client.search("sigma chi demo university website")
+    attempts = client.consume_last_provider_attempts()
+
+    assert len(results) == 1
+    assert results[0].provider == "searxng_json"
+    assert calls == ["http://primary:8888/search", "http://secondary:8888/search"]
+    assert attempts[0]["provider_endpoint"] == "http://primary:8888"
+    assert attempts[1]["provider_endpoint"] == "http://secondary:8888"

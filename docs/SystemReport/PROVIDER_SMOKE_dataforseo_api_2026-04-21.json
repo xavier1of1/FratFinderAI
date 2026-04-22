@@ -1,0 +1,1017 @@
+{
+  "captured_at": "2026-04-21T22:46:49.416368+00:00",
+  "provider": "dataforseo_api",
+  "baselineProvider": "bing_html",
+  "queryCount": 12,
+  "report": {
+    "provider": "dataforseo_api",
+    "queries": [
+      {
+        "category": "national_source_discovery",
+        "query": "\"sigma chi\" chapter directory",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"sigma chi\" \"University of Virginia\" greek life",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" chapter website",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" instagram",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"sigma chi\" \"University of Virginia\" contact email",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "sigma chi meaning slang forum",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"delta chi\" chapter directory",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"delta chi\" \"Purdue University\" greek life",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"delta chi\" \"Purdue University\" chapter website",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"delta chi\" \"Purdue University\" instagram",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"delta chi\" \"Purdue University\" contact email",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "delta chi meaning slang forum",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      }
+    ],
+    "metrics": {
+      "raw_success_rate": 0.0,
+      "request_error_rate": 0.0,
+      "unavailable_rate": 1.0,
+      "challenge_anomaly_rate": 0.0,
+      "low_signal_rate": 0.0,
+      "median_latency_ms": 0.0,
+      "p95_latency_ms": 0.0,
+      "official_school_result_rate": 0.0,
+      "national_directory_result_rate": 0.0,
+      "accepted_evidence_rate": 0.0,
+      "review_required_rate": 0.0,
+      "unsafe_candidate_rate": 0.0,
+      "cost_per_1000_queries": 0.6,
+      "cost_per_accepted_evidence": null,
+      "query_count": 12,
+      "attempt_count": 12
+    }
+  },
+  "baseline": {
+    "provider": "bing_html",
+    "queries": [
+      {
+        "category": "national_source_discovery",
+        "query": "\"sigma chi\" chapter directory",
+        "success": false,
+        "error": "HTTPSConnectionPool(host='lite.duckduckgo.com', port=443): Max retries exceeded with url: /lite/?q=%22sigma+chi%22+chapter+directory (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x00000137275D3E30>, 'Connection to lite.duckduckgo.com timed out. (connect timeout=5.0)'))",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 703,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "connection_refused",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 4266,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 4266,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5016,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"sigma chi\" \"University of Virginia\" greek life",
+        "success": false,
+        "error": "HTTPSConnectionPool(host='lite.duckduckgo.com', port=443): Max retries exceeded with url: /lite/?q=site%3A.edu+%22sigma+chi%22+%22University+of+Virginia%22+greek+life (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x00000137275D3B00>, 'Connection to lite.duckduckgo.com timed out. (connect timeout=5.0)'))",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 140,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "connection_refused",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 4219,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 4235,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5015,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" chapter website",
+        "success": false,
+        "error": "HTTPSConnectionPool(host='lite.duckduckgo.com', port=443): Max retries exceeded with url: /lite/?q=%22sigma+chi%22+%22University+of+Virginia%22+chapter+website (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x0000013727144B30>, 'Connection to lite.duckduckgo.com timed out. (connect timeout=5.0)'))",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5016,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" instagram",
+        "success": false,
+        "error": "HTTPSConnectionPool(host='lite.duckduckgo.com', port=443): Max retries exceeded with url: /lite/?q=%22sigma+chi%22+%22University+of+Virginia%22+instagram (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x0000013727145DC0>, 'Connection to lite.duckduckgo.com timed out. (connect timeout=5.0)'))",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5015,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"sigma chi\" \"University of Virginia\" contact email",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "sigma chi meaning slang forum",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"delta chi\" chapter directory",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"delta chi\" \"Purdue University\" greek life",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"delta chi\" \"Purdue University\" chapter website",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"delta chi\" \"Purdue University\" instagram",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"delta chi\" \"Purdue University\" contact email",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "delta chi meaning slang forum",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      }
+    ],
+    "metrics": {
+      "raw_success_rate": 0.0,
+      "request_error_rate": 0.1579,
+      "unavailable_rate": 0.8421,
+      "challenge_anomaly_rate": 0.1053,
+      "low_signal_rate": 0.0,
+      "median_latency_ms": 0.0,
+      "p95_latency_ms": 5015.0,
+      "official_school_result_rate": 0.0,
+      "national_directory_result_rate": 0.0,
+      "accepted_evidence_rate": 0.0,
+      "review_required_rate": 0.0,
+      "unsafe_candidate_rate": 0.0,
+      "cost_per_1000_queries": 0.0,
+      "cost_per_accepted_evidence": null,
+      "query_count": 12,
+      "attempt_count": 38
+    }
+  },
+  "promotionGates": {
+    "acceptedEvidenceImprovedOrEqual": true,
+    "unsafeCandidateRateNotWorse": true,
+    "stableAuthQuotaBehavior": false,
+    "sustainableCost": true,
+    "passed": false
+  }
+}

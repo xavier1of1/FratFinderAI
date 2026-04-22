@@ -1,0 +1,471 @@
+{
+  "captured_at": "2026-04-21T22:36:09.478756+00:00",
+  "provider": "dataforseo_api",
+  "baselineProvider": "bing_html",
+  "queryCount": 5,
+  "report": {
+    "provider": "dataforseo_api",
+    "queries": [
+      {
+        "category": "national_source_discovery",
+        "query": "\"sigma chi\" chapter directory",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"sigma chi\" \"University of Virginia\" greek life",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 157,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" chapter website",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 141,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" instagram",
+        "success": false,
+        "error": "DataForSEO API credentials are required when provider is dataforseo_api",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 156,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"sigma chi\" \"University of Virginia\" contact email",
+        "success": false,
+        "error": "dataforseo_api temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "dataforseo_api",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      }
+    ],
+    "metrics": {
+      "raw_success_rate": 0.0,
+      "request_error_rate": 0.0,
+      "unavailable_rate": 1.0,
+      "challenge_anomaly_rate": 0.0,
+      "low_signal_rate": 0.0,
+      "median_latency_ms": 141.0,
+      "p95_latency_ms": 157.0,
+      "official_school_result_rate": 0.0,
+      "national_directory_result_rate": 0.0,
+      "accepted_evidence_rate": 0.0,
+      "review_required_rate": 0.0,
+      "unsafe_candidate_rate": 0.0,
+      "cost_per_1000_queries": 0.6,
+      "cost_per_accepted_evidence": null,
+      "query_count": 5,
+      "attempt_count": 5
+    }
+  },
+  "baseline": {
+    "provider": "bing_html",
+    "queries": [
+      {
+        "category": "national_source_discovery",
+        "query": "\"sigma chi\" chapter directory",
+        "success": false,
+        "error": "DuckDuckGo HTML returned an anomaly or blocked response",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 797,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "connection_refused",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 4266,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 4266,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 546,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"sigma chi\" \"University of Virginia\" greek life",
+        "success": false,
+        "error": "DuckDuckGo HTML returned an anomaly or blocked response",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "connection_refused",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 4266,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 4266,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 109,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" chapter website",
+        "success": false,
+        "error": "DuckDuckGo HTML returned an anomaly or blocked response",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 235,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 125,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" instagram",
+        "success": false,
+        "error": "DuckDuckGo HTML returned an anomaly or blocked response",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 187,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 141,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"sigma chi\" \"University of Virginia\" contact email",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      }
+    ],
+    "metrics": {
+      "raw_success_rate": 0.0,
+      "request_error_rate": 0.1176,
+      "unavailable_rate": 0.8824,
+      "challenge_anomaly_rate": 0.4706,
+      "low_signal_rate": 0.0,
+      "median_latency_ms": 172.0,
+      "p95_latency_ms": 4266.0,
+      "official_school_result_rate": 0.0,
+      "national_directory_result_rate": 0.0,
+      "accepted_evidence_rate": 0.0,
+      "review_required_rate": 0.0,
+      "unsafe_candidate_rate": 0.0,
+      "cost_per_1000_queries": 0.0,
+      "cost_per_accepted_evidence": null,
+      "query_count": 5,
+      "attempt_count": 17
+    }
+  },
+  "promotionGates": {
+    "acceptedEvidenceImprovedOrEqual": true,
+    "unsafeCandidateRateNotWorse": true,
+    "stableAuthQuotaBehavior": false,
+    "sustainableCost": true,
+    "passed": false
+  }
+}

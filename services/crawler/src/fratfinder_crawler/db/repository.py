@@ -4933,6 +4933,163 @@ class CrawlerRepository:
         self._connection.commit()
         return int(row["id"])
 
+    def insert_search_provider_attempt(
+        self,
+        *,
+        context_type: str,
+        context_id: str | None = None,
+        request_id: str | None = None,
+        source_slug: str | None = None,
+        field_job_id: str | None = None,
+        provider: str,
+        provider_endpoint: str | None = None,
+        query: str | None = None,
+        status: str,
+        failure_type: str | None = None,
+        http_status: int | None = None,
+        latency_ms: int | None = None,
+        result_count: int | None = None,
+        fallback_taken: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO search_provider_attempts (
+                    context_type,
+                    context_id,
+                    request_id,
+                    source_slug,
+                    field_job_id,
+                    provider,
+                    provider_endpoint,
+                    query,
+                    status,
+                    failure_type,
+                    http_status,
+                    latency_ms,
+                    result_count,
+                    fallback_taken,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    context_type,
+                    context_id,
+                    request_id,
+                    source_slug,
+                    field_job_id,
+                    provider,
+                    provider_endpoint,
+                    query,
+                    status,
+                    failure_type,
+                    http_status,
+                    latency_ms,
+                    result_count,
+                    fallback_taken,
+                    Jsonb(metadata or {}),
+                ),
+            )
+        self._connection.commit()
+
+    def insert_search_provider_attempts(self, attempts: list[dict[str, Any]]) -> None:
+        if not attempts:
+            return
+        with self._connection.cursor() as cursor:
+            cursor.executemany(
+                """
+                INSERT INTO search_provider_attempts (
+                    context_type,
+                    context_id,
+                    request_id,
+                    source_slug,
+                    field_job_id,
+                    provider,
+                    provider_endpoint,
+                    query,
+                    status,
+                    failure_type,
+                    http_status,
+                    latency_ms,
+                    result_count,
+                    fallback_taken,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                [
+                    (
+                        attempt.get("context_type"),
+                        attempt.get("context_id"),
+                        attempt.get("request_id"),
+                        attempt.get("source_slug"),
+                        attempt.get("field_job_id"),
+                        attempt.get("provider"),
+                        attempt.get("provider_endpoint"),
+                        attempt.get("query"),
+                        attempt.get("status"),
+                        attempt.get("failure_type"),
+                        attempt.get("http_status"),
+                        attempt.get("latency_ms"),
+                        attempt.get("result_count"),
+                        bool(attempt.get("fallback_taken", False)),
+                        Jsonb(dict(attempt.get("metadata") or {})),
+                    )
+                    for attempt in attempts
+                ],
+            )
+        self._connection.commit()
+
+    def summarize_search_provider_attempts(
+        self,
+        *,
+        context_type: str | None = None,
+        source_slug: str | None = None,
+        request_id: str | None = None,
+        provider: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        filters: list[str] = []
+        params: list[Any] = []
+        if context_type is not None:
+            filters.append("context_type = %s")
+            params.append(context_type)
+        if source_slug is not None:
+            filters.append("source_slug = %s")
+            params.append(source_slug)
+        if request_id is not None:
+            filters.append("request_id = %s")
+            params.append(request_id)
+        if provider is not None:
+            filters.append("provider = %s")
+            params.append(provider)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(max(1, limit))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    provider,
+                    COALESCE(provider_endpoint, '') AS provider_endpoint,
+                    COUNT(*)::int AS attempts,
+                    COUNT(*) FILTER (WHERE status = 'success')::int AS successes,
+                    COUNT(*) FILTER (WHERE status = 'request_error')::int AS request_errors,
+                    COUNT(*) FILTER (WHERE status = 'unavailable')::int AS unavailable,
+                    COUNT(*) FILTER (WHERE status = 'low_signal')::int AS low_signal,
+                    COALESCE(AVG(latency_ms), 0)::float AS avg_latency_ms
+                FROM search_provider_attempts
+                {where_clause}
+                GROUP BY provider, COALESCE(provider_endpoint, '')
+                ORDER BY attempts DESC, provider ASC, provider_endpoint ASC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
     def list_epoch_metrics(
         self,
         *,

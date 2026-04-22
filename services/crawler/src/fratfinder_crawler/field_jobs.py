@@ -4139,12 +4139,14 @@ class FieldJobEngine:
         try:
             results = self._search_client.search(query)
             provider_attempts = self._consume_provider_attempts()
+            self._persist_provider_attempts(query=query, attempts=provider_attempts)
             self._last_query_provider_attempts = provider_attempts
             self._last_provider_attempts.extend(provider_attempts)
         except SearchUnavailableError as exc:
             self._search_errors_encountered = True
             self._search_queries_failed += 1
             provider_attempts = self._consume_provider_attempts()
+            self._persist_provider_attempts(query=query, attempts=provider_attempts)
             self._last_query_provider_attempts = provider_attempts
             self._last_search_failure_kind = "unavailable"
             self._last_provider_attempts.extend(provider_attempts)
@@ -4162,6 +4164,7 @@ class FieldJobEngine:
             self._search_errors_encountered = True
             self._search_queries_failed += 1
             provider_attempts = self._consume_provider_attempts()
+            self._persist_provider_attempts(query=query, attempts=provider_attempts)
             self._last_query_provider_attempts = provider_attempts
             self._last_search_failure_kind = "request_exception"
             self._last_provider_attempts.extend(provider_attempts)
@@ -4410,6 +4413,42 @@ class FieldJobEngine:
             return []
         attempts = consume()
         return attempts if isinstance(attempts, list) else []
+
+    def _persist_provider_attempts(self, *, query: str, attempts: list[dict[str, object]]) -> None:
+        if not attempts:
+            return
+        insert_many = getattr(self._repository, "insert_search_provider_attempts", None)
+        if not callable(insert_many):
+            return
+        try:
+            insert_many(
+                [
+                    {
+                        "context_type": "field_job",
+                        "context_id": self._field_name,
+                        "request_id": None,
+                        "source_slug": self._source_slug,
+                        "field_job_id": None,
+                        "provider": attempt.get("provider"),
+                        "provider_endpoint": attempt.get("provider_endpoint"),
+                        "query": query,
+                        "status": attempt.get("status"),
+                        "failure_type": attempt.get("failure_type"),
+                        "http_status": attempt.get("http_status"),
+                        "latency_ms": attempt.get("latency_ms"),
+                        "result_count": attempt.get("result_count"),
+                        "fallback_taken": bool(attempt.get("fallback_taken", False)),
+                        "metadata": {
+                            "providerContext": "field_job",
+                            "fieldName": self._field_name,
+                            "circuitOpen": bool(attempt.get("circuit_open", False)),
+                        },
+                    }
+                    for attempt in attempts
+                ]
+            )
+        except Exception:  # pragma: no cover - additive telemetry should not break field-job execution
+            return
 
     def _build_requeue_payload_patch(self, job: FieldJob, exc: "RetryableJobError", backoff_seconds: int) -> dict[str, object]:
         patch: dict[str, object] = {}

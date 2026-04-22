@@ -1,0 +1,1853 @@
+{
+  "captured_at": "2026-04-21T22:48:14.078635+00:00",
+  "accuracy": {
+    "complete_rows": 442,
+    "chapter_specific_contact_rows": 442,
+    "nationals_only_contact_rows": 0,
+    "inactive_validated_rows": 7,
+    "confirmed_absent_website_rows": 3,
+    "active_rows_with_chapter_specific_email": 100,
+    "active_rows_with_chapter_specific_instagram": 398,
+    "active_rows_with_any_contact": 1145,
+    "total_chapters": 2759
+  },
+  "queue": {
+    "queued_jobs": 6817,
+    "actionable_jobs": 594,
+    "deferred_jobs": 0,
+    "blocked_provider_jobs": 2633,
+    "blocked_dependency_jobs": 1947,
+    "blocked_repairable_jobs": 1643,
+    "running_jobs": 0,
+    "done_jobs": 3996,
+    "failed_jobs": 390,
+    "updated_jobs": 1554,
+    "review_jobs": 354,
+    "terminal_no_signal_jobs": 682
+  },
+  "queue_health": {
+    "deferred_ratio": 0.0,
+    "provider_degraded_ratio": 0.3862,
+    "dependency_blocked_ratio": 0.2856,
+    "repair_backlog_ratio": 0.241,
+    "authoritative_resolution_ratio": 0.0,
+    "worker_liveness_ratio": 0.0,
+    "worker_liveness_alert": {
+      "open": true,
+      "message": "Actionable field jobs are present but no field-job workers are active across 2 poll windows",
+      "actionableJobs": 594,
+      "runningJobs": 0,
+      "activeWorkers": 0,
+      "staleWorkers": 0,
+      "pollWindows": 2
+    }
+  },
+  "field_breakdown": [
+    {
+      "field_name": "find_email",
+      "actionable_jobs": 0,
+      "deferred_jobs": 0,
+      "blocked_provider_jobs": 11,
+      "blocked_dependency_jobs": 1369,
+      "blocked_repairable_jobs": 607,
+      "done_jobs": 902,
+      "failed_jobs": 142
+    },
+    {
+      "field_name": "find_instagram",
+      "actionable_jobs": 55,
+      "deferred_jobs": 0,
+      "blocked_provider_jobs": 1246,
+      "blocked_dependency_jobs": 0,
+      "blocked_repairable_jobs": 498,
+      "done_jobs": 1003,
+      "failed_jobs": 44
+    },
+    {
+      "field_name": "find_website",
+      "actionable_jobs": 22,
+      "deferred_jobs": 0,
+      "blocked_provider_jobs": 1173,
+      "blocked_dependency_jobs": 0,
+      "blocked_repairable_jobs": 408,
+      "done_jobs": 1056,
+      "failed_jobs": 117
+    },
+    {
+      "field_name": "verify_school_match",
+      "actionable_jobs": 341,
+      "deferred_jobs": 0,
+      "blocked_provider_jobs": 198,
+      "blocked_dependency_jobs": 40,
+      "blocked_repairable_jobs": 0,
+      "done_jobs": 28,
+      "failed_jobs": 4
+    },
+    {
+      "field_name": "verify_website",
+      "actionable_jobs": 176,
+      "deferred_jobs": 0,
+      "blocked_provider_jobs": 5,
+      "blocked_dependency_jobs": 538,
+      "blocked_repairable_jobs": 130,
+      "done_jobs": 1007,
+      "failed_jobs": 49
+    }
+  ],
+  "deferred_reason_breakdown": [
+    {
+      "blocked_reason": "provider_degraded",
+      "count": 2347,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "blocked_reason": "dependency_wait",
+      "count": 1752,
+      "queue_lane": "dependency_blocked"
+    },
+    {
+      "blocked_reason": "queued_for_entity_repair",
+      "count": 1441,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "blocked_reason": "transient_network",
+      "count": 280,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "blocked_reason": "identity_semantically_incomplete",
+      "count": 202,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "blocked_reason": "website_required",
+      "count": 195,
+      "queue_lane": "dependency_blocked"
+    },
+    {
+      "blocked_reason": "provider_low_signal",
+      "count": 6,
+      "queue_lane": "provider_dependent_search"
+    }
+  ],
+  "deferred_field_breakdown": [
+    {
+      "field_name": "find_instagram",
+      "blocked_reason": "provider_degraded",
+      "count": 1211,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "field_name": "find_email",
+      "blocked_reason": "dependency_wait",
+      "count": 1174,
+      "queue_lane": "dependency_blocked"
+    },
+    {
+      "field_name": "find_website",
+      "blocked_reason": "provider_degraded",
+      "count": 1125,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "field_name": "find_email",
+      "blocked_reason": "queued_for_entity_repair",
+      "count": 541,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "verify_website",
+      "blocked_reason": "dependency_wait",
+      "count": 538,
+      "queue_lane": "dependency_blocked"
+    },
+    {
+      "field_name": "find_instagram",
+      "blocked_reason": "queued_for_entity_repair",
+      "count": 430,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "find_website",
+      "blocked_reason": "queued_for_entity_repair",
+      "count": 344,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "verify_school_match",
+      "blocked_reason": "transient_network",
+      "count": 197,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "field_name": "find_email",
+      "blocked_reason": "website_required",
+      "count": 195,
+      "queue_lane": "dependency_blocked"
+    },
+    {
+      "field_name": "verify_website",
+      "blocked_reason": "queued_for_entity_repair",
+      "count": 126,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "find_instagram",
+      "blocked_reason": "identity_semantically_incomplete",
+      "count": 68,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "find_email",
+      "blocked_reason": "identity_semantically_incomplete",
+      "count": 66,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "find_website",
+      "blocked_reason": "identity_semantically_incomplete",
+      "count": 64,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "find_website",
+      "blocked_reason": "transient_network",
+      "count": 47,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "field_name": "verify_school_match",
+      "blocked_reason": "dependency_wait",
+      "count": 40,
+      "queue_lane": "dependency_blocked"
+    },
+    {
+      "field_name": "find_instagram",
+      "blocked_reason": "transient_network",
+      "count": 35,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "field_name": "find_email",
+      "blocked_reason": "provider_degraded",
+      "count": 11,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "field_name": "verify_website",
+      "blocked_reason": "identity_semantically_incomplete",
+      "count": 4,
+      "queue_lane": "repair_backlog"
+    },
+    {
+      "field_name": "verify_website",
+      "blocked_reason": "provider_low_signal",
+      "count": 4,
+      "queue_lane": "provider_dependent_search"
+    },
+    {
+      "field_name": "find_website",
+      "blocked_reason": "provider_low_signal",
+      "count": 1,
+      "queue_lane": "provider_dependent_search"
+    }
+  ],
+  "deferred_source_breakdown": [
+    {
+      "source_slug": "sigma-alpha-epsilon-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 663
+    },
+    {
+      "source_slug": "sigma-alpha-epsilon-main",
+      "queue_lane": "dependency_blocked",
+      "count": 599
+    },
+    {
+      "source_slug": "pi-kappa-alpha-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 552
+    },
+    {
+      "source_slug": "pi-kappa-alpha-main",
+      "queue_lane": "dependency_blocked",
+      "count": 506
+    },
+    {
+      "source_slug": "delta-kappa-epsilon-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 365
+    },
+    {
+      "source_slug": "sigma-chi-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 330
+    },
+    {
+      "source_slug": "alpha-tau-omega-main",
+      "queue_lane": "repair_backlog",
+      "count": 245
+    },
+    {
+      "source_slug": "delta-chi-main",
+      "queue_lane": "repair_backlog",
+      "count": 233
+    },
+    {
+      "source_slug": "sigma-alpha-epsilon-main",
+      "queue_lane": "repair_backlog",
+      "count": 225
+    },
+    {
+      "source_slug": "phi-kappa-psi-main",
+      "queue_lane": "repair_backlog",
+      "count": 223
+    },
+    {
+      "source_slug": "sigma-chi-main",
+      "queue_lane": "dependency_blocked",
+      "count": 202
+    },
+    {
+      "source_slug": "phi-gamma-delta-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 185
+    },
+    {
+      "source_slug": "delta-kappa-epsilon-main",
+      "queue_lane": "dependency_blocked",
+      "count": 178
+    },
+    {
+      "source_slug": "delta-sigma-phi-main",
+      "queue_lane": "repair_backlog",
+      "count": 169
+    },
+    {
+      "source_slug": "chi-psi-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 122
+    },
+    {
+      "source_slug": "lambda-chi-alpha-main",
+      "queue_lane": "dependency_blocked",
+      "count": 118
+    },
+    {
+      "source_slug": "lambda-chi-alpha-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 117
+    },
+    {
+      "source_slug": "alpha-gamma-rho-main",
+      "queue_lane": "repair_backlog",
+      "count": 109
+    },
+    {
+      "source_slug": "theta-chi-main",
+      "queue_lane": "provider_dependent_search",
+      "count": 93
+    },
+    {
+      "source_slug": "chi-psi-main",
+      "queue_lane": "dependency_blocked",
+      "count": 92
+    }
+  ],
+  "deferred_age_buckets": [
+    {
+      "age_bucket": "gte_3d",
+      "count": 5959
+    },
+    {
+      "age_bucket": "1d_to_3d",
+      "count": 264
+    }
+  ],
+  "field_worker_processes": {
+    "active_workers": 0,
+    "stale_workers": 0
+  },
+  "national_profiles": {
+    "total_profiles": 21,
+    "with_email": 0,
+    "with_instagram": 0,
+    "with_phone": 0
+  },
+  "top_evidence_reason_codes": [
+    {
+      "reason_code": "unknown",
+      "count": 8423
+    },
+    {
+      "reason_code": "fraternity_absent_from_official_school_list",
+      "count": 65
+    },
+    {
+      "reason_code": "chapter_already_inactive",
+      "count": 51
+    }
+  ],
+  "provenance_audit": {
+    "captured_at": "2026-04-21T22:48:14.138250+00:00",
+    "accepted_rows_missing_reason_code": 1276,
+    "accepted_rows_missing_supporting_page_scope": 0,
+    "accepted_rows_matching_national_profile": 0,
+    "samples": [
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "chapter-map",
+        "fraternity_slug": "alpha-chi-rho",
+        "field_name": "website_url",
+        "field_value": "https://www.alphachirho.org/about/map/",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "2fusf",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/%2Fusf",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-beta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-beta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-delta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-delta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "contact_email",
+        "field_value": "netito102204@gmail.com",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/adglagrangecollege",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-epsilon",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-eta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "contact_email",
+        "field_value": "dametristen@gmail.com",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-eta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/mck_alphadeltagamma",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-eta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-eta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-gamma",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-gamma",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-iota",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/adgalphaiota",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-iota",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-iota",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-kappa",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/ak_alphadeltagamma",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-kappa",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-kappa",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-lambda",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-lambda",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-theta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-theta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "alpha-zeta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/alpha-zeta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "beta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "instagram_url",
+        "field_value": "https://www.instagram.com/adg_slu",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "beta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/beta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "chi",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/chi",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "csu",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/csu",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "delta",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/delta",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      },
+      {
+        "issue": "missing_reason_code",
+        "chapter_slug": "epsilon",
+        "fraternity_slug": "alpha-delta-gamma",
+        "field_name": "website_url",
+        "field_value": "https://www.alphadeltagamma.org/chapters/epsilon",
+        "reason_code": null,
+        "supporting_page_scope": null,
+        "national_value": null
+      }
+    ]
+  },
+  "enrichment_shadow": {
+    "captured_at": "2026-04-21T22:48:14.197573+00:00",
+    "jobs_considered": 25,
+    "authoritative_ready_jobs": 0,
+    "provider_dependent_jobs": 25,
+    "provider_window_state": {
+      "general_web_search": {
+        "lane": "general_web_search",
+        "window_started_at": "2026-04-21T22:48:13.943889+00:00",
+        "window_success_rate": 0.0,
+        "attempt_count": 14,
+        "request_error_count": 6,
+        "challenge_or_anomaly_count": 4,
+        "healthy": false,
+        "degraded_reason": "probe_success_below_threshold",
+        "providers": [
+          {
+            "provider": "searxng_json",
+            "attempt_count": 6,
+            "success_count": 0,
+            "request_error_count": 2,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "duckduckgo_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 4,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 0,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "bing_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 0,
+            "challenge_or_anomaly_count": 4,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          }
+        ]
+      },
+      "social_search": {
+        "lane": "social_search",
+        "window_started_at": "2026-04-21T22:48:13.943889+00:00",
+        "window_success_rate": 0.0,
+        "attempt_count": 14,
+        "request_error_count": 6,
+        "challenge_or_anomaly_count": 4,
+        "healthy": false,
+        "degraded_reason": "probe_success_below_threshold",
+        "providers": [
+          {
+            "provider": "searxng_json",
+            "attempt_count": 6,
+            "success_count": 0,
+            "request_error_count": 2,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "duckduckgo_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 4,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 0,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "bing_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 0,
+            "challenge_or_anomaly_count": 4,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          }
+        ],
+        "source_mode": "shares_general_provider_pool"
+      },
+      "authoritative_fetch": {
+        "lane": "authoritative_fetch",
+        "window_started_at": "2026-04-21T22:48:13.943889+00:00",
+        "window_success_rate": 1.0,
+        "attempt_count": 0,
+        "request_error_count": 0,
+        "challenge_or_anomaly_count": 0,
+        "healthy": true,
+        "degraded_reason": "",
+        "source_mode": "independent_of_search_provider"
+      }
+    },
+    "recommended_actions": [
+      {
+        "actionType": "verify_school",
+        "count": 25
+      }
+    ],
+    "samples": [
+      {
+        "chapterSlug": "arizona-alpha-a-university-of-arizona",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "illinois-epsilon-bradley-university",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "alpha-delta-northwestern-university",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "iota-nu-furman-university",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "eta-omicron-university-of-louisiana-at-monroe",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "utah-sigma-weber-state-university",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "iota-tau-university-of-st-thomas",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "gamma-sigma-chapter-university-of-the-south-sewanee",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "beta-at-st-louis-university",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "16211",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 8
+        }
+      },
+      {
+        "chapterSlug": "north-carolina-theta-davidson-college",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "delta-university-of-south-carolina",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "theta-rho-northern-arizona-university",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "theta-xi-virginia-commonwealth-university",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      },
+      {
+        "chapterSlug": "pi-chapter-allegheny-college",
+        "fieldName": "find_email",
+        "queueState": "blocked_dependency",
+        "recommendedAction": "verify_school",
+        "topActions": [
+          {
+            "actionType": "verify_school",
+            "score": 2.9
+          },
+          {
+            "actionType": "defer",
+            "score": 2.0
+          },
+          {
+            "actionType": "parse_supporting_page",
+            "score": 1.9
+          }
+        ],
+        "context": {
+          "supportingPagePresent": false,
+          "supportingPageScope": "",
+          "providerWindowHealthy": false,
+          "websitePrerequisiteUnmet": true,
+          "identityComplete": true,
+          "priorQueryCount": 0
+        }
+      }
+    ]
+  },
+  "enrichment_replay_compare": {
+    "count": 25,
+    "agreementRate": 0.12,
+    "recommendedAuthoritativeRate": 1.0,
+    "deterministicAuthoritativeRate": 0.12,
+    "recommendedProviderSearchRate": 0.0,
+    "deterministicProviderSearchRate": 0.0,
+    "providerWasteRate": 0.0,
+    "providerWasteDisagreementRate": 0.0,
+    "providerWasteAuthoritativeOpportunityRate": 0.0,
+    "providerWasteDelayOpportunityRate": 0.0,
+    "byField": [
+      {
+        "fieldName": "verify_school_match",
+        "count": 24,
+        "agreementRate": 0.125,
+        "providerWasteRate": 0.0,
+        "recommendedAuthoritativeRate": 1.0,
+        "deterministicAuthoritativeRate": 0.125
+      },
+      {
+        "fieldName": "find_email",
+        "count": 1,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.0,
+        "recommendedAuthoritativeRate": 1.0,
+        "deterministicAuthoritativeRate": 0.0
+      }
+    ],
+    "bySource": [
+      {
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "count": 15,
+        "agreementRate": 0.0667,
+        "providerWasteRate": 0.0
+      },
+      {
+        "sourceSlug": "sigma-chi-main",
+        "count": 3,
+        "agreementRate": 0.6667,
+        "providerWasteRate": 0.0
+      },
+      {
+        "sourceSlug": "lambda-chi-alpha-main",
+        "count": 2,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.0
+      },
+      {
+        "sourceSlug": "pi-kappa-alpha-main",
+        "count": 2,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.0
+      },
+      {
+        "sourceSlug": "chi-psi-main",
+        "count": 1,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.0
+      },
+      {
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "count": 1,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.0
+      },
+      {
+        "sourceSlug": "theta-xi-main",
+        "count": 1,
+        "agreementRate": 0.0,
+        "providerWasteRate": 0.0
+      }
+    ],
+    "disagreements": [
+      {
+        "transition": "defer->verify_school",
+        "count": 17,
+        "providerWasteCount": 0,
+        "authoritativeShiftCount": 17,
+        "delayShiftCount": 0,
+        "fieldBreakdown": [
+          {
+            "fieldName": "verify_school_match",
+            "count": 17
+          }
+        ]
+      },
+      {
+        "transition": "review_required->verify_school",
+        "count": 4,
+        "providerWasteCount": 0,
+        "authoritativeShiftCount": 4,
+        "delayShiftCount": 0,
+        "fieldBreakdown": [
+          {
+            "fieldName": "verify_school_match",
+            "count": 4
+          }
+        ]
+      },
+      {
+        "transition": "defer->parse_supporting_page",
+        "count": 1,
+        "providerWasteCount": 0,
+        "authoritativeShiftCount": 1,
+        "delayShiftCount": 0,
+        "fieldBreakdown": [
+          {
+            "fieldName": "find_email",
+            "count": 1
+          }
+        ]
+      }
+    ],
+    "samples": [
+      {
+        "chapterSlug": "alpha-delta-a",
+        "sourceSlug": "chi-psi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "review_required",
+        "finalState": "processed",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "iota-pi-university-of-california-los-angeles",
+        "sourceSlug": "pi-kappa-alpha-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "review_required",
+        "finalState": "failed_terminal",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "16212",
+        "sourceSlug": "lambda-chi-alpha-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "chi-university-of-mississippi",
+        "sourceSlug": "delta-kappa-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "pi-samford-university",
+        "sourceSlug": "sigma-chi-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "beta-omicron-university-of-oklahoma",
+        "sourceSlug": "pi-kappa-alpha-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "16208",
+        "sourceSlug": "lambda-chi-alpha-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "gamma-phi-georgia-southern-university",
+        "sourceSlug": "theta-xi-main",
+        "fieldName": "find_email",
+        "recommendedAction": "parse_supporting_page",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": true,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "utah-upsilon-utah-state-university",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "review_required",
+        "finalState": "failed_terminal",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "texas-theta-baylor-university",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "georgia-psi-mercer-university",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "connecticut-alpha-a-trinity-college",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "new-jersey-alpha-a-princeton-university",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "colorado-chi-university-of-colorado-boulder",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "ohio-gamma-ohio-university",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "louisiana-tau-centenary-college-of-louisiana",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "virginia-tau-university-of-richmond",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "kansas-beta-kansas-state-university",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "california-eta-emerging-chapter-university-of-california-santa-barbara",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      },
+      {
+        "chapterSlug": "oklahoma-kappa-university-of-oklahoma",
+        "sourceSlug": "sigma-alpha-epsilon-main",
+        "fieldName": "verify_school_match",
+        "recommendedAction": "verify_school",
+        "deterministicAction": "defer",
+        "finalState": "requeued",
+        "providerWaste": false,
+        "supportingPagePresent": false,
+        "providerWindowHealthy": false
+      }
+    ]
+  },
+  "search_preflight": {
+    "captured_at": "2026-04-21T22:48:13.943889+00:00",
+    "healthy": false,
+    "success_rate": 0.0,
+    "provider_window_success_rate": 0.0,
+    "successes": 0,
+    "probes": 4,
+    "min_success_rate": 0.34,
+    "provider_health": {
+      "searxng_json": {
+        "attempts": 6,
+        "successes": 0,
+        "unavailable": 4,
+        "request_error": 2,
+        "skipped": 0,
+        "low_signal": 0,
+        "challenge_or_anomaly": 0,
+        "failure_types": {
+          "connection_refused": 2,
+          "SearchUnavailableError": 2,
+          "circuit_open": 2
+        },
+        "success_rate": 0.0,
+        "healthy": false,
+        "health_reason": "below_success_threshold"
+      },
+      "duckduckgo_html": {
+        "attempts": 4,
+        "successes": 0,
+        "unavailable": 0,
+        "request_error": 4,
+        "skipped": 0,
+        "low_signal": 0,
+        "challenge_or_anomaly": 0,
+        "failure_types": {
+          "timeout": 4
+        },
+        "success_rate": 0.0,
+        "healthy": false,
+        "health_reason": "request_error_only"
+      },
+      "bing_html": {
+        "attempts": 4,
+        "successes": 0,
+        "unavailable": 4,
+        "request_error": 0,
+        "skipped": 0,
+        "low_signal": 0,
+        "challenge_or_anomaly": 4,
+        "failure_types": {
+          "challenge_or_anomaly": 4
+        },
+        "success_rate": 0.0,
+        "healthy": false,
+        "health_reason": "challenge_or_anomaly"
+      }
+    },
+    "probe_outcomes": [
+      {
+        "query": "\"sigma chi\" University of Virginia instagram",
+        "success": false,
+        "result_count": 0,
+        "error": "Bing HTML returned a challenge or anomaly page",
+        "provider_attempts": [
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "connection_refused",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 4250,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 4250,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5062,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 782,
+            "http_status": null
+          }
+        ]
+      },
+      {
+        "query": "\"delta chi\" Mississippi State chapter website",
+        "success": false,
+        "result_count": 0,
+        "error": "HTTPConnectionPool(host='localhost', port=8888): Max retries exceeded with url: /search?q=%22delta+chi%22+Mississippi+State+chapter+website&format=json (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000023BBE327050>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it'))",
+        "provider_attempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 5016,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 453,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "connection_refused",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 4234,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "SearchUnavailableError",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 4234,
+            "http_status": null
+          }
+        ]
+      },
+      {
+        "query": "\"lambda chi alpha\" Purdue contact email",
+        "success": false,
+        "result_count": 0,
+        "error": "searxng_json temporarily unavailable (circuit open)",
+        "provider_attempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 5016,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 187,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ]
+      },
+      {
+        "query": "\"phi gamma delta\" chapter directory",
+        "success": false,
+        "result_count": 0,
+        "error": "searxng_json temporarily unavailable (circuit open)",
+        "provider_attempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 5015,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 141,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ]
+      }
+    ],
+    "viable_providers": [],
+    "reason": "probe_success_below_threshold",
+    "provider_window_state": {
+      "general_web_search": {
+        "lane": "general_web_search",
+        "window_started_at": "2026-04-21T22:48:13.943889+00:00",
+        "window_success_rate": 0.0,
+        "attempt_count": 14,
+        "request_error_count": 6,
+        "challenge_or_anomaly_count": 4,
+        "healthy": false,
+        "degraded_reason": "probe_success_below_threshold",
+        "providers": [
+          {
+            "provider": "searxng_json",
+            "attempt_count": 6,
+            "success_count": 0,
+            "request_error_count": 2,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "duckduckgo_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 4,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 0,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "bing_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 0,
+            "challenge_or_anomaly_count": 4,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          }
+        ]
+      },
+      "social_search": {
+        "lane": "social_search",
+        "window_started_at": "2026-04-21T22:48:13.943889+00:00",
+        "window_success_rate": 0.0,
+        "attempt_count": 14,
+        "request_error_count": 6,
+        "challenge_or_anomaly_count": 4,
+        "healthy": false,
+        "degraded_reason": "probe_success_below_threshold",
+        "providers": [
+          {
+            "provider": "searxng_json",
+            "attempt_count": 6,
+            "success_count": 0,
+            "request_error_count": 2,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "duckduckgo_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 4,
+            "challenge_or_anomaly_count": 0,
+            "unavailable_count": 0,
+            "window_success_rate": 0.0
+          },
+          {
+            "provider": "bing_html",
+            "attempt_count": 4,
+            "success_count": 0,
+            "request_error_count": 0,
+            "challenge_or_anomaly_count": 4,
+            "unavailable_count": 4,
+            "window_success_rate": 0.0
+          }
+        ],
+        "source_mode": "shares_general_provider_pool"
+      },
+      "authoritative_fetch": {
+        "lane": "authoritative_fetch",
+        "window_started_at": "2026-04-21T22:48:13.943889+00:00",
+        "window_success_rate": 1.0,
+        "attempt_count": 0,
+        "request_error_count": 0,
+        "challenge_or_anomaly_count": 0,
+        "healthy": true,
+        "degraded_reason": "",
+        "source_mode": "independent_of_search_provider"
+      }
+    }
+  }
+}

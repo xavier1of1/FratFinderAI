@@ -5,7 +5,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
@@ -13,6 +13,11 @@ from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
 from fratfinder_crawler.config import Settings
+from fratfinder_crawler.provider_catalog import (
+    SUPPORTED_PROVIDER_CHOICES,
+    canonical_free_provider_order,
+    normalize_free_provider_order,
+)
 
 _DDG_HTML_ENDPOINT = "https://html.duckduckgo.com/html/"
 _DDG_LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
@@ -21,6 +26,7 @@ _BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 _BRAVE_HTML_ENDPOINT = "https://search.brave.com/search"
 _TAVILY_SEARCH_ENDPOINT = "https://api.tavily.com/search"
 _SERPER_SEARCH_ENDPOINT = "https://google.serper.dev/search"
+_DATAFORSEO_SEARCH_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
 _LOW_SIGNAL_SEARCH_HOSTS = {
     "reddit.com",
     "www.reddit.com",
@@ -57,19 +63,6 @@ _LOW_SIGNAL_QUERY_STOPWORDS = {
     "http",
     "https",
 }
-_SUPPORTED_PROVIDERS = {
-    "auto",
-    "auto_free",
-    "searxng_json",
-    "tavily_api",
-    "serper_api",
-    "brave_api",
-    "bing_html",
-    "duckduckgo_html",
-    "brave_html",
-}
-
-
 @dataclass(slots=True)
 class SearchResult:
     title: str
@@ -89,6 +82,7 @@ class SearchClient:
         settings: Settings,
         get_requester: Callable[..., object] | None = None,
         post_requester: Callable[..., object] | None = None,
+        attempt_recorder: Callable[[dict[str, object]], None] | None = None,
     ):
         self._settings = settings
         self._query_cache: dict[tuple[str, str, int], list[SearchResult]] = {}
@@ -98,7 +92,9 @@ class SearchClient:
         self._provider_attempt_totals: dict[str, int] = {}
         self._provider_success_totals: dict[str, int] = {}
         self._last_provider_attempts: list[dict[str, object]] = []
+        self._attempt_recorder = attempt_recorder
         self._global_last_request_at: float = 0.0
+        self._preferred_searxng_endpoint: str | None = None
         self._min_request_interval_seconds = max(0.0, float(settings.crawler_search_min_request_interval_ms) / 1000.0)
         self._provider_min_request_interval_seconds: dict[str, float] = {
             "searxng_json": max(0.0, float(settings.crawler_search_provider_pacing_ms_searxng_json) / 1000.0),
@@ -133,7 +129,7 @@ class SearchClient:
         if cached is not None:
             return list(cached)
 
-        if provider not in _SUPPORTED_PROVIDERS:
+        if provider not in SUPPORTED_PROVIDER_CHOICES:
             raise SearchUnavailableError(f"Unsupported search provider: {self._settings.crawler_search_provider}")
 
         if provider == "auto":
@@ -145,7 +141,7 @@ class SearchClient:
             self._cache_query_results(cache_key, results)
             return results
         if provider == "searxng_json":
-            results = self._run_provider_call("searxng_json", lambda: self._search_searxng_json(query, limit))
+            results = self._search_searxng_json(query, limit)
             self._cache_query_results(cache_key, results)
             return results
         if provider == "tavily_api":
@@ -154,6 +150,10 @@ class SearchClient:
             return results
         if provider == "serper_api":
             results = self._run_provider_call("serper_api", lambda: self._search_serper_api(query, limit))
+            self._cache_query_results(cache_key, results)
+            return results
+        if provider == "dataforseo_api":
+            results = self._run_provider_call("dataforseo_api", lambda: self._search_dataforseo_api(query, limit))
             self._cache_query_results(cache_key, results)
             return results
         if provider == "brave_api":
@@ -170,7 +170,7 @@ class SearchClient:
             self._cache_query_results(cache_key, results)
             return results
         if provider == "duckduckgo_html":
-            results = self._search_with_provider_chain(query, limit, ["duckduckgo_html", "searxng_json", "bing_html"])
+            results = self._search_with_provider_chain(query, limit, ["duckduckgo_html", "bing_html", "searxng_json"])
             self._cache_query_results(cache_key, results)
             return results
         if provider == "brave_html":
@@ -192,17 +192,7 @@ class SearchClient:
         return self._search_with_provider_chain(query, max_results, providers)
 
     def _free_provider_order(self) -> list[str]:
-        raw_order = (self._settings.crawler_search_provider_order_free or "").strip()
-        if not raw_order:
-            raw_order = "searxng_json,duckduckgo_html,bing_html"
-        deduped: list[str] = []
-        for token in (part.strip().lower() for part in raw_order.split(",")):
-            if not token or token in deduped:
-                continue
-            if token not in _SUPPORTED_PROVIDERS or token in {"auto", "auto_free", "brave_api"}:
-                continue
-            deduped.append(token)
-        provider_order = deduped or ["searxng_json", "duckduckgo_html", "bing_html"]
+        provider_order, _warnings = normalize_free_provider_order(self._settings.crawler_search_provider_order_free)
         return self._rank_providers(provider_order)
 
     def _search_with_provider_chain(self, query: str, max_results: int, providers: list[str]) -> list[SearchResult]:
@@ -241,22 +231,28 @@ class SearchClient:
 
     def _provider_configured(self, provider: str) -> bool:
         if provider == "searxng_json":
-            return bool((self._settings.crawler_search_searxng_base_url or "").strip())
+            return bool(self._searxng_endpoints())
         if provider == "tavily_api":
             return bool((self._settings.crawler_search_tavily_api_key or "").strip())
         if provider == "serper_api":
             return bool((self._settings.crawler_search_serper_api_key or "").strip())
+        if provider == "dataforseo_api":
+            return bool((self._settings.crawler_search_dataforseo_login or "").strip()) and bool(
+                (self._settings.crawler_search_dataforseo_password or "").strip()
+            )
         if provider == "brave_api":
             return bool((self._settings.crawler_search_brave_api_key or "").strip())
         return True
 
     def _search_with_single_provider(self, provider: str, query: str, max_results: int, *, fallback_taken: bool) -> list[SearchResult]:
         if provider == "searxng_json":
-            return self._run_provider_call("searxng_json", lambda: self._search_searxng_json(query, max_results), fallback_taken=fallback_taken)
+            return self._search_searxng_json(query, max_results)
         if provider == "tavily_api":
             return self._run_provider_call("tavily_api", lambda: self._search_tavily_api(query, max_results), fallback_taken=fallback_taken)
         if provider == "serper_api":
             return self._run_provider_call("serper_api", lambda: self._search_serper_api(query, max_results), fallback_taken=fallback_taken)
+        if provider == "dataforseo_api":
+            return self._run_provider_call("dataforseo_api", lambda: self._search_dataforseo_api(query, max_results), fallback_taken=fallback_taken)
         if provider == "bing_html":
             return self._run_provider_call("bing_html", lambda: self._search_bing_html(query, max_results), fallback_taken=fallback_taken)
         if provider == "duckduckgo_html":
@@ -281,6 +277,7 @@ class SearchClient:
         return attempts
 
     def _run_provider_call(self, provider: str, fn: Callable[[], list[SearchResult]], *, fallback_taken: bool = False) -> list[SearchResult]:
+        attempt_start = time.monotonic()
         try:
             self._ensure_provider_available(provider)
         except SearchUnavailableError as exc:
@@ -290,6 +287,7 @@ class SearchClient:
                 failure_type=self._classify_failure_type(exc),
                 circuit_open="circuit open" in str(exc).lower(),
                 fallback_taken=fallback_taken,
+                latency_ms=self._elapsed_ms(attempt_start),
             )
             raise
 
@@ -304,6 +302,7 @@ class SearchClient:
                 failure_type=self._classify_failure_type(exc),
                 circuit_open="circuit open" in str(exc).lower(),
                 fallback_taken=fallback_taken,
+                latency_ms=self._elapsed_ms(attempt_start),
             )
             raise
         except requests.RequestException as exc:
@@ -311,12 +310,20 @@ class SearchClient:
             self._record_provider_attempt(
                 provider,
                 "request_error",
-                failure_type=type(exc).__name__,
+                failure_type=self._classify_request_exception(exc),
                 fallback_taken=fallback_taken,
+                latency_ms=self._elapsed_ms(attempt_start),
+                http_status=getattr(getattr(exc, "response", None), "status_code", None),
             )
             raise
         self._record_provider_success(provider)
-        self._record_provider_attempt(provider, "success", result_count=len(results), fallback_taken=fallback_taken)
+        self._record_provider_attempt(
+            provider,
+            "success",
+            result_count=len(results),
+            fallback_taken=fallback_taken,
+            latency_ms=self._elapsed_ms(attempt_start),
+        )
         return results
 
     def _record_provider_attempt(
@@ -328,19 +335,29 @@ class SearchClient:
         failure_type: str | None = None,
         circuit_open: bool = False,
         fallback_taken: bool = False,
+        provider_endpoint: str | None = None,
+        latency_ms: int | None = None,
+        http_status: int | None = None,
     ) -> None:
-        self._last_provider_attempts.append(
-            {
-                "provider": provider,
-                "status": status,
-                "result_count": result_count,
-                "failure_type": failure_type,
-                "circuit_open": circuit_open,
-                "fallback_taken": fallback_taken,
-            }
-        )
+        attempt_payload: dict[str, object] = {
+            "provider": provider,
+            "provider_endpoint": provider_endpoint,
+            "status": status,
+            "result_count": result_count,
+            "failure_type": failure_type,
+            "circuit_open": circuit_open,
+            "fallback_taken": fallback_taken,
+            "latency_ms": latency_ms,
+            "http_status": http_status,
+        }
+        self._last_provider_attempts.append(attempt_payload)
+        if self._attempt_recorder is not None:
+            self._attempt_recorder(dict(attempt_payload))
         if status != "skipped":
-            self._provider_attempt_totals[provider] = self._provider_attempt_totals.get(provider, 0) + 1
+            provider_key = self._provider_state_key(provider, provider_endpoint)
+            self._provider_attempt_totals[provider_key] = self._provider_attempt_totals.get(provider_key, 0) + 1
+            if provider_key != provider:
+                self._provider_attempt_totals[provider] = self._provider_attempt_totals.get(provider, 0) + 1
 
     def _rank_providers(self, providers: list[str]) -> list[str]:
         if len(providers) <= 1:
@@ -369,11 +386,46 @@ class SearchClient:
         message = str(error).lower()
         if "circuit open" in message:
             return "circuit_open"
+        if "json disabled" in message or "403" in message and "json" in message:
+            return "json_disabled"
+        if "unresponsive engines" in message:
+            return "engine_unresponsive"
+        if "endpoint down" in message:
+            return "endpoint_down"
         if "anomaly" in message or "challenge" in message or "captcha" in message:
             return "challenge_or_anomaly"
         if "temporarily unavailable" in message:
             return "provider_unavailable"
         return type(error).__name__
+
+    def _classify_request_exception(self, error: requests.RequestException) -> str:
+        if isinstance(error, requests.Timeout):
+            return "timeout"
+        if isinstance(error, requests.ConnectionError):
+            message = str(error).lower()
+            if "name or service not known" in message or "getaddrinfo" in message or "dns" in message:
+                return "dns_error"
+            if "refused" in message:
+                return "connection_refused"
+            return "request_error_only"
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None)
+        detail = _response_error_snippet(response).lower() if response is not None else ""
+        if status_code == 401:
+            return "auth_error"
+        if status_code == 402:
+            return "quota_exceeded"
+        if status_code == 432:
+            return "quota_exceeded"
+        if status_code == 403 and any(token in detail for token in ("invalid api key", "invalid key", "unauthorized", "forbidden")):
+            return "auth_error"
+        if status_code == 400 and any(token in detail for token in ("not enough credits", "usage limit", "exceeds your plan", "quota")):
+            return "quota_exceeded"
+        if status_code == 403 and "searxng" in str(getattr(response, "url", "")).lower():
+            return "json_disabled"
+        if status_code == 429:
+            return "rate_limited_429"
+        return "request_error_only"
 
     def _apply_request_spacing(self, provider: str) -> None:
         provider_interval = self._provider_min_request_interval_seconds.get(provider, 0.0)
@@ -399,12 +451,18 @@ class SearchClient:
         self._provider_failure_streak[provider] = 0
         self._provider_circuit_open_until.pop(provider, None)
         self._provider_success_totals[provider] = self._provider_success_totals.get(provider, 0) + 1
+        if "::" in provider:
+            base_provider = provider.split("::", 1)[0]
+            self._provider_success_totals[base_provider] = self._provider_success_totals.get(base_provider, 0) + 1
 
     def _record_provider_failure(self, provider: str) -> None:
         threshold = max(1, self._settings.crawler_search_circuit_breaker_failures)
         cooldown_seconds = max(0, self._settings.crawler_search_circuit_breaker_cooldown_seconds)
         streak = self._provider_failure_streak.get(provider, 0) + 1
         self._provider_failure_streak[provider] = streak
+        if "::" in provider:
+            base_provider = provider.split("::", 1)[0]
+            self._provider_failure_streak[base_provider] = self._provider_failure_streak.get(base_provider, 0) + 1
         if cooldown_seconds > 0 and streak >= threshold:
             self._provider_circuit_open_until[provider] = time.monotonic() + cooldown_seconds
 
@@ -532,10 +590,72 @@ class SearchClient:
         return results
 
     def _search_searxng_json(self, query: str, max_results: int) -> list[SearchResult]:
-        base_url = (self._settings.crawler_search_searxng_base_url or "").strip().rstrip("/")
-        if not base_url:
+        endpoints = self._ordered_searxng_endpoints()
+        if not endpoints:
             raise SearchUnavailableError("SearXNG base URL is required when provider is searxng_json")
-        endpoint = f"{base_url}/search"
+
+        last_error: Exception | None = None
+        for endpoint_base_url in endpoints:
+            state_key = self._provider_state_key("searxng_json", endpoint_base_url)
+            endpoint_start = time.monotonic()
+            try:
+                self._ensure_provider_available(state_key)
+            except SearchUnavailableError as exc:
+                self._record_provider_attempt(
+                    "searxng_json",
+                    "unavailable",
+                    failure_type=self._classify_failure_type(exc),
+                    circuit_open=True,
+                    provider_endpoint=endpoint_base_url,
+                    latency_ms=self._elapsed_ms(endpoint_start),
+                )
+                last_error = exc
+                continue
+
+            self._apply_request_spacing("searxng_json")
+            try:
+                results = self._search_single_searxng_endpoint(endpoint_base_url, query, max_results)
+            except SearchUnavailableError as exc:
+                self._record_provider_failure(state_key)
+                self._record_provider_attempt(
+                    "searxng_json",
+                    "unavailable",
+                    failure_type=self._classify_failure_type(exc),
+                    provider_endpoint=endpoint_base_url,
+                    latency_ms=self._elapsed_ms(endpoint_start),
+                )
+                last_error = exc
+                continue
+            except requests.RequestException as exc:
+                self._record_provider_failure(state_key)
+                self._record_provider_attempt(
+                    "searxng_json",
+                    "request_error",
+                    failure_type=self._classify_request_exception(exc),
+                    provider_endpoint=endpoint_base_url,
+                    latency_ms=self._elapsed_ms(endpoint_start),
+                    http_status=getattr(getattr(exc, "response", None), "status_code", None),
+                )
+                last_error = exc
+                continue
+
+            self._record_provider_success(state_key)
+            self._preferred_searxng_endpoint = endpoint_base_url
+            self._record_provider_attempt(
+                "searxng_json",
+                "success",
+                result_count=len(results),
+                provider_endpoint=endpoint_base_url,
+                latency_ms=self._elapsed_ms(endpoint_start),
+            )
+            return results
+
+        if last_error is not None:
+            raise SearchUnavailableError(str(last_error))
+        raise SearchUnavailableError("SearXNG endpoints are unavailable")
+
+    def _search_single_searxng_endpoint(self, base_url: str, query: str, max_results: int) -> list[SearchResult]:
+        endpoint = f"{base_url.rstrip('/')}/search"
         params: dict[str, str | int] = {"q": query, "format": "json"}
         engines = (self._settings.crawler_search_searxng_engines or "").strip()
         if engines:
@@ -546,10 +666,14 @@ class SearchClient:
             params=params,
             timeout=timeout,
             verify=self._settings.crawler_http_verify_ssl,
-            headers=self._search_headers(referer=f"{base_url}/"),
+            headers=self._search_headers(referer=f"{base_url.rstrip('/')}/"),
         )
+        if getattr(response, "status_code", None) == 403:
+            raise SearchUnavailableError("SearXNG JSON disabled (403)")
         response.raise_for_status()
         payload = response.json() if hasattr(response, "json") else json.loads(getattr(response, "text", "{}") or "{}")
+        if not isinstance(payload, dict):
+            raise SearchUnavailableError("SearXNG returned an invalid JSON payload")
         results: list[SearchResult] = []
         for rank, item in enumerate(payload.get("results", []), start=1):
             if not isinstance(item, dict):
@@ -593,7 +717,7 @@ class SearchClient:
                 "Content-Type": "application/json",
             },
         )
-        response.raise_for_status()
+        self._raise_for_status_with_context(response, "tavily_api")
         payload = response.json() if hasattr(response, "json") else json.loads(getattr(response, "text", "{}") or "{}")
         results: list[SearchResult] = []
         for rank, item in enumerate(payload.get("results", []), start=1):
@@ -627,7 +751,7 @@ class SearchClient:
                 "X-API-KEY": api_key,
             },
         )
-        response.raise_for_status()
+        self._raise_for_status_with_context(response, "serper_api")
         payload = response.json() if hasattr(response, "json") else json.loads(getattr(response, "text", "{}") or "{}")
         results: list[SearchResult] = []
         for rank, item in enumerate(payload.get("organic", []), start=1):
@@ -670,6 +794,94 @@ class SearchClient:
             if len(results) >= max_results:
                 break
         return results
+
+    def _search_dataforseo_api(self, query: str, max_results: int) -> list[SearchResult]:
+        login = str(self._settings.crawler_search_dataforseo_login or "").strip()
+        password = str(self._settings.crawler_search_dataforseo_password or "").strip()
+        if not login or not password:
+            raise SearchUnavailableError("DataForSEO API credentials are required when provider is dataforseo_api")
+        auth = base64.b64encode(f"{login}:{password}".encode("utf-8")).decode("ascii")
+        response = self._post_requester(
+            _DATAFORSEO_SEARCH_ENDPOINT,
+            json=[
+                {
+                    "keyword": query,
+                    "location_name": self._settings.crawler_search_dataforseo_location_name,
+                    "language_name": self._settings.crawler_search_dataforseo_language_name,
+                    "depth": max(10, max_results),
+                }
+            ],
+            timeout=self._settings.crawler_http_timeout_seconds,
+            verify=self._settings.crawler_http_verify_ssl,
+            headers={
+                "User-Agent": self._settings.crawler_http_user_agent,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {auth}",
+            },
+        )
+        self._raise_for_status_with_context(response, "dataforseo_api")
+        payload = response.json() if hasattr(response, "json") else json.loads(getattr(response, "text", "{}") or "{}")
+        tasks = payload.get("tasks") if isinstance(payload, dict) else None
+        task = tasks[0] if isinstance(tasks, list) and tasks else None
+        result_sets = task.get("result") if isinstance(task, dict) else None
+        result_set = result_sets[0] if isinstance(result_sets, list) and result_sets else None
+        items = result_set.get("items") if isinstance(result_set, dict) else None
+        results: list[SearchResult] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("type") or "").strip().lower() not in {"organic", "featured_snippet", "knowledge_graph"}:
+                continue
+            url = str(item.get("url") or "").strip()
+            title = str(item.get("title") or "").strip() or url
+            snippet = str(item.get("description") or item.get("snippet") or "").strip()
+            if not url or not title:
+                continue
+            results.append(SearchResult(title=title, url=url, snippet=snippet, provider="dataforseo_api", rank=len(results) + 1))
+            if len(results) >= max_results:
+                break
+        if not results:
+            raise SearchUnavailableError("DataForSEO returned no parseable search results")
+        return results
+
+    def _searxng_endpoints(self) -> list[str]:
+        raw_multi = str(self._settings.crawler_search_searxng_base_urls or "").strip()
+        candidates: list[str] = []
+        if raw_multi:
+            for token in raw_multi.split(","):
+                value = str(token or "").strip().rstrip("/")
+                if value and value not in candidates:
+                    candidates.append(value)
+        single = str(self._settings.crawler_search_searxng_base_url or "").strip().rstrip("/")
+        if not candidates and single:
+            candidates.append(single)
+        return candidates
+
+    def _ordered_searxng_endpoints(self) -> list[str]:
+        endpoints = self._searxng_endpoints()
+        preferred = str(self._preferred_searxng_endpoint or "").strip().rstrip("/")
+        if preferred and preferred in endpoints:
+            return [preferred, *[endpoint for endpoint in endpoints if endpoint != preferred]]
+        return endpoints
+
+    def _provider_state_key(self, provider: str, provider_endpoint: str | None = None) -> str:
+        endpoint = str(provider_endpoint or "").strip().rstrip("/")
+        if provider == "searxng_json" and endpoint:
+            return f"{provider}::{endpoint}"
+        return provider
+
+    def _elapsed_ms(self, started_at: float) -> int:
+        return max(0, int(round((time.monotonic() - started_at) * 1000.0)))
+
+    def _raise_for_status_with_context(self, response: object, provider: str) -> None:
+        try:
+            getattr(response, "raise_for_status")()
+        except requests.HTTPError as exc:
+            detail = _response_error_snippet(response)
+            if detail:
+                raise requests.HTTPError(f"{exc} | {provider} response: {detail}", request=exc.request, response=exc.response) from exc
+            raise
 
 
 def _normalize_search_result_url(url: str) -> str:
@@ -780,3 +992,23 @@ def _should_fallback_from_low_signal_results(query: str, results: list[SearchRes
         return True
 
     return False
+
+
+def _response_error_snippet(response: object, limit: int = 240) -> str:
+    try:
+        payload = response.json() if hasattr(response, "json") else None
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        for key in ("message", "error", "detail"):
+            value = payload.get(key)
+            if value:
+                text = str(value).strip()
+                return text[:limit]
+        rendered = json.dumps(payload, ensure_ascii=True)
+        return rendered[:limit]
+    text = str(getattr(response, "text", "") or "").strip()
+    if not text:
+        return ""
+    condensed = re.sub(r"\s+", " ", text)
+    return condensed[:limit]

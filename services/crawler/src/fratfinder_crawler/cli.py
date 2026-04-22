@@ -74,6 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
     preflight_parser = subparsers.add_parser("search-preflight", help="Run search provider health probes")
     preflight_parser.add_argument("--probes", type=int, default=None, help="Number of probe queries to run")
 
+    smoke_parser = subparsers.add_parser("search-provider-smoke", help="Run a fixed provider smoke cohort and emit JSON metrics")
+    smoke_parser.add_argument("--provider", required=True, help="Provider to evaluate, for example serper_api or tavily_api")
+    smoke_parser.add_argument("--query-set-file", default=None, help="Optional JSON or JSONL file with category/query records")
+    smoke_parser.add_argument("--max-queries", type=int, default=None, help="Optional cap on the number of cohort queries")
+    smoke_parser.add_argument("--delay-ms", type=int, default=None, help="Optional delay between cohort queries")
+    smoke_parser.add_argument("--output-path", default=None, help="Optional JSON report output path")
+
     subparsers.add_parser("doctor", help="Report effective crawler settings, env resolution, provider reachability, and worker liveness")
 
     baseline_parser = subparsers.add_parser("system-baseline", help="Capture a live baseline snapshot for accuracy, queue state, and provider health")
@@ -259,6 +266,17 @@ def main() -> None:
     if args.command == "search-preflight":
         result = service.search_preflight(probes=args.probes)
         print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "search-provider-smoke":
+        result = service.search_provider_smoke(
+            provider=args.provider,
+            query_set_file=args.query_set_file,
+            max_queries=args.max_queries,
+            output_path=args.output_path,
+            delay_ms=args.delay_ms,
+        )
+        print(json.dumps(result, indent=2, default=str))
         return
 
     if args.command == "doctor":

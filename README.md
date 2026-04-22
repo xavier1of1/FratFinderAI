@@ -196,7 +196,7 @@ Relevant env settings:
 
 - `CRAWLER_SEARCH_ENABLED=true` enables search-backed enrichment for missing fields.
 - `CRAWLER_SEARCH_PROVIDER=auto` is the recommended default: it starts with SearXNG (`searxng_json`) when configured, then follows the configured free-provider order.
-- The recommended free chain is `searxng_json -> duckduckgo_html -> bing_html`. This keeps the local SearXNG instance first while still falling through cleanly when it is temporarily unavailable.
+- The recommended free chain is `searxng_json -> bing_html -> duckduckgo_html`. This keeps the local SearXNG instance first while preferring Bing as the first HTML fallback when SearXNG is temporarily unavailable.
 - `CRAWLER_SEARCH_PROVIDER=auto_free` remains available for the same free-only chain and skips providers that are not configured.
 - `CRAWLER_SEARCH_PROVIDER=bing_html` remains available for explicit local-only testing when you want to bypass Brave.
 - `CRAWLER_SEARCH_PROVIDER_ORDER_FREE` overrides the `auto_free` chain when you need custom ordering.
