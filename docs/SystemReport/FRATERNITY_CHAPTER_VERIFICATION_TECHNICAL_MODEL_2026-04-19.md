@@ -1,7 +1,7 @@
 # Fraternity Chapter Verification Technical Model
 
 Date: 2026-04-19
-System version: 3.0.2
+System version: 3.0.3
 Primary scope: national-source discovery, chapter extraction, chapter existence verification, and active/inactive status determination
 
 ## Why this document exists

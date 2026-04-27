@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Changed
+- Incremented the platform version to `3.0.3` across the root workspace, web app, crawler service, contracts package, and active surfaced version labels.
+
 ### Added
 - Added `infra/supabase/migrations/0027_school_policy_and_chapter_activity.sql` to introduce durable `school_greek_life_registry` and `fraternity_school_activity_cache` tables for campus policy and school-specific chapter activity validation.
 - Added a `purge_inactive_schools` request-graph stage plus crawler/UI state to expose school-policy and chapter-activity validation before contact enrichment is admitted.
