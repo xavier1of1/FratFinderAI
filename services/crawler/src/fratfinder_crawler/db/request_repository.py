@@ -6,6 +6,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from fratfinder_crawler.models import ChapterEvidenceRecord, FraternityCrawlRequestRecord, ProvisionalChapterRecord, RequestGraphRunRecord
+from fratfinder_crawler.normalization.state_normalizer import normalize_us_state
 
 
 class RequestGraphRepository:
@@ -311,6 +312,52 @@ class RequestGraphRepository:
         self._connection.commit()
         return int(count or 0)
 
+    def reconcile_stale_request_graph_runs(self, max_age_minutes: int = 45) -> int:
+        stale_minutes = max(1, int(max_age_minutes))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE request_graph_runs rgr
+                SET
+                    status = CASE
+                        WHEN fcr.status = 'succeeded' THEN 'succeeded'
+                        WHEN fcr.status = 'paused' THEN 'paused'
+                        WHEN fcr.status = 'draft' THEN 'paused'
+                        ELSE 'failed'
+                    END,
+                    active_node = COALESCE(rgr.active_node, 'stale_reconciler'),
+                    error_message = CASE
+                        WHEN fcr.status IN ('succeeded', 'paused', 'draft') THEN rgr.error_message
+                        ELSE COALESCE(rgr.error_message, %s)
+                    END,
+                    finished_at = COALESCE(
+                        rgr.finished_at,
+                        CASE
+                            WHEN fcr.finished_at IS NOT NULL THEN fcr.finished_at
+                            ELSE NOW()
+                        END
+                    ),
+                    updated_at = NOW()
+                FROM fraternity_crawl_requests fcr
+                WHERE rgr.request_id = fcr.id
+                  AND rgr.status = 'running'
+                  AND (
+                    rgr.updated_at < NOW() - (%s::int * INTERVAL '1 minute')
+                    OR (
+                        fcr.status IN ('succeeded', 'failed', 'paused', 'draft', 'canceled')
+                        AND fcr.updated_at >= rgr.updated_at
+                    )
+                  )
+                """,
+                (
+                    "Request graph run stalled before terminal transition",
+                    stale_minutes,
+                ),
+            )
+            count = cursor.rowcount
+        self._connection.commit()
+        return int(count or 0)
+
     def heartbeat_request_lease(
         self,
         *,
@@ -407,6 +454,46 @@ class RequestGraphRepository:
             return None
         return dict(row)
 
+    def get_crawl_run_by_id(self, crawl_run_id: int) -> dict[str, Any] | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    cr.id,
+                    s.slug AS source_slug,
+                    cr.status,
+                    cr.started_at,
+                    cr.finished_at,
+                    cr.pages_processed,
+                    cr.records_seen,
+                    cr.records_upserted,
+                    cr.review_items_created,
+                    cr.field_jobs_created,
+                    cr.last_error,
+                    cr.extraction_metadata,
+                    cr.extraction_metadata ->> 'strategy_used' AS strategy_used,
+                    cr.extraction_metadata ->> 'runtime_mode' AS runtime_mode,
+                    cr.extraction_metadata ->> 'stop_reason' AS stop_reason,
+                    COALESCE(cs.session_count, 0) AS crawl_session_count,
+                    NULLIF(cr.extraction_metadata ->> 'page_level_confidence', '')::double precision AS page_level_confidence,
+                    COALESCE(NULLIF(cr.extraction_metadata ->> 'llm_calls_used', '')::integer, 0) AS llm_calls_used
+                FROM crawl_runs cr
+                JOIN sources s ON s.id = cr.source_id
+                LEFT JOIN (
+                    SELECT crawl_run_id, COUNT(*)::int AS session_count
+                    FROM crawl_sessions
+                    GROUP BY crawl_run_id
+                ) cs ON cs.crawl_run_id = cr.id
+                WHERE cr.id = %s
+                LIMIT 1
+                """,
+                (int(crawl_run_id),),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
     def get_source_field_job_snapshot(self, source_slug: str) -> list[dict[str, Any]]:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -425,6 +512,22 @@ class RequestGraphRepository:
                         WHERE fj.status = 'queued'
                           AND COALESCE(fj.queue_state, 'actionable') = 'deferred'
                     )::int AS queued_deferred,
+                    COUNT(*) FILTER (
+                        WHERE fj.status = 'queued'
+                          AND COALESCE(fj.queue_state, 'actionable') <> 'actionable'
+                    )::int AS queued_non_actionable,
+                    COUNT(*) FILTER (
+                        WHERE fj.status = 'queued'
+                          AND COALESCE(fj.queue_state, 'actionable') = 'blocked_provider'
+                    )::int AS queued_blocked_provider,
+                    COUNT(*) FILTER (
+                        WHERE fj.status = 'queued'
+                          AND COALESCE(fj.queue_state, 'actionable') = 'blocked_dependency'
+                    )::int AS queued_blocked_dependency,
+                    COUNT(*) FILTER (
+                        WHERE fj.status = 'queued'
+                          AND COALESCE(fj.queue_state, 'actionable') = 'blocked_repairable'
+                    )::int AS queued_blocked_repairable,
                     COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.terminal_outcome, '') = 'updated')::int AS done_updated,
                     COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.terminal_outcome, '') = 'review_required')::int AS done_review_required,
                     COUNT(*) FILTER (WHERE fj.status = 'done' AND COALESCE(fj.terminal_outcome, '') = 'terminal_no_signal')::int AS done_terminal_no_signal,
@@ -440,9 +543,9 @@ class RequestGraphRepository:
             )
             rows = cursor.fetchall()
         grouped = {
-            'find_website': {'queued': 0, 'running': 0, 'done': 0, 'failed': 0, 'queued_actionable': 0, 'queued_deferred': 0, 'done_updated': 0, 'done_review_required': 0, 'done_terminal_no_signal': 0, 'done_provider_degraded': 0},
-            'find_email': {'queued': 0, 'running': 0, 'done': 0, 'failed': 0, 'queued_actionable': 0, 'queued_deferred': 0, 'done_updated': 0, 'done_review_required': 0, 'done_terminal_no_signal': 0, 'done_provider_degraded': 0},
-            'find_instagram': {'queued': 0, 'running': 0, 'done': 0, 'failed': 0, 'queued_actionable': 0, 'queued_deferred': 0, 'done_updated': 0, 'done_review_required': 0, 'done_terminal_no_signal': 0, 'done_provider_degraded': 0},
+            'find_website': {'queued': 0, 'running': 0, 'done': 0, 'failed': 0, 'queued_actionable': 0, 'queued_deferred': 0, 'queued_non_actionable': 0, 'queued_blocked_provider': 0, 'queued_blocked_dependency': 0, 'queued_blocked_repairable': 0, 'done_updated': 0, 'done_review_required': 0, 'done_terminal_no_signal': 0, 'done_provider_degraded': 0},
+            'find_email': {'queued': 0, 'running': 0, 'done': 0, 'failed': 0, 'queued_actionable': 0, 'queued_deferred': 0, 'queued_non_actionable': 0, 'queued_blocked_provider': 0, 'queued_blocked_dependency': 0, 'queued_blocked_repairable': 0, 'done_updated': 0, 'done_review_required': 0, 'done_terminal_no_signal': 0, 'done_provider_degraded': 0},
+            'find_instagram': {'queued': 0, 'running': 0, 'done': 0, 'failed': 0, 'queued_actionable': 0, 'queued_deferred': 0, 'queued_non_actionable': 0, 'queued_blocked_provider': 0, 'queued_blocked_dependency': 0, 'queued_blocked_repairable': 0, 'done_updated': 0, 'done_review_required': 0, 'done_terminal_no_signal': 0, 'done_provider_degraded': 0},
         }
         for row in rows:
             grouped[row['field_name']] = {
@@ -452,6 +555,10 @@ class RequestGraphRepository:
                 'failed': int(row['failed'] or 0),
                 'queued_actionable': int(row['queued_actionable'] or 0),
                 'queued_deferred': int(row['queued_deferred'] or 0),
+                'queued_non_actionable': int(row['queued_non_actionable'] or 0),
+                'queued_blocked_provider': int(row['queued_blocked_provider'] or 0),
+                'queued_blocked_dependency': int(row['queued_blocked_dependency'] or 0),
+                'queued_blocked_repairable': int(row['queued_blocked_repairable'] or 0),
                 'done_updated': int(row['done_updated'] or 0),
                 'done_review_required': int(row['done_review_required'] or 0),
                 'done_terminal_no_signal': int(row['done_terminal_no_signal'] or 0),
@@ -658,6 +765,7 @@ class RequestGraphRepository:
         promoted_chapter_id: str | None = None,
         evidence_payload: dict[str, Any] | None = None,
     ) -> str:
+        normalized_state = normalize_us_state(state)
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -670,7 +778,7 @@ class RequestGraphRepository:
                     name,
                     university_name,
                     city,
-                    state,
+                    normalized_state,
                     country,
                     website_url,
                     instagram_url,

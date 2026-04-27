@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 
 from fratfinder_crawler.candidate_sanitizer import sanitize_as_email, sanitize_as_instagram, sanitize_as_website
 from fratfinder_crawler.models import (
@@ -15,6 +16,7 @@ from fratfinder_crawler.models import (
     ProvenanceRecord,
     SourceRecord,
 )
+from fratfinder_crawler.normalization.state_normalizer import normalize_us_state
 
 
 LOW_CONFIDENCE_THRESHOLD = 0.85
@@ -166,6 +168,34 @@ _GREEK_TOKENS = {
     "omega",
 }
 
+_CHAPTER_SCHOOL_ENTITY_RE = re.compile(
+    r"(?P<school>(?:University of [A-Z][A-Za-z.&'-]+(?:\s+[A-Z][A-Za-z.&'-]+){0,5}|[A-Z][A-Za-z.&'-]+(?:\s+[A-Z][A-Za-z.&'-]+){0,5}\s(?:State University|State|Tech|College|University|Institute|Academy|Polytechnic)))\s+(?:provisional\s+)?(?:associate\s+)?(?:chapter|colony|charge|interest group)\b",
+    re.IGNORECASE,
+)
+_SCHOOL_TEXT_RE = re.compile(
+    r"\b(?P<school>(?:University of [A-Z][A-Za-z.&'-]+(?:\s+[A-Z][A-Za-z.&'-]+){0,5}|[A-Z][A-Za-z.&'-]+(?:\s+[A-Z][A-Za-z.&'-]+){0,5}\s(?:State University|State|Tech|College|University|Institute|Academy|Polytechnic)))\b",
+    re.IGNORECASE,
+)
+_HOST_SCHOOL_SUFFIXES = (
+    ("university", "University"),
+    ("college", "College"),
+    ("academy", "Academy"),
+    ("institute", "Institute"),
+    ("polytechnic", "Polytechnic"),
+    ("state", "State"),
+    ("tech", "Tech"),
+)
+_IGNORED_HOST_SCHOOL_LABELS = {
+    "www",
+    "chapter",
+    "chapters",
+    "greeklife",
+    "greek-life",
+    "students",
+    "org",
+    "edu",
+}
+
 
 def _slugify(value: str) -> str:
     value = value.strip().lower()
@@ -186,8 +216,83 @@ def _normalize_label(value: str | None) -> str:
     return re.sub(r"\s+", " ", value).strip().lower()
 
 
+def _normalize_space_preserving_case(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\s+", " ", value).strip()
+
+
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
+
+
+def _titleize_compact_school_token(value: str) -> str:
+    cleaned = re.sub(r"[^a-z]+", " ", value.lower()).strip()
+    return " ".join(part.capitalize() for part in cleaned.split() if part)
+
+
+def _match_school_from_entity_phrase(text: str | None) -> str | None:
+    normalized = _normalize_space_preserving_case(text)
+    if not normalized:
+        return None
+    match = _CHAPTER_SCHOOL_ENTITY_RE.search(normalized)
+    if not match:
+        return None
+    return _normalize_space_preserving_case(match.group("school"))
+
+
+def _match_school_from_text(text: str | None) -> str | None:
+    normalized = _normalize_space_preserving_case(text)
+    if not normalized:
+        return None
+    match = _SCHOOL_TEXT_RE.search(normalized)
+    if not match:
+        return None
+    candidate = _normalize_space_preserving_case(match.group("school"))
+    lowered = candidate.lower()
+    if " at " in lowered:
+        candidate = candidate[lowered.rfind(" at ") + 4 :].strip()
+    if candidate.lower().startswith("for "):
+        candidate = candidate[4:].strip()
+    return _normalize_space_preserving_case(candidate)
+
+
+def _match_school_from_source_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    try:
+        hostname = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return None
+    labels = [label for label in hostname.split(".") if label and label not in _IGNORED_HOST_SCHOOL_LABELS]
+    for label in labels:
+        compact = re.sub(r"[^a-z]", "", label.lower())
+        if len(compact) < 6:
+            continue
+        for suffix, rendered_suffix in _HOST_SCHOOL_SUFFIXES:
+            if compact.endswith(suffix) and len(compact) > len(suffix) + 2:
+                prefix = _titleize_compact_school_token(compact[: -len(suffix)])
+                if prefix:
+                    return f"{prefix} {rendered_suffix}"
+    return None
+
+
+def _resolved_university_name(record: ExtractedChapter) -> str | None:
+    explicit = _clean(getattr(record, "university_name", None))
+    if explicit and _institution_signal_count(explicit) >= 1:
+        return explicit
+
+    inferred_candidates = [
+        _match_school_from_entity_phrase(getattr(record, "name", None)),
+        _match_school_from_entity_phrase(getattr(record, "source_snippet", None)),
+        _match_school_from_text(getattr(record, "source_snippet", None)),
+        _match_school_from_source_url(getattr(record, "source_url", None)),
+    ]
+    for candidate in inferred_candidates:
+        cleaned = _clean(candidate)
+        if cleaned and _institution_signal_count(cleaned) >= 1:
+            return cleaned
+    return explicit
 
 
 def _looks_like_year_or_percentage(value: str) -> bool:
@@ -250,7 +355,7 @@ def _looks_like_person_name(name: str) -> bool:
     lowered = [token.lower() for token in raw_tokens]
     if any(token in _GREEK_TOKENS for token in lowered):
         return False
-    if any(token in {"chapter", "colony", "at", "university", "college", "school", "campus"} for token in lowered):
+    if any(token in {"chapter", "colony", "at", "university", "college", "school", "campus", "tech", "state", "institute", "academy", "polytechnic"} for token in lowered):
         return False
     return all(re.fullmatch(r"[A-Z][A-Za-z.-]{1,30}", token) for token in raw_tokens)
 
@@ -429,13 +534,14 @@ def classify_chapter_validity(
     target_type: str | None = None,
 ) -> ChapterValidityDecision:
     chapter_name = _clean(getattr(record, "name", None)) or ""
-    university_name = _clean(getattr(record, "university_name", None))
+    university_name = _resolved_university_name(record)
     invalid_reason = _semantic_invalid_reason(record)
     chapter_signal_count = _chapter_entity_signal_count(chapter_name, university_name)
     institution_signal_count = _institution_signal_count(university_name)
     semantic_signals = {
         "chapterEntitySignals": chapter_signal_count,
         "institutionSignals": institution_signal_count,
+        "resolvedUniversityName": university_name,
         "hasContacts": bool(
             _clean(getattr(record, "website_url", None))
             or _clean(getattr(record, "instagram_url", None))
@@ -565,11 +671,11 @@ def normalize_record(
         raise AmbiguousRecordError("Chapter record is missing a name")
     if len(chapter_name) > MAX_CHAPTER_NAME_LENGTH:
         raise AmbiguousRecordError("Chapter record name exceeded max supported length")
-    cleaned_university = _clean(record.university_name)
+    cleaned_university = _resolved_university_name(record)
     if cleaned_university and len(cleaned_university) > MAX_UNIVERSITY_NAME_LENGTH:
         raise AmbiguousRecordError("Chapter record university exceeded max supported length")
 
-    slug_input = record.external_id or f"{record.name}-{record.university_name or ''}"
+    slug_input = record.external_id or f"{record.name}-{cleaned_university or ''}"
     slug = _slugify(slug_input)
     if not slug:
         raise AmbiguousRecordError("Unable to derive deterministic chapter slug")
@@ -596,7 +702,7 @@ def normalize_record(
 
     normalized_input = ExtractedChapter(
         name=record.name,
-        university_name=record.university_name,
+        university_name=cleaned_university,
         city=record.city,
         state=record.state,
         website_url=sanitized_website,
@@ -624,7 +730,7 @@ def normalize_record(
         name=chapter_name,
         university_name=cleaned_university,
         city=_clean(normalized_input.city),
-        state=_clean(normalized_input.state),
+        state=normalize_us_state(normalized_input.state),
         website_url=_clean(normalized_input.website_url),
         instagram_url=_clean(normalized_input.instagram_url),
         contact_email=_clean(normalized_input.contact_email),

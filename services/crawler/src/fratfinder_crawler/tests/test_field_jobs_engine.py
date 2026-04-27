@@ -18,12 +18,13 @@ from fratfinder_crawler.field_jobs import (
     _email_local_part_has_identity,
     _email_local_part_looks_generic_office,
     _fraternity_matches,
+    _instagram_probe_handles,
     _instagram_looks_relevant_to_job,
     _nationals_entry_match_score,
     _normalized_match_text,
     _search_result_is_useful,
 )
-from fratfinder_crawler.models import FieldJob
+from fratfinder_crawler.models import ChapterEvidenceRecord, FieldJob
 from fratfinder_crawler.search import SearchResult, SearchUnavailableError
 from fratfinder_crawler.models import ChapterActivityRecord, SchoolPolicyRecord
 from fratfinder_crawler.status.models import (
@@ -41,13 +42,16 @@ class FakeRepository:
         pending_field_jobs: set[tuple[str, str]] | None = None,
         latest_provenance_by_chapter: dict[str, dict[str, object]] | None = None,
         synthesize_active_status_decision: bool = True,
+        instagram_candidates_by_chapter: dict[str, list[ChapterEvidenceRecord]] | None = None,
     ):
         self.jobs = jobs
         self.snippets_by_chapter = snippets_by_chapter
         self.pending_field_jobs = pending_field_jobs or set()
         self.latest_provenance_by_chapter = latest_provenance_by_chapter or {}
         self.synthesize_active_status_decision = synthesize_active_status_decision
+        self.instagram_candidates_by_chapter = instagram_candidates_by_chapter or {}
         self.completed: list[tuple[str, dict[str, str], dict[str, str], int]] = []
+        self.completed_payloads: list[dict[str, object]] = []
         self.requeued: list[str] = []
         self.requeue_details: list[tuple[str, int, str]] = []
         self.requeue_preserve_attempt_flags: list[bool] = []
@@ -99,7 +103,12 @@ class FakeRepository:
 
     def has_recent_transient_website_failures(self, chapter_id: str, min_failures: int = 2) -> bool:
         return False
-
+    
+    def fetch_instagram_candidates_for_chapters(self, chapter_ids: list[str]):
+        rows: list[ChapterEvidenceRecord] = []
+        for chapter_id in chapter_ids:
+            rows.extend(self.instagram_candidates_by_chapter.get(chapter_id, []))
+        return rows
 
     def complete_field_job(
         self,
@@ -110,6 +119,7 @@ class FakeRepository:
         provenance_records=None,
     ) -> None:
         self.completed.append((job.id, chapter_updates, field_state_updates or {}, len(provenance_records or [])))
+        self.completed_payloads.append(dict(completed_payload))
 
     def requeue_field_job(
         self,
@@ -1569,6 +1579,60 @@ def test_instagram_direct_probe_rejects_missing_profile_page():
     assert "No candidate instagram URL found" in repo.requeue_details[0][2]
 
 
+def test_instagram_probe_handles_include_short_fraternity_aliases():
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name="Texas Christian University",
+            chapter_name="Iota-Pi (Texas Christian)",
+        ),
+        fraternity_slug="lambda-chi-alpha",
+    )
+
+    handles = _instagram_probe_handles(job, max_candidates=8)
+
+    assert "tculambdachi" in handles
+    assert "lambdachitcu" in handles
+    assert "tcu_lambdachi" in handles
+
+
+def test_instagram_probe_handles_include_website_host_aliases():
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name="Texas Christian University",
+            chapter_name="Tau Chi Chapter",
+            website_url="https://www.tcufiji.com/home.html",
+        ),
+        fraternity_slug="phi-gamma-delta",
+    )
+
+    handles = _instagram_probe_handles(job, max_candidates=8)
+
+    assert "tcufiji" in handles
+    assert "fijitcu" in handles
+
+
+def test_instagram_relevance_accepts_two_token_fraternity_alias_handle():
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name="Texas Christian University",
+            chapter_name="Iota-Pi (Texas Christian)",
+        ),
+        fraternity_slug="lambda-chi-alpha",
+    )
+    document = SearchDocument(
+        text="Official Lambda Chi Alpha chapter at Texas Christian University.",
+        links=["https://www.instagram.com/tculambdachi/"],
+        url="https://greeks.tcu.edu/chapters/lambda-chi-alpha",
+        title="Lambda Chi Alpha | Texas Christian University",
+        provider="search_page",
+    )
+
+    assert _instagram_looks_relevant_to_job("https://www.instagram.com/tculambdachi/", job, document=document)
+
+
 def test_field_job_engine_prioritizes_website_jobs_before_email_and_instagram_work():
     repo = FakeRepository(
         jobs=[_job("find_website"), _job("find_email"), _job("find_instagram")],
@@ -2412,6 +2476,53 @@ def test_instagram_search_skips_low_signal_hosts_and_avoids_fetching_direct_inst
     assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/fsusigmachi"}
 
 
+def test_instagram_search_fetches_official_school_result_pages_for_local_handles():
+    repo = FakeRepository(
+        jobs=[_job("find_instagram", university_name="Demo University")],
+        snippets_by_chapter={"chapter-1": []},
+    )
+    search_client = FakeSearchClient(
+        {
+            'site:instagram.com "Demo University" "sigma chi"': [],
+            '"sigma chi" Demo University instagram': [
+                SearchResult(
+                    title="Sigma Chi | Demo University Student Organizations",
+                    url="https://studentorgs.demo.edu/sigma-chi",
+                    snippet="Official student organization page with chapter Instagram and contact links.",
+                    provider="duckduckgo_html",
+                    rank=1,
+                )
+            ],
+        }
+    )
+    fetched_urls: list[str] = []
+
+    def get_requester(url, *args, **kwargs):
+        _ = args, kwargs
+        fetched_urls.append(url)
+        if url == "https://studentorgs.demo.edu/sigma-chi":
+            return SimpleNamespace(
+                status_code=200,
+                text='<html><body><h1>Sigma Chi at Demo University</h1><a href="https://www.instagram.com/demosigmachi/">Instagram</a></body></html>',
+            )
+        return SimpleNamespace(status_code=404, text="")
+
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=search_client,
+        get_requester=get_requester,
+        max_search_pages=2,
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert "https://studentorgs.demo.edu/sigma-chi" in fetched_urls
+    assert repo.completed[0][1]["instagram_url"] == "https://www.instagram.com/demosigmachi"
+
+
 def test_generic_instagram_handle_is_rejected_when_school_anchor_is_missing():
     repo = FakeRepository(
         jobs=[_job("find_instagram", university_name="Demo University")],
@@ -3159,6 +3270,29 @@ def test_instagram_search_gate_keeps_valid_school_page_chapter_handle():
     assert [match.value for match in matches] == ["https://www.instagram.com/wwufiji"]
 
 
+def test_instagram_source_page_keeps_local_chapter_handle_without_fraternity_token():
+    repo = FakeRepository(jobs=[], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    job = replace(
+        _job("find_instagram", university_name="Norwich University", chapter_name="Alpha Chapter"),
+        fraternity_slug="theta-chi",
+        source_slug="theta-chi-main",
+        source_base_url="https://www.thetachi.org/chapters/",
+        payload={"candidateSchoolName": "Norwich University", "sourceSlug": "theta-chi-main"},
+    )
+    document = SearchDocument(
+        text="Theta Chi Norwich University Alpha Chapter official Instagram @norwichalpha",
+        links=["https://www.instagram.com/norwichalpha/"],
+        url="https://www.thetachi.org/chapters/norwich-university/",
+        title="Norwich University | Theta Chi",
+        provider="source_page",
+    )
+
+    matches = engine._extract_instagram_matches(document, job)
+
+    assert "https://www.instagram.com/norwichalpha" in [match.value for match in matches]
+
+
 def test_instagram_relevance_accepts_fiji_alias_handle_with_authoritative_context():
     job = replace(
         _job("find_instagram", university_name="William Woods College", chapter_name="Kappa Chi Chapter"),
@@ -3521,6 +3655,201 @@ def test_greedy_collect_none_still_uses_nationals_for_target_chapter():
     assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
     assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/msstatedeltachi"}
     assert repo.discovery_upserts == []
+
+
+def test_find_instagram_uses_candidate_bank_before_search():
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name="Mississippi State University",
+            chapter_name="Mississippi State Chapter",
+            website_url="https://deltachimsstate.org",
+        ),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        payload={"candidateSchoolName": "Mississippi State University", "sourceSlug": "delta-chi-main"},
+    )
+    repo = FakeRepository(
+        jobs=[job],
+        snippets_by_chapter={"chapter-1": []},
+        instagram_candidates_by_chapter={
+            "chapter-1": [
+                ChapterEvidenceRecord(
+                    chapter_id="chapter-1",
+                    chapter_slug="chapter-one",
+                    fraternity_slug="delta-chi",
+                    source_slug="delta-chi-main",
+                    crawl_run_id=11,
+                    field_name="instagram_url",
+                    candidate_value="https://www.instagram.com/msstatedeltachi/",
+                    confidence=0.97,
+                    source_url="https://www.msstate.edu/greek-life/delta-chi",
+                    source_snippet="Official school chapter page for Delta Chi at Mississippi State University Instagram",
+                    metadata={
+                        "sourceType": "official_school_chapter_page",
+                        "pageScope": "school_affiliation_page",
+                        "contactSpecificity": "school_specific",
+                    },
+                )
+            ]
+        },
+    )
+    search_client = FailingSearchClient(RuntimeError("search should not run"))
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker", search_client=search_client)
+    repo.latest_status_decisions["chapter-1"] = ChapterStatusDecision(
+        final_status=ChapterStatusFinal.ACTIVE,
+        school_recognition_status=SchoolRecognitionStatus.RECOGNIZED,
+        national_status="unknown",
+        reason_code="test_active_status",
+        confidence=0.99,
+        evidence_ids=["test-status"],
+        decision_trace={"authority_order": ["test_harness"]},
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/msstatedeltachi"}
+    assert search_client.queries == []
+
+
+def test_find_instagram_uses_direct_probe_after_low_signal_search_when_enabled():
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name="Mississippi State University",
+            chapter_name="Mississippi State Chapter",
+        ),
+        fraternity_slug="delta-chi",
+    )
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        instagram_direct_probe_enabled=True,
+    )
+    engine._search_queries_succeeded = 1
+    engine._search_queries_failed = 0
+    engine._search_documents = lambda job, target, include_existing=False: []
+    engine._probe_instagram_handle_candidates = lambda job: [
+        CandidateMatch(
+            value="https://www.instagram.com/msstatedeltachi/",
+            confidence=0.93,
+            source_url="https://www.instagram.com/msstatedeltachi/",
+            source_snippet="Official Delta Chi Mississippi State Instagram",
+            field_name="instagram_url",
+            source_provider="instagram_probe",
+            query="instagram_probe:msstatedeltachi",
+        )
+    ]
+
+    match = engine._find_instagram_candidate(job)
+
+    assert match is not None
+    assert match.value == "https://www.instagram.com/msstatedeltachi/"
+    assert match.source_provider == "instagram_probe"
+
+
+def test_find_instagram_prefers_direct_probe_before_search_when_enabled():
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name="Mississippi State University",
+            chapter_name="Mississippi State Chapter",
+        ),
+        fraternity_slug="delta-chi",
+    )
+    repo = FakeRepository(jobs=[], snippets_by_chapter={"chapter-1": []})
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        instagram_direct_probe_enabled=True,
+    )
+    engine._probe_instagram_handle_candidates = lambda job: [
+        CandidateMatch(
+            value="https://www.instagram.com/msstatedeltachi/",
+            confidence=0.93,
+            source_url="https://www.instagram.com/msstatedeltachi/",
+            source_snippet="Official Delta Chi Mississippi State Instagram",
+            field_name="instagram_url",
+            source_provider="instagram_probe",
+            query="instagram_probe:msstatedeltachi",
+        )
+    ]
+
+    def _unexpected_search_documents(*args, **kwargs):
+        raise AssertionError("search should not run when direct probe is already confident")
+
+    engine._search_documents = _unexpected_search_documents
+
+    match = engine._find_instagram_candidate(job)
+
+    assert match is not None
+    assert match.value == "https://www.instagram.com/msstatedeltachi/"
+    assert match.source_provider == "instagram_probe"
+
+
+def test_validate_existing_instagram_replaces_bad_existing_value_from_authoritative_candidate():
+    job = replace(
+        _job(
+            "find_instagram",
+            university_name="Mississippi State University",
+            chapter_name="Mississippi State Chapter",
+            instagram_url="https://www.instagram.com/fraternityhq",
+        ),
+        fraternity_slug="delta-chi",
+        source_slug="delta-chi-main",
+        payload={"candidateSchoolName": "Mississippi State University", "sourceSlug": "delta-chi-main"},
+    )
+    repo = FakeRepository(
+        jobs=[job],
+        snippets_by_chapter={"chapter-1": []},
+        instagram_candidates_by_chapter={
+            "chapter-1": [
+                ChapterEvidenceRecord(
+                    chapter_id="chapter-1",
+                    chapter_slug="chapter-one",
+                    fraternity_slug="delta-chi",
+                    source_slug="delta-chi-main",
+                    crawl_run_id=11,
+                    field_name="instagram_url",
+                    candidate_value="https://www.instagram.com/msstatedeltachi/",
+                    confidence=0.99,
+                    source_url="https://www.msstate.edu/greek-life/delta-chi",
+                    source_snippet="Official school chapter page for Delta Chi at Mississippi State University Instagram",
+                    metadata={
+                        "sourceType": "official_school_chapter_page",
+                        "pageScope": "school_affiliation_page",
+                        "contactSpecificity": "school_specific",
+                    },
+                )
+            ]
+        },
+    )
+    engine = FieldJobEngine(
+        repo,
+        logging.getLogger("test"),
+        worker_id="worker",
+        search_client=FailingSearchClient(RuntimeError("search should not run")),
+        validate_existing_instagram=True,
+    )
+    repo.latest_status_decisions["chapter-1"] = ChapterStatusDecision(
+        final_status=ChapterStatusFinal.ACTIVE,
+        school_recognition_status=SchoolRecognitionStatus.RECOGNIZED,
+        national_status="unknown",
+        reason_code="test_active_status",
+        confidence=0.99,
+        evidence_ids=["test-status"],
+        decision_trace={"authority_order": ["test_harness"]},
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][1] == {"instagram_url": "https://www.instagram.com/msstatedeltachi"}
+    assert repo.completed_payloads[0]["allowReplaceExisting"] is True
 
 
 def test_greedy_collect_bfs_ingests_additional_nationals_chapter_records():

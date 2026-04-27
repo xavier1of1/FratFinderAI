@@ -35,7 +35,10 @@ export async function GET(request: NextRequest) {
         totalCount: metadata.totalCount,
         fraternitySlugs: metadata.fraternitySlugs,
         stateOptions: metadata.stateOptions,
-        chapterStatuses: metadata.chapterStatuses
+        chapterStatuses: metadata.chapterStatuses,
+        withWebsiteCount: metadata.withWebsiteCount,
+        withInstagramCount: metadata.withInstagramCount,
+        withEmailCount: metadata.withEmailCount
       });
     }
 

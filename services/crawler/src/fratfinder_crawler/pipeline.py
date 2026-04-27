@@ -18,7 +18,11 @@ from fratfinder_crawler.config import Settings, resolved_env_file_path, settings
 from fratfinder_crawler.db.connection import get_connection
 from fratfinder_crawler.db import CrawlerRepository, RequestGraphRepository
 from fratfinder_crawler.discovery import discover_source
-from fratfinder_crawler.field_job_support import job_supporting_page_ready
+from fratfinder_crawler.field_job_support import (
+    job_has_canonical_active_status,
+    job_has_existing_instagram_support,
+    job_supporting_page_ready,
+)
 from fratfinder_crawler.field_jobs import FIELD_JOB_FIND_EMAIL, FIELD_JOB_FIND_WEBSITE, FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
@@ -191,6 +195,7 @@ class CrawlService:
         heartbeat_seconds = max(5, min(int(self._settings.crawler_v3_request_worker_heartbeat_seconds), max(5, lease_seconds // 2)))
         summaries: list[dict[str, object]] = []
         stale_recovered_total = 0
+        stale_graph_runs_recovered_total = 0
         idle_cycles = 0
 
         log_event(
@@ -224,6 +229,9 @@ class CrawlService:
                         lease_seconds=lease_seconds,
                     )
                     stale_recovered_total += request_repository.reconcile_stale_requests(
+                        self._settings.crawler_v3_request_stale_minutes
+                    )
+                    stale_graph_runs_recovered_total += request_repository.reconcile_stale_request_graph_runs(
                         self._settings.crawler_v3_request_stale_minutes
                     )
                     request_lease_token = str(uuid4())
@@ -303,6 +311,7 @@ class CrawlService:
             "paused": sum(1 for item in summaries if item.get("status") == "paused"),
             "failed": sum(1 for item in summaries if item.get("status") == "failed"),
             "staleRecovered": stale_recovered_total,
+            "staleGraphRunsRecovered": stale_graph_runs_recovered_total,
             "idleCycles": idle_cycles,
             "summaries": summaries,
         }
@@ -1792,6 +1801,8 @@ class CrawlService:
                 current_reason_code = ""
                 if isinstance(job.payload.get("contactResolution"), dict):
                     current_reason_code = str((job.payload.get("contactResolution") or {}).get("reasonCode") or "").strip()
+                if not current_reason_code:
+                    current_reason_code = str(job.blocked_reason or "").strip()
                 if (
                     current_queue_state == "actionable"
                     and not _preflight_snapshot_is_healthy(preflight_snapshot)
@@ -1810,11 +1821,17 @@ class CrawlService:
                     "provider_low_signal",
                     "dependency_wait",
                     "website_required",
+                    "status_dependency_unmet",
                 }:
                     can_reactivate = False
                     if current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}:
                         triage_summary["providerRetryCandidatesConsidered"] = int(triage_summary["providerRetryCandidatesConsidered"]) + 1
                         can_reactivate = _preflight_snapshot_is_healthy(preflight_snapshot) or _job_is_degraded_authoritative_candidate(repository, job)
+                    elif current_reason_code == "status_dependency_unmet" and job.field_name == FIELD_JOB_FIND_INSTAGRAM:
+                        can_reactivate = (
+                            job_has_canonical_active_status(job)
+                            or job_has_existing_instagram_support(job, repository)
+                        )
                     else:
                         can_reactivate = _job_supporting_page_ready(job) or _job_has_reusable_official_school_evidence(repository, job)
                     if can_reactivate:
@@ -1857,24 +1874,35 @@ class CrawlService:
                     terminal_failure=False,
                 )
                 triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
-                if next_queue_state == "blocked_dependency" and current_reason_code in {"dependency_wait", "website_required"}:
+                if next_queue_state == "blocked_dependency" and current_reason_code in {"dependency_wait", "website_required", "status_dependency_unmet"}:
                     triage_summary["dependencyDeferred"] = int(triage_summary["dependencyDeferred"]) + 1
-                    if job.field_name in {FIELD_JOB_FIND_EMAIL, FIELD_JOB_VERIFY_WEBSITE}:
+                    if job.field_name in {FIELD_JOB_FIND_EMAIL, FIELD_JOB_VERIFY_WEBSITE, FIELD_JOB_FIND_INSTAGRAM}:
                         missing_fields: list[str] = []
                         has_support_ready = _job_supporting_page_ready(job)
-                        if not has_support_ready and not repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE):
+                        if (
+                            job.field_name in {FIELD_JOB_FIND_EMAIL, FIELD_JOB_VERIFY_WEBSITE}
+                            and not has_support_ready
+                            and not repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE)
+                        ):
                             missing_fields.append(FIELD_JOB_FIND_WEBSITE)
-                        elif not has_support_ready:
+                        elif job.field_name in {FIELD_JOB_FIND_EMAIL, FIELD_JOB_VERIFY_WEBSITE} and not has_support_ready:
                             triage_summary["dependencyPrerequisitesAlreadyPending"] = int(triage_summary["dependencyPrerequisitesAlreadyPending"]) + 1
                         if (
-                            not has_support_ready
+                            (
+                                (
+                                    job.field_name == FIELD_JOB_FIND_INSTAGRAM
+                                    and not job_has_canonical_active_status(job)
+                                    and not job_has_existing_instagram_support(job, repository)
+                                )
+                                or (job.field_name in {FIELD_JOB_FIND_EMAIL, FIELD_JOB_VERIFY_WEBSITE} and not has_support_ready)
+                            )
                             and job.university_name
                             and not repository.has_pending_field_job(job.chapter_id, FIELD_JOB_VERIFY_SCHOOL)
                         ):
                             missing_fields.append(FIELD_JOB_VERIFY_SCHOOL)
                         elif not has_support_ready and job.university_name:
                             triage_summary["dependencyPrerequisitesAlreadyPending"] = int(triage_summary["dependencyPrerequisitesAlreadyPending"]) + 1
-                        if missing_fields:
+                        if missing_fields and job.source_slug:
                             created_count = repository.create_field_jobs(
                                 job.chapter_id,
                                 job.crawl_run_id,
@@ -2224,6 +2252,7 @@ class CrawlService:
         run_preflight: bool | None = None,
         runtime_mode: str | None = None,
         graph_durability: str | None = None,
+        validate_existing_instagram: bool = False,
     ) -> dict[str, object]:
         self._assert_live_runtime_configuration()
         effective_workers = workers or self._settings.crawler_field_job_max_workers
@@ -2442,6 +2471,7 @@ class CrawlService:
                 runtime_mode=runtime_mode,
                 graph_durability=graph_durability,
                 preflight_snapshot=preflight_snapshot,
+                validate_existing_instagram=validate_existing_instagram,
             ),
         )
         aggregate = supervisor.run()
@@ -2494,6 +2524,7 @@ class CrawlService:
         runtime_mode: str = "legacy",
         graph_durability: str = "sync",
         preflight_snapshot: dict[str, object] | None = None,
+        validate_existing_instagram: bool = False,
     ) -> dict[str, object]:
         policy_pack = self._resolve_field_job_policy_pack(source_slug)
         current_search_settings = _search_settings_from_preflight(self._settings, preflight_snapshot)
@@ -2563,7 +2594,7 @@ class CrawlService:
                     max_search_pages = self._settings.crawler_search_max_pages_per_job
                     dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
                     email_max_queries = min(self._settings.crawler_search_email_max_queries, 3)
-                    instagram_max_queries = min(self._settings.crawler_search_instagram_max_queries, 3)
+                    instagram_max_queries = max(1, self._settings.crawler_search_instagram_max_queries)
                     if policy_pack.get("max_search_pages") is not None:
                         max_search_pages = min(max_search_pages, int(policy_pack["max_search_pages"]))
                     if policy_pack.get("email_max_queries") is not None:
@@ -2580,7 +2611,7 @@ class CrawlService:
                             self._settings.crawler_search_dependency_wait_seconds,
                         )
                         email_max_queries = min(max(1, self._settings.crawler_search_degraded_email_max_queries), 3)
-                        instagram_max_queries = min(max(1, self._settings.crawler_search_degraded_instagram_max_queries), 3)
+                        instagram_max_queries = max(1, self._settings.crawler_search_degraded_instagram_max_queries)
 
                     adaptive_policy: AdaptivePolicy | None = None
                     if self._settings.crawler_adaptive_enrichment_observations_enabled:
@@ -2633,6 +2664,7 @@ class CrawlService:
                         adaptive_policy_version=self._settings.crawler_policy_version,
                         provider_window_state=current_provider_window_state,
                         enrichment_observations_enabled=self._settings.crawler_adaptive_enrichment_observations_enabled,
+                        validate_existing_instagram=validate_existing_instagram,
                     )
                     result = self._run_field_job_runtime(
                         repository=repository,
@@ -3578,7 +3610,7 @@ class CrawlService:
                 "appEnv": self._settings.app_env,
                 "searchProvider": self._settings.crawler_search_provider,
                 "searchProviderOrderFree": _provider_order_from_settings(self._settings),
-                "automaticChainProviders": provider_names(automatic_chain_allowed=True),
+                "automaticChainProviders": _automatic_provider_order_from_settings(self._settings),
                 "optInOnlyProviders": [
                     name for name, metadata in PROVIDER_CATALOG.items() if not metadata.automatic_chain_allowed and not metadata.deprecated
                 ],
@@ -3718,7 +3750,7 @@ class CrawlService:
 
 def _provider_reachability(settings: Settings) -> dict[str, dict[str, object]]:
     reachability: dict[str, dict[str, object]] = {}
-    providers = list(dict.fromkeys([*_provider_order_from_settings(settings), *provider_names()]))
+    providers = list(dict.fromkeys([*_automatic_provider_order_from_settings(settings), *provider_names()]))
     timeout = max(1.0, min(float(settings.crawler_http_timeout_seconds), 4.0))
 
     for provider in providers:
@@ -4231,8 +4263,12 @@ def _search_settings_from_preflight(settings: Settings, preflight_snapshot: dict
     if not isinstance(provider_health, dict) or not provider_health:
         return settings
 
+    effective_settings = settings
+    if _auto_paid_providers_exhausted_in_preflight(settings, provider_health):
+        effective_settings = effective_settings.model_copy(update={"crawler_v3_paid_search_enabled": False})
+
     base_order: list[str] = []
-    raw_order = (settings.crawler_search_provider_order_free or "").strip()
+    raw_order = (effective_settings.crawler_search_provider_order_free or "").strip()
     base_order, _warnings = normalize_free_provider_order(raw_order)
 
     successful: list[tuple[str, float, int, int, int]] = []
@@ -4269,8 +4305,45 @@ def _search_settings_from_preflight(settings: Settings, preflight_snapshot: dict
     ]
     new_order = ",".join(ranked + neutral + degraded)
     if new_order == raw_order:
-        return settings
-    return settings.model_copy(update={"crawler_search_provider_order_free": new_order})
+        return effective_settings
+    return effective_settings.model_copy(update={"crawler_search_provider_order_free": new_order})
+
+
+def _auto_paid_providers_exhausted_in_preflight(
+    settings: Settings,
+    provider_health: dict[str, object],
+) -> bool:
+    provider = (settings.crawler_search_provider or "").strip().lower()
+    if provider != "auto" or not bool(getattr(settings, "crawler_v3_paid_search_enabled", False)):
+        return False
+
+    free_order = set(_provider_order_from_settings(settings))
+    auto_order = _automatic_provider_order_from_settings(settings)
+    paid_providers = [provider_name for provider_name in auto_order if provider_name not in free_order]
+    if not paid_providers:
+        return False
+
+    observed = 0
+    unhealthy = 0
+    for provider_name in paid_providers:
+        payload = provider_health.get(provider_name)
+        if not isinstance(payload, dict):
+            continue
+        attempts = int(payload.get("attempts", 0) or 0)
+        if attempts <= 0:
+            continue
+        observed += 1
+        successes = int(payload.get("successes", 0) or 0)
+        request_error = int(payload.get("request_error", 0) or 0)
+        unavailable = int(payload.get("unavailable", 0) or 0)
+        failure_types = payload.get("failure_types") or {}
+        quota_or_auth = any(
+            int(failure_types.get(reason, 0) or 0) > 0 for reason in ("quota_exceeded", "auth_error")
+        )
+        if successes <= 0 and (request_error + unavailable) >= attempts and quota_or_auth:
+            unhealthy += 1
+
+    return observed > 0 and unhealthy == observed
 
 
 
@@ -4357,6 +4430,11 @@ def _field_job_batch_delta_payload(before_metrics, after_metrics, *, processed: 
 def _provider_order_from_settings(settings: Settings) -> list[str]:
     order, _warnings = normalize_free_provider_order(str(getattr(settings, "crawler_search_provider_order_free", "") or "").strip())
     return order or canonical_free_provider_order()
+
+
+def _automatic_provider_order_from_settings(settings: Settings) -> list[str]:
+    provider = str(getattr(settings, "crawler_search_provider", "") or "").strip().lower()
+    return SearchClient.effective_auto_provider_order(settings, free_only=provider == "auto_free")
 
 
 def _empty_provider_health_bucket() -> dict[str, object]:

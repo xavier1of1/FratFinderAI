@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { scheduleDueFraternityCrawlRequests, scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
+import { evaluateSourceUrl } from "@/lib/source-selection";
 import {
   appendFraternityCrawlRequestEvent,
   getFraternityCrawlRequest,
@@ -108,6 +109,7 @@ export async function PATCH(request: NextRequest, context: { params: { id: strin
     let sourceConfidence =
       current.sourceConfidence ??
       Number(current.progress?.discovery?.sourceConfidence ?? current.progress?.discovery?.candidates?.[0]?.score ?? 0.6);
+    const confirmedAt = new Date().toISOString();
 
     if (!sourceUrl) {
       return apiError({
@@ -140,10 +142,47 @@ export async function PATCH(request: NextRequest, context: { params: { id: strin
         active: true,
         metadata: {
           confirmedByOperator: true,
-          confirmedAt: new Date().toISOString()
+          confirmedAt,
+          sourceQuality: evaluateSourceUrl(sourceUrl)
         }
       });
     }
+
+    const sourceQuality = evaluateSourceUrl(sourceUrl);
+    sourceConfidence = Math.max(sourceConfidence ?? 0, sourceQuality.score);
+    const confidenceTier = sourceConfidence >= 0.8 ? "high" : sourceConfidence >= 0.6 ? "medium" : "low";
+    const currentDiscovery = current.progress?.discovery;
+    const nextProgress = {
+      ...(current.progress ?? {}),
+      discovery: {
+        sourceUrl,
+        sourceConfidence,
+        confidenceTier,
+        sourceProvenance: currentDiscovery?.sourceProvenance ?? null,
+        fallbackReason: currentDiscovery?.fallbackReason ?? null,
+        sourceQuality,
+        selectedCandidateRationale: currentDiscovery?.selectedCandidateRationale,
+        resolutionTrace: currentDiscovery?.resolutionTrace ?? [],
+        candidates: currentDiscovery?.candidates ?? [],
+        confirmedByOperator: true,
+        confirmedAt
+      },
+      analytics: {
+        ...((current.progress?.analytics as Record<string, unknown> | undefined) ?? {}),
+        sourceQuality: {
+          recoveryAttempts: current.progress?.analytics?.sourceQuality?.recoveryAttempts ?? 0,
+          recoveredFromUrl: current.progress?.analytics?.sourceQuality?.recoveredFromUrl ?? null,
+          recoveredToUrl: current.progress?.analytics?.sourceQuality?.recoveredToUrl ?? null,
+          sourceRejectedCount: current.progress?.analytics?.sourceQuality?.sourceRejectedCount ?? 0,
+          sourceRecoveredCount: current.progress?.analytics?.sourceQuality?.sourceRecoveredCount ?? 0,
+          zeroChapterPrevented: current.progress?.analytics?.sourceQuality?.zeroChapterPrevented ?? 0,
+          sourcePreservedCount: current.progress?.analytics?.sourceQuality?.sourcePreservedCount ?? 0,
+          ...sourceQuality,
+          confirmedByOperator: true,
+          confirmedAt
+        }
+      }
+    };
 
     await updateFraternityCrawlRequest({
       id,
@@ -154,6 +193,7 @@ export async function PATCH(request: NextRequest, context: { params: { id: strin
       stage: "discovery",
       scheduledFor: payload.scheduledFor ?? current.scheduledFor,
       priority: 0,
+      progress: nextProgress,
       clearFinishedAt: true,
       lastError: null
     });
@@ -165,6 +205,7 @@ export async function PATCH(request: NextRequest, context: { params: { id: strin
       payload: {
         sourceSlug,
         sourceUrl,
+        sourceQuality,
         scheduledFor: payload.scheduledFor ?? current.scheduledFor
       }
     });

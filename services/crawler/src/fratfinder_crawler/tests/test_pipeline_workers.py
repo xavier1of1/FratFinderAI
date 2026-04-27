@@ -6,7 +6,7 @@ import fratfinder_crawler.pipeline as pipeline_module
 import pytest
 
 from fratfinder_crawler.config import Settings
-from fratfinder_crawler.models import FieldJob
+from fratfinder_crawler.models import ChapterEvidenceRecord, FieldJob
 from fratfinder_crawler.pipeline import (
     CrawlService,
     _balanced_kpi_weights,
@@ -30,6 +30,7 @@ from fratfinder_crawler.pipeline import (
     _probe_queries_from_preflight,
     _provider_window_success_rate,
     _provider_window_state_from_preflight,
+    _automatic_provider_order_from_settings,
     _provider_order_from_settings,
     _render_epoch_report,
     _reorder_search_settings_from_window,
@@ -306,6 +307,10 @@ def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
             assert max_age_minutes == 45
             return 1
 
+        def reconcile_stale_request_graph_runs(self, max_age_minutes: int) -> int:
+            assert max_age_minutes == 45
+            return 2
+
         def claim_next_due_request(self, worker_id: str, *, lease_token: str | None = None, lease_seconds: int | None = None):
             assert worker_id == "local-request-worker"
             assert lease_token
@@ -355,6 +360,8 @@ def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
     assert result["succeeded"] == 1
     assert result["paused"] == 1
     assert result["failed"] == 0
+    assert result["staleRecovered"] == 3
+    assert result["staleGraphRunsRecovered"] == 6
 
 
 class _QueueTriageRepository:
@@ -370,6 +377,7 @@ class _QueueTriageRepository:
         self.school_policy = None
         self.chapter_activity = None
         self.official_school_evidence_url = None
+        self.instagram_candidates_by_chapter: dict[str, list[ChapterEvidenceRecord]] = {}
         self.patched: list[dict[str, object]] = []
         self.repairs: list[dict[str, object]] = []
         self.repair_jobs: list[dict[str, object]] = []
@@ -390,6 +398,12 @@ class _QueueTriageRepository:
 
     def fetch_provenance_snippets(self, chapter_id: str) -> list[str]:
         return list(self.snippets_by_chapter.get(chapter_id, []))
+
+    def fetch_instagram_candidates_for_chapters(self, chapter_ids: list[str]):
+        rows: list[ChapterEvidenceRecord] = []
+        for chapter_id in chapter_ids:
+            rows.extend(self.instagram_candidates_by_chapter.get(chapter_id, []))
+        return rows
 
     def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
         return (chapter_id, field_name) in self.pending_field_jobs
@@ -695,6 +709,48 @@ def test_reconcile_field_job_queue_reactivates_authoritative_provider_blocked_jo
     assert repo.patched[0]["scheduled_delay_seconds"] == 0
 
 
+def test_reconcile_field_job_queue_uses_blocked_reason_when_payload_reason_missing_for_provider_retry():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_transient_long_cooldown_seconds=900,
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            replace(
+                _field_job(
+                    field_name="find_instagram",
+                    university_name="Example University",
+                    payload={
+                        "sourceSlug": "alpha-main",
+                        "queue_state": "blocked_provider",
+                        "contactResolution": {"queueState": "blocked_provider"},
+                    },
+                    source_slug="alpha-main",
+                ),
+                blocked_reason="provider_degraded",
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": True},
+    )
+
+    assert triage["providerRetryCandidatesConsidered"] == 1
+    assert triage["providerRetryCandidatesAdmitted"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
+    assert repo.patched[0]["scheduled_delay_seconds"] == 0
+
+
 def test_reconcile_field_job_queue_reactivates_dependency_blocked_job_when_support_exists():
     settings = SimpleNamespace(
         crawler_field_job_runtime_mode="langgraph_primary",
@@ -733,6 +789,143 @@ def test_reconcile_field_job_queue_reactivates_dependency_blocked_job_when_suppo
     assert triage["dependencyReactivatedFromExistingSupport"] == 1
     assert repair["reconciledHistorical"] == 1
     assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
+
+
+def test_reconcile_field_job_queue_reactivates_status_blocked_instagram_when_authoritative_support_exists():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_instagram",
+                university_name="Mississippi State University",
+                payload={
+                    "sourceSlug": "delta-chi-main",
+                    "queue_state": "blocked_dependency",
+                    "contactResolution": {
+                        "queueState": "blocked_dependency",
+                        "reasonCode": "status_dependency_unmet",
+                    },
+                },
+                source_slug="delta-chi-main",
+            )
+        ],
+    )
+    repo.instagram_candidates_by_chapter["chapter-1"] = [
+        ChapterEvidenceRecord(
+            chapter_slug="chapter-1",
+            field_name="instagram_url",
+            candidate_value="https://www.instagram.com/msstatedeltachi/",
+            confidence=0.86,
+            source_url="https://www.msstate.edu/student-life/greek/delta-chi",
+            source_snippet="Official school chapter page for Delta Chi at Mississippi State University Instagram",
+            chapter_id="chapter-1",
+            fraternity_slug="delta-chi",
+            source_slug="delta-chi-main",
+            metadata={"sourceType": "official_school_chapter_page"},
+        )
+    ]
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="delta-chi-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("delta-chi-main"),
+        preflight_snapshot={"healthy": False},
+    )
+
+    assert triage["dependencyReactivatedFromExistingSupport"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
+
+
+def test_reconcile_field_job_queue_reactivates_status_blocked_instagram_when_canonical_active_status_exists():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_instagram",
+                university_name="University of Louisville",
+                payload={
+                    "sourceSlug": "sigma-pi-main",
+                    "queue_state": "blocked_dependency",
+                    "queueTriage": {
+                        "outcome": "keep_deferred",
+                        "validityClass": "canonical_valid",
+                    },
+                    "contactResolution": {
+                        "queueState": "blocked_dependency",
+                        "reasonCode": "status_dependency_unmet",
+                        "validityClass": "canonical_valid",
+                    },
+                },
+                source_slug="sigma-pi-main",
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="sigma-pi-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("sigma-pi-main"),
+        preflight_snapshot={"healthy": False},
+    )
+
+    assert triage["dependencyReactivatedFromExistingSupport"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
+
+
+def test_reconcile_field_job_queue_creates_verify_school_for_status_blocked_instagram_without_support():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_instagram",
+                university_name="Example University",
+                payload={
+                    "sourceSlug": "alpha-main",
+                    "queue_state": "blocked_dependency",
+                    "contactResolution": {
+                        "queueState": "blocked_dependency",
+                        "reasonCode": "status_dependency_unmet",
+                    },
+                },
+                source_slug="alpha-main",
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": False},
+    )
+
+    assert triage["dependencyDeferred"] == 1
+    assert triage["dependencyUnlockPromoted"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.created_field_jobs[0]["missing_fields"] == ["verify_school_match"]
 
 
 def test_process_chapter_repair_queue_promotes_canonical_and_unblocks_jobs():
@@ -924,6 +1117,52 @@ def test_throughput_helper_provider_window_logic_reorders_and_detects_degradatio
     degraded_window = _provider_window_state_from_preflight(explicit_challenge_snapshot)
     assert degraded_window["general_web_search"]["challenge_or_anomaly_count"] == 3
     assert degraded_window["general_web_search"]["providers"][0]["challenge_or_anomaly_count"] == 3
+
+
+def test_automatic_provider_order_includes_configured_paid_providers_when_enabled():
+    settings = Settings(
+        database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+        CRAWLER_SEARCH_PROVIDER="auto",
+        CRAWLER_V3_PAID_SEARCH_ENABLED=True,
+        CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,bing_html,duckduckgo_html",
+        CRAWLER_SEARCH_SERPER_API_KEY="test-key",
+        CRAWLER_SEARCH_TAVILY_API_KEY="test-key",
+    )
+
+    assert _provider_order_from_settings(settings) == ["searxng_json", "bing_html", "duckduckgo_html"]
+    assert _automatic_provider_order_from_settings(settings) == [
+        "searxng_json",
+        "serper_api",
+        "tavily_api",
+        "bing_html",
+        "duckduckgo_html",
+    ]
+
+
+def test_search_settings_from_preflight_disables_paid_auto_chain_when_paid_providers_are_exhausted():
+    settings = Settings(
+        database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+        CRAWLER_SEARCH_PROVIDER="auto",
+        CRAWLER_V3_PAID_SEARCH_ENABLED=True,
+        CRAWLER_SEARCH_PROVIDER_ORDER_FREE="bing_html,searxng_json,duckduckgo_html",
+        CRAWLER_SEARCH_SERPER_API_KEY="test-key",
+        CRAWLER_SEARCH_TAVILY_API_KEY="test-key",
+    )
+    snapshot = {
+        "provider_health": {
+            "searxng_json": {"attempts": 2, "successes": 0, "unavailable": 2, "request_error": 0, "failure_types": {"engine_unresponsive": 2}},
+            "serper_api": {"attempts": 2, "successes": 0, "unavailable": 0, "request_error": 2, "failure_types": {"quota_exceeded": 2}},
+            "tavily_api": {"attempts": 2, "successes": 0, "unavailable": 0, "request_error": 2, "failure_types": {"quota_exceeded": 2}},
+            "bing_html": {"attempts": 4, "successes": 3, "unavailable": 0, "request_error": 0, "failure_types": {}},
+        }
+    }
+
+    adjusted = _search_settings_from_preflight(settings, snapshot)
+
+    assert adjusted.crawler_v3_paid_search_enabled is False
+    assert _automatic_provider_order_from_settings(adjusted)[0] == "bing_html"
+    assert "serper_api" not in _automatic_provider_order_from_settings(adjusted)
+    assert "tavily_api" not in _automatic_provider_order_from_settings(adjusted)
 
 
 def test_throughput_helper_merges_chunk_results_and_supporting_page_readiness():
@@ -1163,7 +1402,12 @@ def test_system_baseline_returns_accuracy_queue_and_preflight(monkeypatch):
     monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(FakeConnection()))
     monkeypatch.setattr(pipeline_module, "CrawlerRepository", FakeRepository)
 
-    service = CrawlService(Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder"))
+    service = CrawlService(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            crawler_search_require_confident_website_for_email=True,
+        )
+    )
     monkeypatch.setattr(service, "search_preflight", lambda probes=None: {"healthy": True, "probes": probes or 3})
 
     baseline = service.system_baseline(probes=4)
@@ -1204,7 +1448,12 @@ def test_crawl_replay_policy_surfaces_terminal_business_signals(monkeypatch):
     monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(FakeConnection()))
     monkeypatch.setattr(pipeline_module, "CrawlerRepository", FakeRepository)
 
-    service = CrawlService(Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder"))
+    service = CrawlService(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            crawler_search_require_confident_website_for_email=True,
+        )
+    )
     monkeypatch.setattr(
         service,
         "export_crawl_observations",
@@ -1281,7 +1530,12 @@ def test_enrichment_replay_policy_summarizes_shadow_vs_deterministic_outcomes(mo
     monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(FakeConnection()))
     monkeypatch.setattr(pipeline_module, "CrawlerRepository", FakeRepository)
 
-    service = CrawlService(Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder"))
+    service = CrawlService(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            crawler_search_require_confident_website_for_email=True,
+        )
+    )
     replay = service.enrichment_replay_policy(source_slug="alpha-main")
 
     assert replay["count"] == 2
@@ -1344,7 +1598,12 @@ def test_enrichment_policy_compare_report_breaks_down_disagreements_and_opportun
     monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(FakeConnection()))
     monkeypatch.setattr(pipeline_module, "CrawlerRepository", FakeRepository)
 
-    service = CrawlService(Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder"))
+    service = CrawlService(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            crawler_search_require_confident_website_for_email=True,
+        )
+    )
     report = service.enrichment_policy_compare_report(source_slug="alpha-main")
 
     assert report["count"] == 3
@@ -1576,6 +1835,127 @@ def test_enrichment_promote_verify_school_candidates_requires_cached_evidence_wh
     }
 
 
+def test_process_field_jobs_skips_dependency_prereq_creation_without_source_slug(monkeypatch):
+    class FakeConnection:
+        pass
+
+    class FakeRepository:
+        def __init__(self, connection):
+            self.connection = connection
+            self.created_jobs = []
+
+        def get_accuracy_recovery_metrics(self):
+            return {
+                "complete_rows": 0,
+                "chapter_specific_contact_rows": 0,
+                "nationals_only_contact_rows": 0,
+                "inactive_validated_rows": 0,
+                "confirmed_absent_website_rows": 0,
+                "active_rows_with_chapter_specific_email": 0,
+                "active_rows_with_chapter_specific_instagram": 0,
+                "active_rows_with_any_contact": 0,
+                "total_chapters": 0,
+            }
+
+        def reconcile_stale_field_jobs(self, *args, **kwargs):
+            _ = args, kwargs
+            return 0
+
+        def recover_stale_field_jobs(self, **kwargs):
+            _ = kwargs
+            return 0
+
+        def reconcile_stale_field_job_graph_runs(self, *args, **kwargs):
+            _ = args, kwargs
+            return 0
+
+        def recover_stale_field_job_graph_runs(self, **kwargs):
+            _ = kwargs
+            return 0
+
+        def get_field_job_queue_counts(self):
+            return {
+                "queued_jobs": 1,
+                "actionable_jobs": 1,
+                "deferred_jobs": 0,
+                "blocked_provider_jobs": 0,
+                "blocked_dependency_jobs": 0,
+                "blocked_repairable_jobs": 0,
+                "running_jobs": 0,
+            }
+
+        def get_field_job_worker_process_stats(self, workload_lane="contact_resolution"):
+            _ = workload_lane
+            return {"active_workers": 0, "stale_workers": 0}
+
+        def field_job_graph_tables_ready(self):
+            return False
+
+        def backfill_field_job_typed_queue_state(self):
+            return {"blocked_reason_populated": 1}
+
+        def list_queued_field_jobs_for_triage(self, **kwargs):
+            _ = kwargs
+            return [
+                replace(
+                    replace(
+                        _field_job(
+                            field_name="find_email",
+                            source_slug=None,
+                            university_name="Example University",
+                        ),
+                        crawl_run_id=12,
+                    ),
+                    fraternity_slug="alpha-main",
+                    queue_state="actionable",
+                )
+            ]
+
+        def get_campus_status_decision(self, *args, **kwargs):
+            _ = args, kwargs
+            return None
+
+        def has_pending_field_job(self, chapter_id: str, field_name: str) -> bool:
+            _ = chapter_id, field_name
+            return False
+
+        def patch_queued_field_job(self, *args, **kwargs):
+            _ = args, kwargs
+            return None
+
+        def create_field_jobs(self, chapter_id, crawl_run_id, chapter_slug, source_slug, missing_fields):
+            self.created_jobs.append((chapter_id, crawl_run_id, chapter_slug, source_slug, tuple(missing_fields)))
+            return 1
+
+        def queue_chapter_repair_candidates(self, **kwargs):
+            _ = kwargs
+            return {"queued": 0, "running": 0, "promotedToCanonical": 0, "downgradedToProvisional": 0, "confirmedInvalid": 0, "repairExhausted": 0, "reconciledHistorical": 0}
+
+        def claim_next_chapter_repair_job(self, worker_id: str, source_slug: str | None = None):
+            _ = worker_id, source_slug
+            return None
+
+    monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(FakeConnection()))
+    repo = FakeRepository(FakeConnection())
+    monkeypatch.setattr(pipeline_module, "CrawlerRepository", lambda connection: repo)
+    monkeypatch.setattr(
+        pipeline_module,
+        "FieldJobSupervisorGraphRuntime",
+        lambda **kwargs: SimpleNamespace(run=lambda: {"processed": 0, "requeued": 0, "failed_terminal": 0, "runtime_mode_used": "langgraph_primary"}),
+    )
+
+    service = CrawlService(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            crawler_search_require_confident_website_for_email=True,
+        )
+    )
+    result = service.process_field_jobs(limit=5, workers=1, run_preflight=False)
+
+    assert result["queue_triage"]["triaged"] >= 1
+    assert repo.created_jobs == []
+
+
 def test_infer_repair_family_prioritizes_school_normalization_and_state_prefix():
     missing_school = replace(
         _field_job(field_name="find_website", source_slug="alpha-main"),
@@ -1590,3 +1970,5 @@ def test_infer_repair_family_prioritizes_school_normalization_and_state_prefix()
 
     assert _infer_repair_family(missing_school) == "school_name_normalizer"
     assert _infer_repair_family(state_prefix) == "state_prefix_resolver"
+
+

@@ -82,6 +82,66 @@ export interface ChapterListResponse {
   fraternitySlugs: string[];
   stateOptions: string[];
   chapterStatuses: string[];
+  withWebsiteCount: number;
+  withInstagramCount: number;
+  withEmailCount: number;
+}
+
+export type CrmChannel = "email" | "instagram";
+export type CrmCampaignStatus = "draft" | "ready" | "sending" | "drafted" | "sent" | "partial" | "failed";
+export type CrmDeliveryMode = "operator" | "outlook";
+export type CrmRecipientStatus = "queued" | "drafted" | "sent" | "failed";
+export type CrmDispatchMode = "draft" | "send";
+
+export interface CrmCampaignFilters {
+  fraternitySlug?: string | null;
+  state?: string | null;
+  chapterStatus?: "active" | "inactive" | "all";
+  search?: string | null;
+  limit?: number | null;
+}
+
+export interface CrmCampaignRecipient {
+  id: string;
+  campaignId: string;
+  chapterId: string;
+  fraternitySlug: string;
+  fraternityName: string;
+  chapterName: string;
+  universityName: string | null;
+  city: string | null;
+  state: string | null;
+  channel: CrmChannel;
+  contactValue: string;
+  subjectLine: string | null;
+  messageBody: string;
+  status: CrmRecipientStatus;
+  lastError: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CrmCampaign {
+  id: string;
+  name: string;
+  channel: CrmChannel;
+  status: CrmCampaignStatus;
+  deliveryMode: CrmDeliveryMode;
+  subjectTemplate: string | null;
+  messageTemplate: string;
+  filters: CrmCampaignFilters;
+  recipientCount: number;
+  queuedCount: number;
+  draftedCount: number;
+  sentCount: number;
+  failedCount: number;
+  launchedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  recipients: CrmCampaignRecipient[];
 }
 
 export interface CrawlRunListItem {
@@ -353,6 +413,9 @@ export interface FraternityCrawlSourceQuality {
   sourceRejectedCount?: number;
   sourceRecoveredCount?: number;
   zeroChapterPrevented?: number;
+  sourcePreservedCount?: number;
+  confirmedByOperator?: boolean;
+  confirmedAt?: string | null;
 }
 
 export interface FraternityCrawlEnrichmentAnalytics {
@@ -363,7 +426,11 @@ export interface FraternityCrawlEnrichmentAnalytics {
   lowProgressCycles: number;
   degradedCycleCount: number;
   queueAtStart: number;
+  queueAtStartActionable?: number;
+  queueAtStartNonActionable?: number;
   queueRemaining: number;
+  queueRemainingActionable?: number;
+  queueRemainingNonActionable?: number;
   budgetStrategy: string;
   runtimeFallbackCount?: number;
   zeroChapterPrevented?: number;
@@ -391,6 +458,8 @@ export interface FraternityCrawlProgress {
       isWeak: boolean;
       isBlocked?: boolean;
       reasons: string[];
+      confirmedByOperator?: boolean;
+      confirmedAt?: string | null;
     } | null;
     selectedCandidateRationale?: string | null;
     resolutionTrace?: Array<Record<string, unknown>>;
@@ -477,6 +546,7 @@ export interface FraternityCrawlProgress {
   contactResolution?: {
     queuedActionable?: number;
     queuedDeferred?: number;
+    queuedNonActionable?: number;
     processed?: number;
     requeued?: number;
     reviewRequired?: number;
@@ -485,8 +555,14 @@ export interface FraternityCrawlProgress {
     autoWritten?: number;
     writesByField?: Record<string, number>;
     actionableRemaining?: number;
+    totalRemaining?: number;
+    blockedRemaining?: number;
+    blockedProvider?: number;
+    blockedDependency?: number;
+    blockedOther?: number;
     blockedInvalid?: number;
     blockedRepairable?: number;
+    blockedRepairableEntities?: number;
     reconciledHistorical?: number;
     rejectionReasonCounts?: Record<string, number>;
   };

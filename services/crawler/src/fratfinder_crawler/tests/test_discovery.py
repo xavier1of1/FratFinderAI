@@ -658,6 +658,24 @@ def test_discover_source_prefers_curated_ato_map_over_generic_root():
     assert any(step.get("step") == "selected_curated_hint" for step in result.resolution_trace)
 
 
+def test_discover_source_uses_curated_kappa_sigma_chapter_listing_when_search_is_empty():
+    result = discover_source("Kappa Sigma", StubSearchClient({}))
+
+    assert result.selected_url == "https://www.kappasigma.org/chapter-listing/"
+    assert result.source_provenance == "search"
+    assert result.selected_candidate_rationale == "curated_hint_safe_fallback"
+    assert any(step.get("step") == "selected_curated_hint" for step in result.resolution_trace)
+
+
+def test_discover_source_uses_curated_alpha_epsilon_pi_chapter_roll_when_search_is_empty():
+    result = discover_source("Alpha Epsilon Pi", StubSearchClient({}))
+
+    assert result.selected_url == "https://aepi.org/about/chapter-roll/"
+    assert result.source_provenance == "search"
+    assert result.selected_candidate_rationale == "curated_hint_safe_fallback"
+    assert any(step.get("step") == "selected_curated_hint" for step in result.resolution_trace)
+
+
 def test_discover_source_prefers_generic_chapter_list_over_about_page_without_hint():
     responses = {
         '"Theta Chi" national fraternity website': [

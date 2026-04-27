@@ -74,7 +74,7 @@ function normalizeStateCode(value: string | null | undefined): string | null {
   return STATE_NAME_TO_CODE[normalized] ?? null;
 }
 const DEFAULT_RERUN_FIELDS: ChapterFieldName[] = ["find_website", "find_email", "find_instagram"];
-const MAX_VISIBLE_STATE_DOTS = 24;
+const MAX_VISIBLE_STATE_DOTS = 60;
 const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000];
 
 function fieldTone(state: string | undefined): "neutral" | "info" | "warning" {
@@ -130,6 +130,9 @@ export function ChaptersDashboard({
   chapters: initialChapters,
   mapSummary,
   totalChapterCount: initialTotalChapterCount,
+  totalWebsiteCount,
+  totalInstagramCount,
+  totalEmailCount,
   fraternityOptions: initialFraternityOptions,
   stateOptions: initialStateOptions,
   statusOptions: initialStatusOptions,
@@ -140,6 +143,9 @@ export function ChaptersDashboard({
   chapters: ChapterListItem[];
   mapSummary: ChapterMapStateSummary[];
   totalChapterCount: number;
+  totalWebsiteCount: number;
+  totalInstagramCount: number;
+  totalEmailCount: number;
   fraternityOptions: string[];
   stateOptions: string[];
   statusOptions: string[];
@@ -406,6 +412,9 @@ export function ChaptersDashboard({
             <p className="sectionDescription">Select chapters to request reruns, remove bad records, or edit a single chapter directly from the dashboard.</p>
           </div>
           <div className="pageIntroMeta">
+            <span className="pageIntroMetaItem">{totalWebsiteCount} websites</span>
+            <span className="pageIntroMetaItem">{totalInstagramCount} Instagrams</span>
+            <span className="pageIntroMetaItem">{totalEmailCount} emails</span>
             <span className="pageIntroMetaItem">{selectedIds.length} selected</span>
             <span className="pageIntroMetaItem">{activeChapter ? "single-edit mode" : "bulk mode"}</span>
           </div>

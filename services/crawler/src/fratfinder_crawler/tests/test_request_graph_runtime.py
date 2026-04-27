@@ -4,7 +4,7 @@ import logging
 from dataclasses import replace
 from types import SimpleNamespace
 
-from fratfinder_crawler.models import ChapterActivityRecord, FraternityCrawlRequestRecord, ProvisionalChapterRecord, SchoolPolicyRecord
+from fratfinder_crawler.models import ChapterActivityRecord, ChapterEvidenceRecord, FraternityCrawlRequestRecord, ProvisionalChapterRecord, SchoolPolicyRecord
 from fratfinder_crawler.orchestration.request_graph import RequestSupervisorGraphRuntime
 
 
@@ -61,6 +61,7 @@ class _FakeRequestRepository:
         self.provider_health_snapshots: list[dict] = []
         self.run_status: dict[int, dict] = {}
         self.latest_crawl_runs: dict[str, dict] = {}
+        self.crawl_runs_by_id: dict[int, dict] = {}
         self.field_snapshots: dict[str, list[dict]] = {}
         self.provisional_chapters: list[ProvisionalChapterRecord] = []
         self.provisional_updates: list[dict] = []
@@ -148,6 +149,9 @@ class _FakeRequestRepository:
         _ = started_after, exclude_run_id
         return self.latest_crawl_runs.get(source_slug)
 
+    def get_crawl_run_by_id(self, crawl_run_id: int) -> dict | None:
+        return self.crawl_runs_by_id.get(crawl_run_id)
+
     def get_source_field_job_snapshot(self, source_slug: str) -> list[dict]:
         return list(self.field_snapshots.get(source_slug, []))
 
@@ -195,6 +199,9 @@ class _FakeCrawlerRepository:
         self.chapters_for_crawl_run: dict[int, list[dict]] = {}
         self.inactive_applied: list[dict] = []
         self.completed_pending: list[dict] = []
+        self.instagram_candidate_rows: dict[str, list[ChapterEvidenceRecord]] = {}
+        self.instagram_resolutions: list[dict] = []
+        self.review_items: list[dict] = []
 
     def upsert_fraternity(self, slug: str, name: str, nic_affiliated: bool = True) -> tuple[str, str]:
         self.upserted_fraternities.append({"slug": slug, "name": name, "nicAffiliated": nic_affiliated})
@@ -207,7 +214,17 @@ class _FakeCrawlerRepository:
     def load_sources(self, source_slug: str | None = None):
         if not source_slug:
             return []
-        return [SimpleNamespace(id="source-1", fraternity_id="frat-1", source_slug=source_slug, slug=source_slug)]
+        return [
+            SimpleNamespace(
+                id="source-1",
+                fraternity_id="frat-1",
+                source_slug=source_slug,
+                slug=source_slug,
+                base_url="https://example.org",
+                list_url="https://example.org/chapters",
+                metadata={},
+            )
+        ]
 
     def upsert_chapter_discovery(self, source, chapter):
         self.upserted_chapters.append({"source": source, "chapter": chapter})
@@ -228,6 +245,27 @@ class _FakeCrawlerRepository:
     def complete_pending_field_jobs_for_chapter(self, **kwargs):
         self.completed_pending.append(dict(kwargs))
         return 1
+
+    def fetch_instagram_candidates_for_chapters(self, chapter_ids: list[str]):
+        rows: list[ChapterEvidenceRecord] = []
+        for chapter_id in chapter_ids:
+            rows.extend(self.instagram_candidate_rows.get(chapter_id, []))
+        return rows
+
+    def apply_instagram_resolution(self, **kwargs):
+        self.instagram_resolutions.append(dict(kwargs))
+        return True
+
+    def create_review_item(self, source_id, crawl_run_id, candidate, *, chapter_id=None):
+        self.review_items.append(
+            {
+                "source_id": source_id,
+                "crawl_run_id": crawl_run_id,
+                "candidate": candidate,
+                "chapter_id": chapter_id,
+            }
+        )
+        return "review-1"
 
 
 def _build_runtime(
@@ -408,6 +446,49 @@ def test_request_graph_promotes_reviews_and_rejects_provisional_chapters():
     assert result["progress"]["provisional"]["rejected"] == 1
 
 
+def test_request_graph_promotes_official_provisional_with_institution_even_without_contact():
+    request = _request()
+    request_repository = _FakeRequestRepository(request)
+    request_repository.provisional_chapters = [
+        ProvisionalChapterRecord(
+            id="prov-official",
+            fraternity_id="frat-1",
+            slug="virginia-tech-chapter",
+            name="Virginia Tech Provisional Chapter",
+            status="provisional",
+            request_id=request.id,
+            university_name="Virginia Tech",
+            evidence_payload={
+                "sourceClass": "national",
+                "validityClass": "provisional_candidate",
+            },
+        )
+    ]
+
+    crawler_repository = _FakeCrawlerRepository()
+
+    def _load_sources(_: str | None = None):
+        return [
+            SimpleNamespace(
+                id="source-1",
+                fraternity_id="frat-1",
+                source_slug="alpha-main",
+                slug="alpha-main",
+                base_url="https://www.dlp.org",
+                list_url="https://www.dlp.org/chapters",
+                metadata={"confirmedByOperator": True},
+            )
+        ]
+
+    crawler_repository.load_sources = _load_sources  # type: ignore[assignment]
+    runtime = _build_runtime(request_repository, crawler_repository)
+    result = runtime._evaluate_provisional_promotions({"request": request, "progress": {}})  # type: ignore[attr-defined]
+
+    assert len(crawler_repository.upserted_chapters) == 1
+    assert any(update["promotion_reason"] == "auto_promoted_official_institution_signal" for update in request_repository.provisional_updates)
+    assert result["progress"]["provisional"]["autoPromoted"] == 1
+
+
 def test_request_graph_pauses_when_recovery_budget_is_exhausted():
     request = _request(
         source_slug=None,
@@ -464,6 +545,72 @@ def test_request_graph_pauses_when_recovery_budget_is_exhausted():
     assert request_repository.request.stage == "awaiting_confirmation"
     assert request_repository.request.status == "draft"
     assert any(event_type == "source_rejected" for event_type, _ in request_repository.events)
+
+
+def test_request_graph_preserves_confirmed_directory_source_after_zero_record_crawl():
+    request = _request(
+        source_slug="alpha-main",
+        source_url="https://www.thetaxi.org/chapters-and-colonies/",
+        source_confidence=0.9,
+        progress={
+            "discovery": {
+                "sourceUrl": "https://www.thetaxi.org/chapters-and-colonies/",
+                "sourceConfidence": 0.9,
+                "confidenceTier": "high",
+                "sourceProvenance": "verified_registry",
+                "fallbackReason": None,
+                "resolutionTrace": [],
+                "candidates": [],
+                "confirmedByOperator": True,
+                "confirmedAt": "2026-04-04T00:00:00+00:00",
+            },
+            "analytics": {
+                "sourceQuality": {
+                    "score": 0.9,
+                    "isWeak": False,
+                    "isBlocked": False,
+                    "reasons": ["positive:chapters", "deeper_path"],
+                    "recoveryAttempts": 0,
+                    "recoveredFromUrl": None,
+                    "recoveredToUrl": None,
+                    "sourceRejectedCount": 0,
+                    "sourceRecoveredCount": 0,
+                    "zeroChapterPrevented": 0,
+                    "sourcePreservedCount": 0,
+                    "confirmedByOperator": True,
+                    "confirmedAt": "2026-04-04T00:00:00+00:00",
+                }
+            },
+        },
+    )
+    request_repository = _FakeRequestRepository(request)
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 905,
+            "status": "succeeded",
+            "pages_processed": 4,
+            "records_seen": 0,
+            "records_upserted": 0,
+            "review_items_created": 0,
+            "field_jobs_created": 0,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    runtime = _build_runtime(
+        request_repository,
+        _FakeCrawlerRepository(),
+        run_crawl=run_crawl,
+        discover_source=lambda fraternity_name: {"fraternity_name": fraternity_name, "selected_url": None},
+    )
+
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert summary["terminalReason"] == "completed_confirmed_source_zero_record"
+    assert request_repository.request.stage == "completed"
+    assert request_repository.request.status == "succeeded"
+    assert any(event_type == "source_preserved" for event_type, _ in request_repository.events)
 
 
 def test_request_graph_runs_enrichment_cycle_until_queue_drains():
@@ -621,10 +768,14 @@ def test_request_graph_completes_when_only_deferred_queue_remains():
     summary = runtime.run(request.id)
 
     assert summary["status"] == "succeeded"
-    assert summary["queueRemaining"] == 0
+    assert summary["queueRemaining"] == 1
+    assert summary["queueRemainingActionable"] == 0
+    assert summary["queueRemainingNonActionable"] == 1
+    assert summary["terminalReason"] == "completed_deferred_non_actionable_queue"
     assert request_repository.request.stage == "completed"
     assert request_repository.request.progress["contactResolution"]["queuedDeferred"] == 1
     assert request_repository.request.progress["contactResolution"]["terminalNoSignal"] == 1
+    assert request_repository.request.progress["analytics"]["enrichment"]["completionMode"] == "deferred_non_actionable_residual"
 
 
 def test_request_graph_completes_with_small_residual_queue_when_provider_is_degraded():
@@ -902,3 +1053,194 @@ def test_request_graph_passes_crawl_policy_version_to_v3_crawl():
 
     assert summary["status"] == "succeeded"
     assert received_policy_versions == ["adaptive-v1-test-promotion"]
+
+
+def test_request_graph_instagram_sweep_resolves_candidates_before_enrichment():
+    request = _request(source_slug="delta-chi-main")
+    request_repository = _FakeRequestRepository(request)
+    crawler_repository = _FakeCrawlerRepository()
+    request_repository.latest_crawl_runs["delta-chi-main"] = {
+        "id": 911,
+        "status": "succeeded",
+        "pages_processed": 4,
+        "records_seen": 1,
+        "records_upserted": 1,
+        "review_items_created": 0,
+        "field_jobs_created": 1,
+    }
+    request_repository.crawl_runs_by_id[911] = dict(request_repository.latest_crawl_runs["delta-chi-main"])
+    request_repository.request = replace(
+        request_repository.request,
+        progress={
+            **request_repository.request.progress,
+            "crawlRun": {
+                "id": 911,
+                "status": "succeeded",
+                "pagesProcessed": 4,
+                "recordsSeen": 1,
+                "recordsUpserted": 1,
+                "reviewItemsCreated": 0,
+                "fieldJobsCreated": 1,
+            },
+        },
+    )
+    crawler_repository.chapters_for_crawl_run[911] = [
+        {
+            "chapter_id": "chapter-1",
+            "chapter_slug": "chapter-one",
+            "chapter_name": "Mississippi State Chapter",
+            "university_name": "Mississippi State University",
+            "chapter_status": "active",
+            "website_url": None,
+            "instagram_url": None,
+            "contact_email": None,
+            "field_states": {},
+            "fraternity_slug": "delta-chi",
+        }
+    ]
+    crawler_repository.instagram_candidate_rows["chapter-1"] = [
+        ChapterEvidenceRecord(
+            chapter_id="chapter-1",
+            chapter_slug="chapter-one",
+            fraternity_slug="delta-chi",
+            source_slug="delta-chi-main",
+            crawl_run_id=911,
+            field_name="instagram_url",
+                candidate_value="https://www.instagram.com/msstatedeltachi/",
+                confidence=0.97,
+                source_url="https://www.msstate.edu/greek-life/delta-chi",
+                source_snippet="Official school chapter page for Delta Chi at Mississippi State University Instagram",
+                metadata={
+                    "sourceType": "official_school_chapter_page",
+                    "pageScope": "school_affiliation_page",
+                    "contactSpecificity": "school_specific",
+            },
+        )
+    ]
+    runtime = _build_runtime(
+        request_repository,
+        crawler_repository,
+        process_field_jobs=lambda **_: {"processed": 0, "requeued": 0, "failed_terminal": 0},
+    )
+
+    updates = runtime._run_instagram_sweep({"request_id": request.id, "progress": request_repository.request.progress})
+
+    assert crawler_repository.instagram_resolutions[0]["instagram_url"] == "https://www.instagram.com/msstatedeltachi/"
+    assert crawler_repository.completed_pending[0]["reason_code"] == "resolved_by_global_instagram_sweep"
+    sweep = updates["progress"]["analytics"]["enrichment"]["instagramSweep"]
+    assert sweep["resolved"] == 1
+    assert sweep["jobsCanceled"] == 1
+
+
+def test_request_graph_instagram_sweep_uses_bound_progress_crawl_run_not_latest_source_run():
+    request = _request(
+        source_slug="delta-chi-main",
+        progress={
+            "discovery": {
+                "sourceUrl": "https://deltachi.org/chapters",
+                "sourceConfidence": 0.9,
+                "confidenceTier": "high",
+                "sourceProvenance": "verified_registry",
+                "fallbackReason": None,
+                "resolutionTrace": [],
+                "candidates": [],
+            },
+            "crawlRun": {
+                "id": 911,
+                "status": "succeeded",
+                "pagesProcessed": 4,
+                "recordsSeen": 1,
+                "recordsUpserted": 1,
+                "reviewItemsCreated": 0,
+                "fieldJobsCreated": 1,
+            },
+        },
+    )
+    request_repository = _FakeRequestRepository(request)
+    crawler_repository = _FakeCrawlerRepository()
+    request_repository.latest_crawl_runs["delta-chi-main"] = {
+        "id": 999,
+        "status": "succeeded",
+        "pages_processed": 7,
+        "records_seen": 4,
+        "records_upserted": 4,
+        "review_items_created": 0,
+        "field_jobs_created": 2,
+    }
+    request_repository.crawl_runs_by_id[911] = {
+        "id": 911,
+        "status": "succeeded",
+        "pages_processed": 4,
+        "records_seen": 1,
+        "records_upserted": 1,
+        "review_items_created": 0,
+        "field_jobs_created": 1,
+    }
+    crawler_repository.chapters_for_crawl_run[911] = [
+        {
+            "chapter_id": "chapter-1",
+            "chapter_slug": "chapter-one",
+            "chapter_name": "Mississippi State Chapter",
+            "university_name": "Mississippi State University",
+            "chapter_status": "active",
+            "website_url": None,
+            "instagram_url": None,
+            "contact_email": None,
+            "field_states": {},
+            "fraternity_slug": "delta-chi",
+        }
+    ]
+    crawler_repository.chapters_for_crawl_run[999] = []
+    crawler_repository.instagram_candidate_rows["chapter-1"] = [
+        ChapterEvidenceRecord(
+            chapter_id="chapter-1",
+            chapter_slug="chapter-one",
+            fraternity_slug="delta-chi",
+            source_slug="delta-chi-main",
+            crawl_run_id=911,
+            field_name="instagram_url",
+            candidate_value="https://www.instagram.com/msstatedeltachi/",
+            confidence=0.97,
+            source_url="https://www.msstate.edu/greek-life/delta-chi",
+            source_snippet="Official school chapter page for Delta Chi at Mississippi State University Instagram",
+            metadata={
+                "sourceType": "official_school_chapter_page",
+                "pageScope": "school_affiliation_page",
+                "contactSpecificity": "school_specific",
+            },
+        )
+    ]
+    runtime = _build_runtime(
+        request_repository,
+        crawler_repository,
+        process_field_jobs=lambda **_: {"processed": 0, "requeued": 0, "failed_terminal": 0},
+    )
+
+    updates = runtime._run_instagram_sweep({"request_id": request.id, "progress": request.progress})
+
+    assert crawler_repository.instagram_resolutions[0]["crawl_run_id"] == 911
+    assert updates["instagram_sweep_summary"]["resolved"] == 1
+
+
+def test_request_graph_enrichment_cycle_enables_existing_instagram_validation():
+    request = _request(source_slug="alpha-main")
+    request_repository = _FakeRequestRepository(request)
+    crawler_repository = _FakeCrawlerRepository()
+    captured_kwargs: dict[str, object] = {}
+
+    runtime = _build_runtime(
+        request_repository,
+        crawler_repository,
+        process_field_jobs=lambda **kwargs: captured_kwargs.update(kwargs) or {"processed": 0, "requeued": 0, "failed_terminal": 0},
+    )
+
+    runtime._run_enrichment_cycle(
+        {
+            "request_id": request.id,
+            "request": request,
+            "effective_config": {"fieldJobLimitPerCycle": 10, "fieldJobWorkers": 2},
+            "cycle_state": {"cyclesCompleted": 0, "lowProgressCycles": 0, "degradedCycleCount": 0, "processedTotal": 0, "requeuedTotal": 0, "failedTerminalTotal": 0},
+        }
+    )
+
+    assert captured_kwargs["validate_existing_instagram"] is True

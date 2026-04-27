@@ -69,9 +69,6 @@ export default async function ChaptersPage({
     listChapters({ limit: pageSize, offset }),
     listChapterMapSummary()
   ]);
-  const withWebsite = loadedChapters.filter((chapter) => Boolean(chapter.websiteUrl)).length;
-  const withInstagram = loadedChapters.filter((chapter) => Boolean(chapter.instagramUrl)).length;
-  const withEmail = loadedChapters.filter((chapter) => Boolean(chapter.contactEmail)).length;
   const visibleStart = metadata.totalCount === 0 ? 0 : offset + 1;
   const visibleEnd = offset + loadedChapters.length;
 
@@ -84,15 +81,18 @@ export default async function ChaptersPage({
         meta={[
           `${visibleStart}-${visibleEnd} of ${metadata.totalCount} chapters`,
           `Page ${currentPage} of ${totalPages}`,
-          `${withWebsite} websites`,
-          `${withInstagram} Instagrams`,
-          `${withEmail} emails`
+          `${metadata.withWebsiteCount} websites`,
+          `${metadata.withInstagramCount} Instagrams`,
+          `${metadata.withEmailCount} emails`
         ]}
       />
       <ChaptersDashboard
         chapters={loadedChapters}
         mapSummary={mapSummary}
         totalChapterCount={metadata.totalCount}
+        totalWebsiteCount={metadata.withWebsiteCount}
+        totalInstagramCount={metadata.withInstagramCount}
+        totalEmailCount={metadata.withEmailCount}
         fraternityOptions={metadata.fraternitySlugs}
         stateOptions={metadata.stateOptions}
         statusOptions={metadata.chapterStatuses}

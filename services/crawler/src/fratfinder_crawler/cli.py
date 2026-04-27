@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Run provider preflight before processing jobs (degraded mode may be applied)",
     )
+    jobs_parser.add_argument(
+        "--validate-existing-instagram",
+        action="store_true",
+        help="Audit populated instagram_url values before treating them as settled",
+    )
 
     preflight_parser = subparsers.add_parser("search-preflight", help="Run search provider health probes")
     preflight_parser.add_argument("--probes", type=int, default=None, help="Number of probe queries to run")
@@ -259,6 +264,7 @@ def main() -> None:
             run_preflight=args.run_preflight,
             runtime_mode=args.runtime_mode,
             graph_durability=args.graph_durability,
+            validate_existing_instagram=args.validate_existing_instagram,
         )
         print(json.dumps(result, indent=2))
         return

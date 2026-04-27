@@ -42,11 +42,21 @@ _DIRECTORY_MARKERS = (
     "chapters",
     "chapter",
     "directory",
+    "chapter-locator",
+    "chapterlocator",
     "find-a-chapter",
     "findachapter",
+    "locate",
+    "locate-chapter",
+    "chapter-listing",
+    "chapterlisting",
     "locations",
     "locator",
     "chapter-roll",
+    "chapters-by-state",
+    "active-chapters",
+    "campuses",
+    "undergraduates",
     "our-chapters",
 )
 
@@ -85,12 +95,16 @@ _FRATERNITY_HOST_HINTS = {
 }
 
 _FRATERNITY_SOURCE_HINTS = {
+    "alpha-epsilon-pi": "https://aepi.org/about/chapter-roll/",
+    "alpha-phi-alpha": "https://apa1906.net/chapter-locator/",
     "phi-gamma-delta": "https://phigam.org/about/overview/our-chapters/",
     "sigma-chi": "https://sigmachi.org/chapters/",
     "alpha-tau-omega": "https://ato.org/home-2/ato-map/",
+    "kappa-sigma": "https://www.kappasigma.org/chapter-listing/",
     "pi-kappa-alpha": "https://pikes.org/chapters/",
     "tau-kappa-epsilon": "https://www.tke.org/chapters",
     "theta-xi": "https://www.thetaxi.org/chapters-and-colonies/",
+    "zeta-beta-tau": "https://zbt.org/chapters",
 }
 
 _FRATERNITY_CONTEXT_MARKERS = (

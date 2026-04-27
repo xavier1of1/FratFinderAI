@@ -64,6 +64,7 @@ from fratfinder_crawler.models import (
     SourceRecord,
     VerifiedSourceRecord,
 )
+from fratfinder_crawler.normalization.state_normalizer import normalize_us_state
 from fratfinder_crawler.status.models import (
     CampusStatusSource,
     ChapterStatusDecision,
@@ -1531,6 +1532,7 @@ class CrawlerRepository:
         self._connection.commit()
 
     def upsert_chapter(self, source: SourceRecord, chapter: NormalizedChapter) -> str:
+        normalized_state = normalize_us_state(chapter.state)
         self._contracts.validate_chapter(
             {
                 "fraternitySlug": chapter.fraternity_slug,
@@ -1540,7 +1542,7 @@ class CrawlerRepository:
                 "name": chapter.name,
                 "universityName": chapter.university_name,
                 "city": chapter.city,
-                "state": chapter.state,
+                "state": normalized_state,
                 "country": chapter.country,
                 "websiteUrl": chapter.website_url,
                 "chapterStatus": chapter.chapter_status,
@@ -1611,7 +1613,7 @@ class CrawlerRepository:
                     "name": chapter.name,
                     "university_name": chapter.university_name,
                     "city": chapter.city,
-                    "state": chapter.state,
+                    "state": normalized_state,
                     "country": chapter.country,
                     "website_url": chapter.website_url,
                     "instagram_url": chapter.instagram_url,
@@ -1625,6 +1627,7 @@ class CrawlerRepository:
         return chapter_id
 
     def upsert_chapter_discovery(self, source: SourceRecord, chapter: NormalizedChapter) -> str:
+        normalized_state = normalize_us_state(chapter.state)
         self._contracts.validate_chapter(
             {
                 "fraternitySlug": chapter.fraternity_slug,
@@ -1634,7 +1637,7 @@ class CrawlerRepository:
                 "name": chapter.name,
                 "universityName": chapter.university_name,
                 "city": chapter.city,
-                "state": chapter.state,
+                "state": normalized_state,
                 "country": chapter.country,
                 "websiteUrl": chapter.website_url,
                 "chapterStatus": chapter.chapter_status,
@@ -1705,7 +1708,7 @@ class CrawlerRepository:
                     "name": chapter.name,
                     "university_name": chapter.university_name,
                     "city": chapter.city,
-                    "state": chapter.state,
+                    "state": normalized_state,
                     "country": chapter.country,
                     "website_url": chapter.website_url,
                     "instagram_url": chapter.instagram_url,
@@ -1846,6 +1849,414 @@ class CrawlerRepository:
             )
         self._connection.commit()
 
+    def fetch_instagram_candidates_for_chapters(self, chapter_ids: list[str]) -> list[ChapterEvidenceRecord]:
+        normalized_ids = [str(chapter_id).strip() for chapter_id in chapter_ids if str(chapter_id).strip()]
+        if not normalized_ids:
+            return []
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    chapter_id::text AS chapter_id,
+                    chapter_slug,
+                    fraternity_slug,
+                    source_slug,
+                    request_id,
+                    crawl_run_id,
+                    field_name,
+                    candidate_value,
+                    confidence,
+                    trust_tier,
+                    evidence_status,
+                    source_url,
+                    source_snippet,
+                    provider,
+                    query,
+                    related_website_url,
+                    metadata
+                FROM chapter_evidence
+                WHERE field_name = 'instagram_url'
+                  AND chapter_id = ANY(%s::uuid[])
+                ORDER BY chapter_id, created_at DESC
+                """,
+                (normalized_ids,),
+            )
+            rows = cursor.fetchall()
+        return [
+            ChapterEvidenceRecord(
+                chapter_id=str(row["chapter_id"]) if row["chapter_id"] is not None else None,
+                chapter_slug=row["chapter_slug"] or "",
+                fraternity_slug=row["fraternity_slug"],
+                source_slug=row["source_slug"],
+                request_id=row["request_id"],
+                crawl_run_id=row["crawl_run_id"],
+                field_name=row["field_name"],
+                candidate_value=row["candidate_value"],
+                confidence=float(row["confidence"]) if row["confidence"] is not None else None,
+                trust_tier=row["trust_tier"] or "medium",
+                evidence_status=row["evidence_status"] or "observed",
+                source_url=row["source_url"],
+                source_snippet=row["source_snippet"],
+                provider=row["provider"],
+                query=row["query"],
+                related_website_url=row["related_website_url"],
+                metadata=row["metadata"] or {},
+            )
+            for row in rows
+        ]
+
+    def normalize_instagram_candidate_source_types(self) -> dict[str, Any]:
+        valid_source_types = [
+            "existing_db_value",
+            "provenance_supporting_page",
+            "authoritative_bundle",
+            "nationals_chapter_entry",
+            "nationals_chapter_page",
+            "nationals_directory_row",
+            "official_school_chapter_page",
+            "official_school_directory_row",
+            "verified_chapter_website",
+            "chapter_website_structured_data",
+            "chapter_website_social_link",
+            "search_result_profile",
+            "generated_handle_search",
+            "national_following_seed",
+            "review_override",
+        ]
+        legacy_aliases = [
+            "official_school",
+            "official_school_page",
+            "school_page",
+            "school_directory",
+            "chapter_site",
+            "chapter_website",
+            "chapter_website_structured_data",
+            "chapter_website_social_link",
+            "nationals",
+            "nationals_page",
+            "nationals_row",
+            "national_directory_row",
+            "search",
+            "search_result",
+            "instagram_search",
+            "generated_handle",
+            "provenance",
+            "supporting_page",
+            "source_page",
+            "existing_db",
+        ]
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*)::int AS total_rows,
+                    COUNT(*) FILTER (
+                        WHERE NULLIF(BTRIM(COALESCE(metadata ->> 'evidenceSourceType', metadata ->> 'sourceType', '')), '') IS NULL
+                    )::int AS missing_source_type,
+                    COUNT(*) FILTER (
+                        WHERE NULLIF(BTRIM(COALESCE(metadata ->> 'evidenceSourceType', metadata ->> 'sourceType', '')), '') IS NOT NULL
+                          AND LOWER(BTRIM(COALESCE(metadata ->> 'evidenceSourceType', metadata ->> 'sourceType', ''))) = ANY(%s::text[])
+                    )::int AS legacy_source_type
+                FROM chapter_evidence
+                WHERE field_name = 'instagram_url'
+                """,
+                (legacy_aliases,),
+            )
+            before = dict(cursor.fetchone() or {})
+            cursor.execute(
+                """
+                WITH candidates AS (
+                    SELECT
+                        ce.id,
+                        CASE
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) = 'official_school'
+                                THEN 'official_school_chapter_page'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) IN ('official_school_page', 'school_page')
+                                THEN 'official_school_chapter_page'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) = 'school_directory'
+                                THEN 'official_school_directory_row'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) IN ('chapter_site', 'chapter_website')
+                                THEN 'verified_chapter_website'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) = 'chapter_website_structured_data'
+                                THEN 'chapter_website_structured_data'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) = 'chapter_website_social_link'
+                                THEN 'chapter_website_social_link'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) IN ('nationals', 'nationals_page')
+                                THEN 'nationals_chapter_page'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) IN ('nationals_row', 'national_directory_row')
+                                THEN 'nationals_directory_row'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) IN ('search', 'search_result', 'instagram_search')
+                                THEN 'search_result_profile'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) = 'generated_handle'
+                                THEN 'generated_handle_search'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) IN ('provenance', 'supporting_page', 'source_page')
+                                THEN 'provenance_supporting_page'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) = 'existing_db'
+                                THEN 'existing_db_value'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'contactSpecificity', ''))) = 'school_specific'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'pageScope', ''))) LIKE 'school%%'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'supportingPageUrl', ce.source_url, ''))) LIKE '%%.edu%%'
+                                THEN 'official_school_chapter_page'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'contactSpecificity', ''))) = 'national_specific_to_chapter'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'pageScope', ''))) LIKE '%%nation%%'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'supportingPageUrl', ce.source_url, ''))) LIKE '%%chapter-directory%%'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'supportingPageUrl', ce.source_url, ''))) LIKE '%%find-a-chapter%%'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'supportingPageUrl', ce.source_url, ''))) LIKE '%%/chapters%%'
+                                THEN 'nationals_chapter_page'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'contactSpecificity', ''))) = 'chapter_specific'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'pageScope', ''))) LIKE '%%chapter_website%%'
+                                OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'pageScope', ''))) LIKE '%%chapter_site%%'
+                                THEN 'verified_chapter_website'
+                            WHEN LOWER(BTRIM(COALESCE(ce.metadata ->> 'supportingPageUrl', ce.source_url, ''))) LIKE '%%instagram.com/%%'
+                                OR NULLIF(BTRIM(COALESCE(ce.provider, '')), '') IS NOT NULL
+                                OR NULLIF(BTRIM(COALESCE(ce.query, '')), '') IS NOT NULL
+                                THEN 'search_result_profile'
+                            WHEN NULLIF(BTRIM(COALESCE(ce.metadata ->> 'supportingPageUrl', ce.source_url, '')), '') IS NOT NULL
+                                THEN 'provenance_supporting_page'
+                            ELSE 'search_result_profile'
+                        END AS normalized_source_type
+                    FROM chapter_evidence ce
+                    WHERE ce.field_name = 'instagram_url'
+                      AND (
+                        NULLIF(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', '')), '') IS NULL
+                        OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) = ANY(%s::text[])
+                        OR LOWER(BTRIM(COALESCE(ce.metadata ->> 'evidenceSourceType', ce.metadata ->> 'sourceType', ''))) <> ALL(%s::text[])
+                      )
+                ),
+                applied AS (
+                    UPDATE chapter_evidence ce
+                    SET metadata = jsonb_set(
+                        jsonb_set(COALESCE(ce.metadata, '{}'::jsonb), '{evidenceSourceType}', to_jsonb(candidates.normalized_source_type), true),
+                        '{sourceType}',
+                        to_jsonb(candidates.normalized_source_type),
+                        true
+                    )
+                    FROM candidates
+                    WHERE ce.id = candidates.id
+                    RETURNING ce.id
+                )
+                SELECT COUNT(*)::int AS updated_rows FROM applied
+                """,
+                (legacy_aliases, valid_source_types),
+            )
+            updated = dict(cursor.fetchone() or {})
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE NULLIF(BTRIM(COALESCE(metadata ->> 'evidenceSourceType', metadata ->> 'sourceType', '')), '') IS NULL
+                    )::int AS missing_source_type,
+                    COUNT(*) FILTER (
+                        WHERE LOWER(BTRIM(COALESCE(metadata ->> 'evidenceSourceType', metadata ->> 'sourceType', ''))) <> ALL(%s::text[])
+                    )::int AS invalid_source_type
+                FROM chapter_evidence
+                WHERE field_name = 'instagram_url'
+                """,
+                (valid_source_types,),
+            )
+            after = dict(cursor.fetchone() or {})
+            cursor.execute(
+                """
+                SELECT
+                    COALESCE(NULLIF(BTRIM(COALESCE(metadata ->> 'evidenceSourceType', metadata ->> 'sourceType', '')), ''), 'missing') AS source_type,
+                    COUNT(*)::int AS count
+                FROM chapter_evidence
+                WHERE field_name = 'instagram_url'
+                GROUP BY source_type
+                ORDER BY count DESC, source_type ASC
+                """,
+            )
+            distribution = [
+                {
+                    "sourceType": str(row["source_type"]),
+                    "count": int(row["count"] or 0),
+                }
+                for row in cursor.fetchall()
+            ]
+        self._connection.commit()
+        return {
+            "totalRows": int(before.get("total_rows") or 0),
+            "missingSourceTypeBefore": int(before.get("missing_source_type") or 0),
+            "legacySourceTypeBefore": int(before.get("legacy_source_type") or 0),
+            "updatedRows": int(updated.get("updated_rows") or 0),
+            "missingSourceTypeAfter": int(after.get("missing_source_type") or 0),
+            "invalidSourceTypeAfter": int(after.get("invalid_source_type") or 0),
+            "distribution": distribution,
+        }
+
+    def apply_instagram_resolution(
+        self,
+        *,
+        chapter_id: str,
+        chapter_slug: str,
+        fraternity_slug: str | None,
+        source_slug: str | None,
+        crawl_run_id: int | None,
+        request_id: str | None,
+        instagram_url: str,
+        confidence: float,
+        source_url: str | None,
+        source_snippet: str | None,
+        reason_code: str,
+        page_scope: str | None,
+        contact_specificity: str | None,
+        source_type: str | None,
+        decision_stage: str,
+        allow_replace: bool = False,
+        previous_url: str | None = None,
+    ) -> bool:
+        normalized_instagram = sanitize_as_instagram(instagram_url)
+        if normalized_instagram is None:
+            return False
+        with self._connection.transaction(), self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT chapter_status, instagram_url
+                FROM chapters
+                WHERE id = %s
+                """,
+                (chapter_id,),
+            )
+            chapter_row = cursor.fetchone()
+            if chapter_row is None:
+                return False
+            current_status = str(chapter_row["chapter_status"] or "").strip().lower()
+            if current_status != "active":
+                return False
+            current_instagram = sanitize_as_instagram(chapter_row["instagram_url"])
+            if current_instagram and current_instagram != normalized_instagram and not allow_replace:
+                return False
+
+            contact_provenance_patch = {
+                "instagram_url": {
+                    "supportingPageUrl": source_url,
+                    "supportingPageScope": _normalize_page_scope(page_scope),
+                    "contactProvenanceType": _normalize_contact_specificity(contact_specificity),
+                    "decisionStage": decision_stage,
+                    "sourceType": source_type,
+                    "reasonCode": reason_code,
+                    "confidence": round(float(confidence or 0.0), 4),
+                    "decisionOutcome": DECISION_OUTCOME_ACCEPTED,
+                    "fieldResolutionState": FIELD_RESOLUTION_RESOLVED,
+                    "candidateValue": normalized_instagram,
+                    "updatedAt": datetime.utcnow().isoformat(),
+                }
+            }
+            cursor.execute(
+                """
+                UPDATE chapters
+                SET
+                    instagram_url = CASE
+                        WHEN %(allow_replace)s THEN %(instagram_url)s
+                        ELSE COALESCE(instagram_url, %(instagram_url)s)
+                    END,
+                    field_states = COALESCE(field_states, '{}'::jsonb) || %(field_states)s,
+                    contact_provenance = COALESCE(contact_provenance, '{}'::jsonb) || %(contact_provenance)s,
+                    updated_at = NOW()
+                WHERE id = %(chapter_id)s
+                """,
+                {
+                    "chapter_id": chapter_id,
+                    "instagram_url": normalized_instagram,
+                    "allow_replace": bool(allow_replace),
+                    "field_states": Jsonb({"instagram_url": "found"}),
+                    "contact_provenance": Jsonb(contact_provenance_patch),
+                },
+            )
+
+            source_id: str | None = None
+            if crawl_run_id is not None:
+                cursor.execute("SELECT source_id FROM crawl_runs WHERE id = %s", (crawl_run_id,))
+                source_row = cursor.fetchone()
+                if source_row is not None and source_row["source_id"] is not None:
+                    source_id = str(source_row["source_id"])
+            if source_id is not None and crawl_run_id is not None:
+                cursor.execute(
+                    """
+                    INSERT INTO chapter_provenance (
+                        chapter_id,
+                        source_id,
+                        crawl_run_id,
+                        field_name,
+                        field_value,
+                        source_url,
+                        source_snippet,
+                        confidence
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        chapter_id,
+                        source_id,
+                        crawl_run_id,
+                        "instagram_url",
+                        normalized_instagram,
+                        source_url,
+                        (source_snippet or reason_code or normalized_instagram)[:400],
+                        float(confidence or 0.0),
+                    ),
+                )
+
+            trust_tier = (
+                "strong_official"
+                if float(confidence or 0.0) >= 0.95
+                else "high"
+                if float(confidence or 0.0) >= 0.85
+                else "medium"
+            )
+            cursor.execute(
+                """
+                INSERT INTO chapter_evidence (
+                    chapter_id,
+                    chapter_slug,
+                    fraternity_slug,
+                    source_slug,
+                    request_id,
+                    crawl_run_id,
+                    field_name,
+                    candidate_value,
+                    confidence,
+                    trust_tier,
+                    evidence_status,
+                    source_url,
+                    source_snippet,
+                    metadata
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    chapter_id,
+                    chapter_slug,
+                    fraternity_slug,
+                    source_slug,
+                    request_id,
+                    crawl_run_id,
+                    "instagram_url",
+                    normalized_instagram,
+                    float(confidence or 0.0),
+                    trust_tier,
+                    "accepted",
+                    source_url,
+                    (source_snippet or normalized_instagram)[:400],
+                    Jsonb(
+                        {
+                            "reasonCode": reason_code,
+                            "pageScope": _normalize_page_scope(page_scope),
+                            "contactSpecificity": _normalize_contact_specificity(contact_specificity),
+                            "evidenceSourceType": source_type,
+                            "supportingPageUrl": source_url,
+                            "supportingConfidence": round(float(confidence or 0.0), 4),
+                            "decisionStage": decision_stage,
+                            "allowReplaceExisting": bool(allow_replace),
+                            "previousUrl": previous_url,
+                            "requestId": request_id,
+                        }
+                    ),
+                ),
+            )
+        self._connection.commit()
+        return True
+
     def upsert_provisional_chapter(
         self,
         *,
@@ -1866,6 +2277,7 @@ class CrawlerRepository:
         promoted_chapter_id: str | None = None,
         evidence_payload: dict[str, Any] | None = None,
     ) -> str:
+        normalized_state = normalize_us_state(state)
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -1878,7 +2290,7 @@ class CrawlerRepository:
                     name,
                     university_name,
                     city,
-                    state,
+                    normalized_state,
                     country,
                     website_url,
                     instagram_url,
@@ -2947,8 +3359,11 @@ class CrawlerRepository:
                 ORDER BY
                     fj.priority DESC,
                     CASE
-                        WHEN fj.queue_state = 'deferred' THEN 1
-                        ELSE 0
+                        WHEN fj.queue_state = 'blocked_provider' THEN 0
+                        WHEN fj.queue_state = 'blocked_dependency' THEN 1
+                        WHEN fj.queue_state = 'blocked_repairable' THEN 2
+                        WHEN fj.queue_state = 'deferred' THEN 3
+                        ELSE 4
                     END ASC,
                     fj.scheduled_at ASC,
                     fj.id ASC
@@ -3532,6 +3947,10 @@ class CrawlerRepository:
             or completed_payload.get("statusDecisionId")
             or ""
         ).strip() or None
+        allow_instagram_replace = bool(
+            decision_evidence.metadata.get("allowReplaceExisting")
+            or completed_payload.get("allowReplaceExisting")
+        )
         operator_override_reason = str(
             decision_evidence.metadata.get("operatorOverrideReason")
             or completed_payload.get("operatorOverrideReason")
@@ -3576,7 +3995,12 @@ class CrawlerRepository:
                             WHEN website_url !~* '^https?://' THEN %(website_url)s::text
                             ELSE website_url
                         END,
-                        instagram_url = COALESCE(instagram_url, %(instagram_url)s),
+                        instagram_url = CASE
+                            WHEN %(instagram_url)s::text IS NULL THEN instagram_url
+                            WHEN instagram_url IS NULL THEN %(instagram_url)s::text
+                            WHEN %(allow_instagram_replace)s THEN %(instagram_url)s::text
+                            ELSE instagram_url
+                        END,
                         contact_email = COALESCE(contact_email, %(contact_email)s),
                         university_name = COALESCE(university_name, %(university_name)s),
                         chapter_status = COALESCE(%(chapter_status)s, chapter_status),
@@ -3589,6 +4013,7 @@ class CrawlerRepository:
                         "chapter_id": job.chapter_id,
                         "website_url": chapter_updates.get("website_url"),
                         "instagram_url": chapter_updates.get("instagram_url"),
+                        "allow_instagram_replace": allow_instagram_replace,
                         "contact_email": chapter_updates.get("contact_email"),
                         "university_name": chapter_updates.get("university_name"),
                         "chapter_status": chapter_updates.get("chapter_status"),

@@ -2,6 +2,7 @@ import pytest
 
 from fratfinder_crawler.models import AmbiguousRecordError, ExtractedChapter, SourceRecord
 from fratfinder_crawler.normalization.normalizer import classify_chapter_validity, normalize_record
+from fratfinder_crawler.normalization.state_normalizer import normalize_us_state
 
 
 def _source() -> SourceRecord:
@@ -153,6 +154,26 @@ def test_normalizer_routes_mailto_website_into_email_field():
     assert normalized.contact_email == "admin@chapter.org"
     assert normalized.field_states["website_url"] == "missing"
     assert normalized.field_states["contact_email"] == "found"
+
+
+def test_normalizer_normalizes_full_state_names_to_postal_codes():
+    extracted = ExtractedChapter(
+        name="Gamma Alpha",
+        university_name="University of Texas",
+        state="Texas",
+        source_url="https://example.org/chapters",
+        source_confidence=0.95,
+    )
+
+    normalized, provenance = normalize_record(_source(), extracted)
+
+    assert normalized.state == "TX"
+    assert any(item.field_name == "state" and item.field_value == "TX" for item in provenance)
+
+
+def test_state_normalizer_drops_dirty_state_values():
+    assert normalize_us_state("January 1, 1957") is None
+    assert normalize_us_state("Visit Website") is None
 
 def test_normalizer_marks_valid_missing_when_conservative_evidence_exists():
     extracted = ExtractedChapter(
@@ -359,6 +380,37 @@ def test_chapter_validity_marks_wider_web_candidates_provisional():
 
     assert decision.validity_class == "provisional_candidate"
     assert decision.repair_reason == "broader_web_gated"
+
+
+def test_chapter_validity_infers_school_from_chapter_name_phrase():
+    decision = classify_chapter_validity(
+        ExtractedChapter(
+            name="Virginia Tech Provisional Chapter",
+            university_name=None,
+            source_url="https://www.dlp.org/chapters",
+            source_confidence=0.95,
+        ),
+        source_class="national",
+    )
+
+    assert decision.validity_class == "canonical_valid"
+    assert decision.university_name == "Virginia Tech"
+    assert decision.semantic_signals["institutionSignals"] >= 1
+
+
+def test_normalize_record_infers_school_from_source_snippet_and_url():
+    extracted = ExtractedChapter(
+        name="Virginia Eta Chapter",
+        university_name="Blacksburg",
+        source_url="https://virginiatech.phikappapsi.com",
+        source_snippet="Official chapter homepage for Phi Kappa Psi at Virginia Tech",
+        source_confidence=0.95,
+    )
+
+    normalized, _ = normalize_record(_source(), extracted, validity_class="canonical_valid")
+
+    assert normalized.university_name == "Virginia Tech"
+    assert normalized.slug == "virginia-eta-chapter-virginia-tech"
 
 
 def test_normalizer_blocks_contact_queue_for_non_canonical_validity():

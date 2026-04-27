@@ -613,13 +613,13 @@ tbody tr:hover {
 .stateMarkers {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.22rem;
+  gap: 0.16rem;
   align-content: flex-start;
 }
 
 .markerDot {
-  width: 0.48rem;
-  height: 0.48rem;
+  width: 0.36rem;
+  height: 0.36rem;
   border-radius: 999px;
   background: linear-gradient(180deg, var(--primary), var(--accent));
   display: inline-block;

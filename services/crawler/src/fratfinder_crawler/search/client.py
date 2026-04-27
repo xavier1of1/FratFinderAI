@@ -27,6 +27,12 @@ _BRAVE_HTML_ENDPOINT = "https://search.brave.com/search"
 _TAVILY_SEARCH_ENDPOINT = "https://api.tavily.com/search"
 _SERPER_SEARCH_ENDPOINT = "https://google.serper.dev/search"
 _DATAFORSEO_SEARCH_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
+_AUTO_PAID_PROVIDER_ORDER = (
+    "serper_api",
+    "tavily_api",
+    "dataforseo_api",
+    "brave_api",
+)
 _LOW_SIGNAL_SEARCH_HOSTS = {
     "reddit.com",
     "www.reddit.com",
@@ -180,7 +186,7 @@ class SearchClient:
         raise SearchUnavailableError(f"Unsupported search provider: {self._settings.crawler_search_provider}")
 
     def _search_auto(self, query: str, max_results: int) -> list[SearchResult]:
-        providers = self._free_provider_order()
+        providers = self._auto_provider_order()
         deduped: list[str] = []
         for provider in providers:
             if provider not in deduped:
@@ -191,9 +197,56 @@ class SearchClient:
         providers = self._free_provider_order()
         return self._search_with_provider_chain(query, max_results, providers)
 
-    def _free_provider_order(self) -> list[str]:
-        provider_order, _warnings = normalize_free_provider_order(self._settings.crawler_search_provider_order_free)
+    def _auto_provider_order(self) -> list[str]:
+        provider_order = self.effective_auto_provider_order(self._settings)
         return self._rank_providers(provider_order)
+
+    def _free_provider_order(self) -> list[str]:
+        provider_order = self.effective_auto_provider_order(self._settings, free_only=True)
+        return self._rank_providers(provider_order)
+
+    @staticmethod
+    def effective_auto_provider_order(settings: Settings, *, free_only: bool = False) -> list[str]:
+        provider_order, _warnings = normalize_free_provider_order(settings.crawler_search_provider_order_free)
+        free_order = list(dict.fromkeys(provider_order or canonical_free_provider_order()))
+        if free_only or not bool(getattr(settings, "crawler_v3_paid_search_enabled", False)):
+            return free_order
+
+        paid_order = [
+            provider
+            for provider in _AUTO_PAID_PROVIDER_ORDER
+            if SearchClient._provider_configured_for_settings(settings, provider)
+        ]
+        if not paid_order:
+            return free_order
+
+        if "searxng_json" in free_order:
+            expanded = ["searxng_json", *paid_order, *[provider for provider in free_order if provider != "searxng_json"]]
+        else:
+            expanded = [*paid_order, *free_order]
+        return list(dict.fromkeys(expanded))
+
+    @staticmethod
+    def _provider_configured_for_settings(settings: Settings, provider: str) -> bool:
+        if provider == "searxng_json":
+            return bool(
+                [
+                    endpoint
+                    for endpoint in str(getattr(settings, "crawler_search_searxng_base_url", "") or "").split(",")
+                    if endpoint.strip()
+                ]
+            )
+        if provider == "tavily_api":
+            return bool((settings.crawler_search_tavily_api_key or "").strip())
+        if provider == "serper_api":
+            return bool((settings.crawler_search_serper_api_key or "").strip())
+        if provider == "dataforseo_api":
+            return bool((settings.crawler_search_dataforseo_login or "").strip()) and bool(
+                (settings.crawler_search_dataforseo_password or "").strip()
+            )
+        if provider == "brave_api":
+            return bool((settings.crawler_search_brave_api_key or "").strip())
+        return True
 
     def _search_with_provider_chain(self, query: str, max_results: int, providers: list[str]) -> list[SearchResult]:
         last_error: Exception | None = None
@@ -230,19 +283,7 @@ class SearchClient:
         raise SearchUnavailableError("No configured providers available")
 
     def _provider_configured(self, provider: str) -> bool:
-        if provider == "searxng_json":
-            return bool(self._searxng_endpoints())
-        if provider == "tavily_api":
-            return bool((self._settings.crawler_search_tavily_api_key or "").strip())
-        if provider == "serper_api":
-            return bool((self._settings.crawler_search_serper_api_key or "").strip())
-        if provider == "dataforseo_api":
-            return bool((self._settings.crawler_search_dataforseo_login or "").strip()) and bool(
-                (self._settings.crawler_search_dataforseo_password or "").strip()
-            )
-        if provider == "brave_api":
-            return bool((self._settings.crawler_search_brave_api_key or "").strip())
-        return True
+        return self._provider_configured_for_settings(self._settings, provider)
 
     def _search_with_single_provider(self, provider: str, query: str, max_results: int, *, fallback_taken: bool) -> list[SearchResult]:
         if provider == "searxng_json":

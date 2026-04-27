@@ -11,6 +11,7 @@ from langgraph.graph import END, StateGraph
 from fratfinder_crawler.db import CrawlerRepository, RequestGraphRepository
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.models import FraternityCrawlRequestRecord, NormalizedChapter
+from fratfinder_crawler.social import run_instagram_sweep as execute_instagram_sweep
 
 
 class RequestGraphState(TypedDict, total=False):
@@ -35,6 +36,7 @@ class RequestGraphState(TypedDict, total=False):
     cycle: int
     preflight_snapshot: dict[str, Any] | None
     latest_field_job_result: dict[str, Any] | None
+    instagram_sweep_summary: dict[str, int] | None
     skip_enrichment: bool
     continue_enrichment: bool
     graph_status: str
@@ -104,7 +106,9 @@ class RequestSupervisorGraphRuntime:
         final_state = self._graph.invoke(initial_state)
         progress = final_state.get("progress") or {}
         records_seen = (progress.get("crawlRun") or {}).get("recordsSeen", 0)
-        queue_remaining = _remaining_actionable_queue(progress)
+        queue_remaining_total = _remaining_total_queue(progress)
+        queue_remaining_actionable = _remaining_actionable_queue(progress)
+        queue_remaining_non_actionable = _remaining_non_actionable_queue(progress)
         cycles_completed = (final_state.get("cycle_state") or {}).get("cyclesCompleted", 0)
         summary = {
             "requestId": request_id,
@@ -112,10 +116,12 @@ class RequestSupervisorGraphRuntime:
             "terminalReason": final_state.get("terminal_reason"),
             "status": final_state.get("graph_status", "failed"),
             "crawlRuntimeModeUsed": final_state.get("crawl_runtime_mode_used"),
-            "businessStatus": "progressed" if int(records_seen or 0) > 0 or int(cycles_completed or 0) > 0 or int(queue_remaining or 0) == 0 else "no_business_progress",
+            "businessStatus": "progressed" if int(records_seen or 0) > 0 or int(cycles_completed or 0) > 0 or int(queue_remaining_total or 0) == 0 else "no_business_progress",
             "crawlRunId": progress.get("crawlRun", {}).get("id"),
             "recordsSeen": records_seen,
-            "queueRemaining": queue_remaining,
+            "queueRemaining": queue_remaining_total,
+            "queueRemainingActionable": queue_remaining_actionable,
+            "queueRemainingNonActionable": queue_remaining_non_actionable,
             "cyclesCompleted": cycles_completed,
         }
         self._request_repository.finish_request_graph_run(
@@ -134,6 +140,7 @@ class RequestSupervisorGraphRuntime:
         graph.add_node("start_crawl", self._instrument("start_crawl", self._start_crawl, phase="crawl"))
         graph.add_node("sync_crawl_progress", self._instrument("sync_crawl_progress", self._sync_crawl_progress, phase="crawl"))
         graph.add_node("purge_inactive_schools", self._instrument("purge_inactive_schools", self._purge_inactive_schools, phase="validation"))
+        graph.add_node("run_instagram_sweep", self._instrument("run_instagram_sweep", self._run_instagram_sweep, phase="validation"))
         graph.add_node("enter_enrichment", self._instrument("enter_enrichment", self._enter_enrichment, phase="enrichment"))
         graph.add_node("run_enrichment_cycle", self._instrument("run_enrichment_cycle", self._run_enrichment_cycle, phase="enrichment"))
         graph.add_node("sync_enrichment_progress", self._instrument("sync_enrichment_progress", self._sync_enrichment_progress, phase="enrichment"))
@@ -152,7 +159,8 @@ class RequestSupervisorGraphRuntime:
             self._after_crawl_sync,
             {"recover": "recover_source", "retry": "start_crawl", "continue": "purge_inactive_schools", "finalize": "finalize"},
         )
-        graph.add_edge("purge_inactive_schools", "enter_enrichment")
+        graph.add_edge("purge_inactive_schools", "run_instagram_sweep")
+        graph.add_edge("run_instagram_sweep", "enter_enrichment")
         graph.add_conditional_edges(
             "enter_enrichment",
             self._after_enter_enrichment,
@@ -275,7 +283,8 @@ class RequestSupervisorGraphRuntime:
                 "graph_status": "failed",
                 "terminal_reason": "request_missing",
             }
-        source_quality = _current_source_quality(request)
+        source_record = _first_source_record(self._crawler_repository, request.source_slug)
+        source_quality = _with_source_confirmation(_current_source_quality(request), request=request, source_record=source_record)
         progress = _clone_progress(request.progress)
         progress = _update_progress_graph(
             progress,
@@ -293,13 +302,31 @@ class RequestSupervisorGraphRuntime:
 
     def _recover_source(self, state: RequestGraphState) -> dict[str, Any]:
         request = state["request"]
-        source_quality = dict(state.get("source_quality") or _current_source_quality(request))
+        source_record = _first_source_record(self._crawler_repository, request.source_slug)
+        source_quality = _with_source_confirmation(
+            dict(state.get("source_quality") or _current_source_quality(request)),
+            request=request,
+            source_record=source_record,
+        )
         recovery_reason = state.get("recovery_reason")
         if recovery_reason is None:
             return {"source_quality": source_quality, "request_paused": False, "terminal_reason": None}
 
         recovery_attempts = int(source_quality.get("recoveryAttempts", 0) or 0)
         if recovery_attempts >= self._free_recovery_attempts:
+            if _should_preserve_current_source(
+                request=request,
+                source_quality=source_quality,
+                recovery_reason=recovery_reason,
+                source_record=source_record,
+            ):
+                return self._preserve_current_source(
+                    request=request,
+                    progress=state.get("progress") or request.progress,
+                    source_quality=source_quality,
+                    recovery_reason=recovery_reason,
+                    message="Request preserved operator-confirmed official source after recovery budget exhaustion",
+                )
             source_quality["sourceRejectedCount"] = int(source_quality.get("sourceRejectedCount", 0) or 0) + 1
             progress = _update_progress_analytics(state.get("progress") or request.progress, source_quality=source_quality)
             self._request_repository.update_request(
@@ -342,6 +369,19 @@ class RequestSupervisorGraphRuntime:
         ) and not bool(alternate_quality.get("isWeak", True)) and float(alternate_quality.get("score", 0.0) or 0.0) > current_score + delta_required
 
         if not can_switch:
+            if _should_preserve_current_source(
+                request=request,
+                source_quality=source_quality,
+                recovery_reason=recovery_reason,
+                source_record=source_record,
+            ):
+                return self._preserve_current_source(
+                    request=request,
+                    progress=state.get("progress") or request.progress,
+                    source_quality=source_quality,
+                    recovery_reason=recovery_reason,
+                    message="Request preserved operator-confirmed official source because no stronger alternative was found",
+                )
             source_quality["sourceRejectedCount"] = int(source_quality.get("sourceRejectedCount", 0) or 0) + 1
             if recovery_reason == "zero_chapter":
                 source_quality["zeroChapterPrevented"] = int(source_quality.get("zeroChapterPrevented", 0) or 0) + 1
@@ -447,6 +487,48 @@ class RequestSupervisorGraphRuntime:
             "recovery_reason": None,
             "request_paused": False,
             "terminal_reason": None,
+        }
+
+    def _preserve_current_source(
+        self,
+        *,
+        request: FraternityCrawlRequestRecord,
+        progress: dict[str, Any] | None,
+        source_quality: dict[str, Any],
+        recovery_reason: str | None,
+        message: str,
+    ) -> dict[str, Any]:
+        preserved_quality = dict(source_quality)
+        preserved_quality["sourcePreservedCount"] = int(preserved_quality.get("sourcePreservedCount", 0) or 0) + 1
+        if recovery_reason == "zero_chapter":
+            preserved_quality["zeroChapterPrevented"] = int(preserved_quality.get("zeroChapterPrevented", 0) or 0) + 1
+        next_progress = _update_progress_analytics(progress or request.progress, source_quality=preserved_quality)
+        self._request_repository.update_request(
+            request.id,
+            status="succeeded",
+            stage="completed",
+            progress=next_progress,
+            last_error="",
+            finished_at_now=True,
+        )
+        self._request_repository.append_request_event(
+            request.id,
+            "source_preserved",
+            message,
+            {
+                "sourceUrl": request.source_url,
+                "sourceQuality": preserved_quality,
+                "recoveryReason": recovery_reason,
+            },
+        )
+        return {
+            "request": self._request_repository.get_request(request.id),
+            "progress": next_progress,
+            "source_quality": preserved_quality,
+            "request_paused": False,
+            "graph_status": "succeeded",
+            "terminal_reason": "completed_confirmed_source_zero_record",
+            "recovery_reason": None,
         }
 
     def _start_crawl(self, state: RequestGraphState) -> dict[str, Any]:
@@ -584,6 +666,20 @@ class RequestSupervisorGraphRuntime:
             "terminal_reason": None,
         }
 
+    def _resolve_bound_crawl_run(self, state: RequestGraphState, request: FraternityCrawlRequestRecord) -> dict[str, Any] | None:
+        state_crawl_run = state.get("crawl_run")
+        if isinstance(state_crawl_run, dict) and state_crawl_run.get("id") is not None:
+            crawl_run_id = int(state_crawl_run.get("id") or 0)
+            if crawl_run_id > 0:
+                return self._request_repository.get_crawl_run_by_id(crawl_run_id) or state_crawl_run
+            return state_crawl_run
+        progress = _clone_progress(state.get("progress") or request.progress)
+        progress_crawl_run = progress.get("crawlRun") or {}
+        crawl_run_id = int(progress_crawl_run.get("id") or 0)
+        if crawl_run_id > 0:
+            return self._request_repository.get_crawl_run_by_id(crawl_run_id)
+        return None
+
     def _purge_inactive_schools(self, state: RequestGraphState) -> dict[str, Any]:
         request = self._request_repository.get_request(state["request_id"])
         if request is None:
@@ -700,7 +796,9 @@ class RequestSupervisorGraphRuntime:
                 "terminal_reason": "request_missing",
             }
         progress = _clone_progress(state.get("progress") or request.progress)
-        total_queue = _remaining_actionable_queue(progress)
+        total_queue = _remaining_total_queue(progress)
+        actionable_queue = _remaining_actionable_queue(progress)
+        non_actionable_queue = _remaining_non_actionable_queue(progress)
         cycle_state = state.get("cycle_state") or {"cyclesCompleted": 0, "lowProgressCycles": 0, "degradedCycleCount": 0, "processedTotal": 0, "requeuedTotal": 0, "failedTerminalTotal": 0}
         effective_config = _compute_adaptive_enrichment_config(request.config, progress, cycle_state)
         previous_enrichment = dict((((progress.get("analytics") or {}).get("enrichment") or {})))
@@ -718,7 +816,11 @@ class RequestSupervisorGraphRuntime:
                 "lowProgressCycles": cycle_state["lowProgressCycles"],
                 "degradedCycleCount": cycle_state["degradedCycleCount"],
                 "queueAtStart": total_queue,
+                "queueAtStartActionable": actionable_queue,
+                "queueAtStartNonActionable": non_actionable_queue,
                 "queueRemaining": total_queue,
+                "queueRemainingActionable": actionable_queue,
+                "queueRemainingNonActionable": non_actionable_queue,
                 "runtimeFallbackCount": int(previous_enrichment.get("runtimeFallbackCount", 0) or 0),
                 "queueBurnRate": float(previous_enrichment.get("queueBurnRate", 0) or 0),
                 "budgetStrategy": previous_enrichment.get("budgetStrategy") or "v3_initial_budget",
@@ -750,7 +852,15 @@ class RequestSupervisorGraphRuntime:
             runtime_mode=self._runtime_mode,
         )
         self._request_repository.update_request(request.id, stage="enrichment", progress=progress)
-        if total_queue <= 0:
+        if actionable_queue <= 0:
+            if total_queue > 0:
+                return self._complete_with_non_actionable_residual_queue(
+                    request=request,
+                    progress=progress,
+                    cycle_state=cycle_state,
+                    source_quality=state.get("source_quality") or _current_source_quality(request),
+                    message="Request completed with deferred non-actionable queue remaining after crawl validation",
+                )
             self._request_repository.update_request(
                 request.id,
                 status="succeeded",
@@ -783,6 +893,70 @@ class RequestSupervisorGraphRuntime:
             "continue_enrichment": False,
         }
 
+    def _run_instagram_sweep(self, state: RequestGraphState) -> dict[str, Any]:
+        request = self._request_repository.get_request(state["request_id"])
+        if request is None:
+            return {
+                "error": f"Request {state['request_id']} disappeared during instagram sweep",
+                "graph_status": "failed",
+                "terminal_reason": "request_missing",
+            }
+        progress = _clone_progress(state.get("progress") or request.progress)
+        crawl_run = self._resolve_bound_crawl_run(state, request)
+        crawl_run_id = int((crawl_run or {}).get("id") or ((progress.get("crawlRun") or {}).get("id") or 0) or 0)
+        summary = {
+            "candidates": 0,
+            "resolved": 0,
+            "review": 0,
+            "jobsCanceled": 0,
+            "existingConfirmed": 0,
+            "existingReplaced": 0,
+        }
+        if request.source_slug and crawl_run_id > 0:
+            summary = execute_instagram_sweep(
+                repository=self._crawler_repository,
+                request_id=request.id,
+                source_slug=request.source_slug,
+                crawl_run_id=crawl_run_id,
+            )
+            if any(int(summary.get(key, 0) or 0) > 0 for key in summary):
+                self._request_repository.append_request_event(
+                    request.id,
+                    "instagram_sweep_completed",
+                    "Instagram sweep resolved authoritative matches before residual enrichment",
+                    {
+                        "crawlRunId": crawl_run_id,
+                        **summary,
+                    },
+                )
+
+        previous_enrichment = dict((((progress.get("analytics") or {}).get("enrichment") or {})))
+        previous_sweep = dict(previous_enrichment.get("instagramSweep") or {})
+        merged_sweep = {
+            "candidates": int(previous_sweep.get("candidates", 0) or 0) + int(summary.get("candidates", 0) or 0),
+            "resolved": int(previous_sweep.get("resolved", 0) or 0) + int(summary.get("resolved", 0) or 0),
+            "review": int(previous_sweep.get("review", 0) or 0) + int(summary.get("review", 0) or 0),
+            "jobsCanceled": int(previous_sweep.get("jobsCanceled", 0) or 0) + int(summary.get("jobsCanceled", 0) or 0),
+            "existingConfirmed": int(previous_sweep.get("existingConfirmed", 0) or 0) + int(summary.get("existingConfirmed", 0) or 0),
+            "existingReplaced": int(previous_sweep.get("existingReplaced", 0) or 0) + int(summary.get("existingReplaced", 0) or 0),
+            "searchSavedBySweep": int(previous_sweep.get("searchSavedBySweep", 0) or 0) + int(summary.get("jobsCanceled", 0) or 0),
+        }
+        progress = _update_progress_analytics(
+            progress,
+            enrichment={
+                **previous_enrichment,
+                "instagramSweep": merged_sweep,
+            },
+        )
+        # Keep the request stage within the persisted DB contract while the
+        # graph-level active node carries the more specific instagram sweep step.
+        self._request_repository.update_request(request.id, stage="enrichment", progress=progress)
+        return {
+            "request": self._request_repository.get_request(request.id),
+            "progress": progress,
+            "instagram_sweep_summary": summary,
+        }
+
     def _run_enrichment_cycle(self, state: RequestGraphState) -> dict[str, Any]:
         request = state["request"]
         effective_config = dict(state.get("effective_config") or request.config)
@@ -808,6 +982,7 @@ class RequestSupervisorGraphRuntime:
             run_preflight=False,
             runtime_mode=self._field_job_runtime_mode,
             graph_durability=self._field_job_graph_durability,
+            validate_existing_instagram=True,
         )
         cycle_state["cyclesCompleted"] = cycle
         cycle_state["processedTotal"] = int(cycle_state.get("processedTotal", 0) or 0) + int(result.get("processed", 0) or 0)
@@ -829,7 +1004,7 @@ class RequestSupervisorGraphRuntime:
             }
         cycle_state = dict(state.get("cycle_state") or {"cyclesCompleted": 0, "lowProgressCycles": 0, "degradedCycleCount": 0, "processedTotal": 0, "requeuedTotal": 0, "failedTerminalTotal": 0})
         field_result = dict(state.get("latest_field_job_result") or {})
-        crawl_run = self._request_repository.get_latest_crawl_run_for_source(request.source_slug) if request.source_slug else None
+        crawl_run = self._resolve_bound_crawl_run(state, request)
         field_snapshot = self._request_repository.get_source_field_job_snapshot(request.source_slug) if request.source_slug else []
         progress = _build_progress_snapshot(
             source_url=request.source_url,
@@ -849,12 +1024,16 @@ class RequestSupervisorGraphRuntime:
                 "activeNode": "sync_enrichment_progress",
             },
         )
-        remaining_queue = _remaining_actionable_queue(progress)
+        remaining_queue_total = _remaining_total_queue(progress)
+        remaining_queue_actionable = _remaining_actionable_queue(progress)
+        remaining_queue_non_actionable = _remaining_non_actionable_queue(progress)
         low_signal_cycle = int(field_result.get("processed", 0) or 0) <= 0 and int(field_result.get("requeued", 0) or 0) > 0
         cycle_state["lowProgressCycles"] = cycle_state["lowProgressCycles"] + 1 if low_signal_cycle else 0
         if int(field_result.get("requeued", 0) or 0) > max(int(field_result.get("processed", 0) or 0) * 3, 20):
             cycle_state["degradedCycleCount"] = cycle_state.get("degradedCycleCount", 0) + 1
         effective_config = _compute_adaptive_enrichment_config(request.config, progress, cycle_state)
+        previous_queue_at_start_actionable = int((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("queueAtStartActionable", 0)) or 0)
+        previous_queue_at_start_non_actionable = int((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("queueAtStartNonActionable", 0)) or 0)
         queue_at_start = int((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("queueAtStart", 0)) or _total_field_jobs(progress.get("totals")))
         runtime_fallback_count = int((((request.progress.get("analytics") or {}).get("enrichment") or {}).get("runtimeFallbackCount", 0)) or 0) + int(field_result.get("runtime_fallback_count", 0) or 0)
         previous_enrichment = dict((((request.progress.get("analytics") or {}).get("enrichment") or {})) )
@@ -862,7 +1041,7 @@ class RequestSupervisorGraphRuntime:
         previous_chapter_repair = dict(previous_enrichment.get("chapterRepair") or {})
         current_queue_triage = dict(field_result.get("queue_triage") or {})
         current_chapter_repair = dict(field_result.get("chapter_repair") or {})
-        queue_burn_rate = round((queue_at_start - remaining_queue) / queue_at_start, 4) if queue_at_start > 0 else 0.0
+        queue_burn_rate = round((queue_at_start - remaining_queue_total) / queue_at_start, 4) if queue_at_start > 0 else 0.0
         preflight_probe_queries = list(dict.fromkeys([
             *list(previous_enrichment.get("preflightProbeQueries") or []),
             *list(field_result.get("preflight_probe_queries") or []),
@@ -883,7 +1062,11 @@ class RequestSupervisorGraphRuntime:
                 "lowProgressCycles": cycle_state["lowProgressCycles"],
                 "degradedCycleCount": cycle_state["degradedCycleCount"],
                 "queueAtStart": queue_at_start,
-                "queueRemaining": remaining_queue,
+                "queueAtStartActionable": previous_queue_at_start_actionable or remaining_queue_actionable,
+                "queueAtStartNonActionable": previous_queue_at_start_non_actionable,
+                "queueRemaining": remaining_queue_total,
+                "queueRemainingActionable": remaining_queue_actionable,
+                "queueRemainingNonActionable": remaining_queue_non_actionable,
                 "runtimeFallbackCount": runtime_fallback_count,
                 "queueBurnRate": queue_burn_rate,
                 "budgetStrategy": "v3_degraded" if cycle_state["degradedCycleCount"] > 0 else "v3_steady",
@@ -951,7 +1134,15 @@ class RequestSupervisorGraphRuntime:
                 "providerWindowState": field_result.get("provider_window_state", {}),
             },
         )
-        if remaining_queue <= 0:
+        if remaining_queue_actionable <= 0:
+            if remaining_queue_total > 0:
+                return self._complete_with_non_actionable_residual_queue(
+                    request=request,
+                    progress=progress,
+                    cycle_state=cycle_state,
+                    source_quality=state.get("source_quality") or _current_source_quality(request),
+                    message="Request completed with deferred non-actionable queue remaining after enrichment",
+                )
             self._request_repository.update_request(
                 request.id,
                 status="succeeded",
@@ -996,7 +1187,7 @@ class RequestSupervisorGraphRuntime:
                 progress=progress,
                 cycle_state=cycle_state,
                 effective_config=effective_config,
-                remaining_queue=remaining_queue,
+                remaining_queue=remaining_queue_actionable,
                 preflight_snapshot=preflight_snapshot,
                 source_quality=state.get("source_quality") or _current_source_quality(request),
                 message="Request completed early with small residual actionable queue deferred because provider health was degraded and progress had stalled",
@@ -1016,7 +1207,7 @@ class RequestSupervisorGraphRuntime:
                     progress=progress,
                     cycle_state=cycle_state,
                     effective_config=effective_config,
-                    remaining_queue=remaining_queue,
+                    remaining_queue=remaining_queue_actionable,
                     preflight_snapshot=preflight_snapshot,
                     source_quality=state.get("source_quality") or _current_source_quality(request),
                     message="Request completed with small residual actionable queue deferred because provider health was degraded",
@@ -1115,6 +1306,60 @@ class RequestSupervisorGraphRuntime:
             "terminal_reason": "completed_deferred_provider_recovery",
         }
 
+    def _complete_with_non_actionable_residual_queue(
+        self,
+        *,
+        request: FraternityCrawlRequestRecord,
+        progress: dict[str, Any],
+        cycle_state: dict[str, int],
+        source_quality: dict[str, Any],
+        message: str,
+    ) -> dict[str, Any]:
+        residual_total = _remaining_total_queue(progress)
+        residual_actionable = _remaining_actionable_queue(progress)
+        residual_non_actionable = _remaining_non_actionable_queue(progress)
+        progress = _update_progress_analytics(
+            progress,
+            source_quality=source_quality,
+            enrichment={
+                **(((progress.get("analytics") or {}).get("enrichment") or {})),
+                "completionMode": "deferred_non_actionable_residual",
+                "residualTotalAtCompletion": residual_total,
+                "residualActionableAtCompletion": residual_actionable,
+                "residualNonActionableAtCompletion": residual_non_actionable,
+                "providerDegradedAtCompletion": False,
+            },
+        )
+        self._request_repository.update_request(
+            request.id,
+            status="succeeded",
+            stage="completed",
+            finished_at_now=True,
+            progress=progress,
+            last_error="",
+        )
+        self._request_repository.append_request_event(
+            request.id,
+            "request_completed",
+            message,
+            {
+                "totals": progress.get("totals"),
+                "residualTotal": residual_total,
+                "residualActionable": residual_actionable,
+                "residualNonActionable": residual_non_actionable,
+                "completionMode": "deferred_non_actionable_residual",
+                "cyclesCompleted": int(cycle_state.get("cyclesCompleted", 0) or 0),
+            },
+        )
+        return {
+            "request": self._request_repository.get_request(request.id),
+            "progress": progress,
+            "cycle_state": cycle_state,
+            "continue_enrichment": False,
+            "graph_status": "succeeded",
+            "terminal_reason": "completed_deferred_non_actionable_queue",
+        }
+
     def _evaluate_provisional_promotions(self, state: RequestGraphState) -> dict[str, Any]:
         progress = _clone_progress(state.get("progress") or {})
         provisional = progress.get("provisional") or {}
@@ -1137,7 +1382,17 @@ class RequestSupervisorGraphRuntime:
                     bool((value or "").strip())
                     for value in (item.website_url, item.instagram_url, item.contact_email)
                 )
-                if source is not None and has_institution and has_contact:
+                evidence_payload = dict(item.evidence_payload or {})
+                source_supports_official_promotion = bool(
+                    source is not None
+                    and (
+                        _url_looks_like_official_directory(getattr(source, "list_url", None))
+                        or _url_looks_like_official_directory(getattr(source, "base_url", None))
+                        or bool((getattr(source, "metadata", {}) or {}).get("confirmedByOperator"))
+                    )
+                )
+                evidence_supports_promotion = str(evidence_payload.get("sourceClass") or "").strip() in {"national", "institutional"}
+                if source is not None and has_institution and (has_contact or (source_supports_official_promotion and evidence_supports_promotion)):
                     field_states = {
                         key: "found"
                         for key, value in {
@@ -1168,7 +1423,9 @@ class RequestSupervisorGraphRuntime:
                     self._request_repository.update_provisional_chapter_status(
                         item.id,
                         status="promoted",
-                        promotion_reason="auto_promoted_contact_and_institution_signal",
+                        promotion_reason="auto_promoted_contact_and_institution_signal"
+                        if has_contact
+                        else "auto_promoted_official_institution_signal",
                         promoted_chapter_id=chapter_id,
                     )
                     promoted += 1
@@ -1250,18 +1507,28 @@ def _remaining_queue(totals: dict[str, Any] | None) -> int:
     return int(totals.get("queued", 0) or 0) + int(totals.get("running", 0) or 0)
 
 
+def _remaining_total_queue(progress: dict[str, Any] | None) -> int:
+    payload = progress or {}
+    totals = payload.get("totals") or {}
+    return _remaining_queue(totals)
+
+
 def _remaining_actionable_queue(progress: dict[str, Any] | None) -> int:
     payload = progress or {}
     contact_resolution = payload.get("contactResolution") or {}
     totals = payload.get("totals") or {}
     if contact_resolution:
-        return int(contact_resolution.get("queuedActionable", 0) or 0) + int(totals.get("running", 0) or 0)
-    return _remaining_queue(totals)
+        return int(contact_resolution.get("actionableRemaining", 0) or 0)
+    return _remaining_total_queue(payload)
+
+
+def _remaining_non_actionable_queue(progress: dict[str, Any] | None) -> int:
+    return max(0, _remaining_total_queue(progress) - _remaining_actionable_queue(progress))
 
 
 def _residual_queue_threshold(*, progress: dict[str, Any], effective_config: dict[str, int]) -> int:
     enrichment = ((progress.get("analytics") or {}).get("enrichment") or {})
-    queue_at_start = int(enrichment.get("queueAtStart", 0) or 0)
+    queue_at_start = int(enrichment.get("queueAtStartActionable", 0) or enrichment.get("queueAtStart", 0) or 0)
     effective_limit = max(1, int(effective_config.get("fieldJobLimitPerCycle", 1) or 1))
     return max(
         2,
@@ -1366,6 +1633,9 @@ def _current_source_quality(request: FraternityCrawlRequestRecord) -> dict[str, 
             "sourceRejectedCount": int(progress_quality.get("sourceRejectedCount", 0) or 0),
             "sourceRecoveredCount": int(progress_quality.get("sourceRecoveredCount", 0) or 0),
             "zeroChapterPrevented": int(progress_quality.get("zeroChapterPrevented", 0) or 0),
+            "sourcePreservedCount": int(progress_quality.get("sourcePreservedCount", 0) or 0),
+            "confirmedByOperator": bool(progress_quality.get("confirmedByOperator", False)),
+            "confirmedAt": progress_quality.get("confirmedAt"),
         }
     quality = _evaluate_source_url(request.source_url)
     quality.update(
@@ -1376,6 +1646,9 @@ def _current_source_quality(request: FraternityCrawlRequestRecord) -> dict[str, 
             "sourceRejectedCount": 0,
             "sourceRecoveredCount": 0,
             "zeroChapterPrevented": 0,
+            "sourcePreservedCount": 0,
+            "confirmedByOperator": bool((((request.progress or {}).get("discovery") or {}).get("confirmedByOperator"))),
+            "confirmedAt": (((request.progress or {}).get("discovery") or {}).get("confirmedAt")),
         }
     )
     return quality
@@ -1402,7 +1675,29 @@ def _evaluate_source_url(url: str | None) -> dict[str, Any]:
         "quora.com",
         "wiktionary.org",
     }
-    positive_markers = ["chapter", "chapters", "chapter-directory", "find-a-chapter", "findachapter", "our-chapters", "locations", "locator", "map", "undergraduate"]
+    positive_markers = [
+        "chapter",
+        "chapters",
+        "chapter-directory",
+        "chapter-locator",
+        "chapterlocator",
+        "chapter-roll",
+        "chapters-by-state",
+        "find-a-chapter",
+        "findachapter",
+        "locate",
+        "locate-chapter",
+        "chapter-listing",
+        "chapterlisting",
+        "our-chapters",
+        "active-chapters",
+        "locations",
+        "locator",
+        "map",
+        "campuses",
+        "undergraduate",
+        "undergraduates",
+    ]
     weak_markers = ["alumni", "alumni-groups", "alumnigroups", "member", "members", "memberhub", "portal", "login", "account", "donate"]
     if not url:
         return {"score": 0.0, "isWeak": True, "isBlocked": False, "reasons": ["missing_url"]}
@@ -1442,6 +1737,65 @@ def _evaluate_source_url(url: str | None) -> dict[str, Any]:
         return {"score": 0.0, "isWeak": True, "isBlocked": False, "reasons": ["invalid_url"]}
 
 
+def _first_source_record(crawler_repository: CrawlerRepository, source_slug: str | None) -> Any | None:
+    if not source_slug:
+        return None
+    sources = crawler_repository.load_sources(source_slug)
+    return next(iter(sources), None)
+
+
+def _with_source_confirmation(
+    source_quality: dict[str, Any],
+    *,
+    request: FraternityCrawlRequestRecord,
+    source_record: Any | None,
+) -> dict[str, Any]:
+    next_quality = dict(source_quality)
+    discovery = (request.progress or {}).get("discovery") or {}
+    source_metadata = getattr(source_record, "metadata", {}) or {}
+    confirmed_by_operator = bool(
+        discovery.get("confirmedByOperator")
+        or next_quality.get("confirmedByOperator")
+        or source_metadata.get("confirmedByOperator")
+    )
+    if confirmed_by_operator:
+        next_quality["confirmedByOperator"] = True
+        next_quality["confirmedAt"] = (
+            discovery.get("confirmedAt")
+            or next_quality.get("confirmedAt")
+            or source_metadata.get("confirmedAt")
+        )
+    return next_quality
+
+
+def _url_looks_like_official_directory(url: str | None) -> bool:
+    quality = _evaluate_source_url(url)
+    reasons = {str(reason) for reason in quality.get("reasons") or []}
+    return bool(url) and not bool(quality.get("isBlocked", False)) and not bool(quality.get("isWeak", True)) and (
+        any(reason.startswith("positive:") for reason in reasons) or "deeper_path" in reasons
+    )
+
+
+def _should_preserve_current_source(
+    *,
+    request: FraternityCrawlRequestRecord,
+    source_quality: dict[str, Any],
+    recovery_reason: str | None,
+    source_record: Any | None,
+) -> bool:
+    if recovery_reason != "zero_chapter":
+        return False
+    if not request.source_url:
+        return False
+    quality = _with_source_confirmation(source_quality, request=request, source_record=source_record)
+    if not bool(quality.get("confirmedByOperator", False)):
+        return False
+    return (
+        float(quality.get("score", 0.0) or 0.0) >= 0.69
+        and _url_looks_like_official_directory(request.source_url)
+    )
+
+
 def _build_progress_snapshot(
     *,
     source_url: str | None,
@@ -1457,9 +1811,9 @@ def _build_progress_snapshot(
     graph: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     fields = {
-        "find_website": {"queued": 0, "running": 0, "done": 0, "failed": 0, "queuedActionable": 0, "queuedDeferred": 0, "doneUpdated": 0, "doneReviewRequired": 0, "doneTerminalNoSignal": 0, "doneProviderDegraded": 0},
-        "find_email": {"queued": 0, "running": 0, "done": 0, "failed": 0, "queuedActionable": 0, "queuedDeferred": 0, "doneUpdated": 0, "doneReviewRequired": 0, "doneTerminalNoSignal": 0, "doneProviderDegraded": 0},
-        "find_instagram": {"queued": 0, "running": 0, "done": 0, "failed": 0, "queuedActionable": 0, "queuedDeferred": 0, "doneUpdated": 0, "doneReviewRequired": 0, "doneTerminalNoSignal": 0, "doneProviderDegraded": 0},
+        "find_website": {"queued": 0, "running": 0, "done": 0, "failed": 0, "queuedActionable": 0, "queuedDeferred": 0, "queuedNonActionable": 0, "queuedBlockedProvider": 0, "queuedBlockedDependency": 0, "queuedBlockedRepairable": 0, "doneUpdated": 0, "doneReviewRequired": 0, "doneTerminalNoSignal": 0, "doneProviderDegraded": 0},
+        "find_email": {"queued": 0, "running": 0, "done": 0, "failed": 0, "queuedActionable": 0, "queuedDeferred": 0, "queuedNonActionable": 0, "queuedBlockedProvider": 0, "queuedBlockedDependency": 0, "queuedBlockedRepairable": 0, "doneUpdated": 0, "doneReviewRequired": 0, "doneTerminalNoSignal": 0, "doneProviderDegraded": 0},
+        "find_instagram": {"queued": 0, "running": 0, "done": 0, "failed": 0, "queuedActionable": 0, "queuedDeferred": 0, "queuedNonActionable": 0, "queuedBlockedProvider": 0, "queuedBlockedDependency": 0, "queuedBlockedRepairable": 0, "doneUpdated": 0, "doneReviewRequired": 0, "doneTerminalNoSignal": 0, "doneProviderDegraded": 0},
     }
     for item in field_snapshot:
         fields[item["field"]] = {
@@ -1469,6 +1823,10 @@ def _build_progress_snapshot(
             "failed": int(item.get("failed", 0) or 0),
             "queuedActionable": int(item.get("queued_actionable", item.get("queued", 0)) or 0),
             "queuedDeferred": int(item.get("queued_deferred", 0) or 0),
+            "queuedNonActionable": int(item.get("queued_non_actionable", 0) or 0),
+            "queuedBlockedProvider": int(item.get("queued_blocked_provider", 0) or 0),
+            "queuedBlockedDependency": int(item.get("queued_blocked_dependency", 0) or 0),
+            "queuedBlockedRepairable": int(item.get("queued_blocked_repairable", 0) or 0),
             "doneUpdated": int(item.get("done_updated", 0) or 0),
             "doneReviewRequired": int(item.get("done_review_required", 0) or 0),
             "doneTerminalNoSignal": int(item.get("done_terminal_no_signal", 0) or 0),
@@ -1485,6 +1843,16 @@ def _build_progress_snapshot(
         field_name: int(values.get("doneUpdated", 0) or 0)
         for field_name, values in fields.items()
     }
+    queued_actionable = sum(int(field.get("queuedActionable", 0) or 0) for field in fields.values())
+    queued_deferred = sum(int(field.get("queuedDeferred", 0) or 0) for field in fields.values())
+    queued_non_actionable = sum(int(field.get("queuedNonActionable", 0) or 0) for field in fields.values())
+    queued_blocked_provider = sum(int(field.get("queuedBlockedProvider", 0) or 0) for field in fields.values())
+    queued_blocked_dependency = sum(int(field.get("queuedBlockedDependency", 0) or 0) for field in fields.values())
+    queued_blocked_repairable = sum(int(field.get("queuedBlockedRepairable", 0) or 0) for field in fields.values())
+    actionable_remaining = queued_actionable + int(totals.get("running", 0) or 0)
+    total_remaining = int(totals.get("queued", 0) or 0) + int(totals.get("running", 0) or 0)
+    blocked_remaining = max(0, total_remaining - actionable_remaining)
+    blocked_other = max(0, queued_non_actionable - queued_deferred - queued_blocked_provider - queued_blocked_dependency - queued_blocked_repairable)
     return {
         "discovery": {
             "sourceUrl": source_url,
@@ -1527,8 +1895,9 @@ def _build_progress_snapshot(
         "fields": fields,
         "totals": totals,
         "contactResolution": {
-            "queuedActionable": sum(int(field.get("queuedActionable", 0) or 0) for field in fields.values()),
-            "queuedDeferred": sum(int(field.get("queuedDeferred", 0) or 0) for field in fields.values()),
+            "queuedActionable": queued_actionable,
+            "queuedDeferred": queued_deferred,
+            "queuedNonActionable": queued_non_actionable,
             "processed": sum(int(field.get("done", 0) or 0) for field in fields.values()),
             "requeued": int(enrichment_analytics.get("requeuedTotal", 0) or 0),
             "reviewRequired": sum(int(field.get("doneReviewRequired", 0) or 0) for field in fields.values()),
@@ -1536,9 +1905,15 @@ def _build_progress_snapshot(
             "providerDegraded": sum(int(field.get("doneProviderDegraded", 0) or 0) for field in fields.values()),
             "autoWritten": sum(writes_by_field.values()),
             "writesByField": writes_by_field,
-            "actionableRemaining": sum(int(field.get("queuedActionable", 0) or 0) for field in fields.values()) + int(totals.get("running", 0) or 0),
+            "actionableRemaining": actionable_remaining,
+            "totalRemaining": total_remaining,
+            "blockedRemaining": blocked_remaining,
+            "blockedProvider": queued_blocked_provider,
+            "blockedDependency": queued_blocked_dependency,
+            "blockedRepairable": queued_blocked_repairable,
+            "blockedOther": blocked_other,
             "blockedInvalid": int((((crawl_run or {}).get("extraction_metadata") or {}).get("chapter_validity") or {}).get("contactAdmission", {}).get("blocked_invalid", 0) or 0) + int(queue_triage.get("invalidCancelled", 0) or 0),
-            "blockedRepairable": int((((crawl_run or {}).get("extraction_metadata") or {}).get("chapter_validity") or {}).get("contactAdmission", {}).get("blocked_repairable", 0) or 0) + int(queue_triage.get("repairQueued", 0) or 0),
+            "blockedRepairableEntities": int((((crawl_run or {}).get("extraction_metadata") or {}).get("chapter_validity") or {}).get("contactAdmission", {}).get("blocked_repairable", 0) or 0) + int(queue_triage.get("repairQueued", 0) or 0),
             "reconciledHistorical": int(chapter_repair.get("reconciledHistorical", 0) or 0),
             "rejectionReasonCounts": {},
         },

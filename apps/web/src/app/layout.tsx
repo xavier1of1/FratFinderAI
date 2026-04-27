@@ -18,6 +18,7 @@ const navItems = [
   { href: "/review-items", label: "Review Queue" },
   { href: "/benchmarks", label: "Benchmarks" },
   { href: "/campaigns", label: "Campaigns" },
+  { href: "/crm", label: "CRM" },
   { href: "/fraternity-intake", label: "Fraternity Intake" }
 ];
 

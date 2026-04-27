@@ -112,6 +112,31 @@ def test_find_instagram_defers_when_status_unknown_and_status_required():
     assert exc.value.reason_code == "status_dependency_unmet"
 
 
+def test_find_instagram_continues_when_supporting_page_is_already_local_and_authoritative():
+    repository = _FakeRepository()
+    engine = FieldJobEngine(repository=repository, logger=logging.getLogger("status-gate"), worker_id="worker-1", search_degraded_mode=True)
+    job = _job("find_instagram")
+    job.payload["contactResolution"] = {
+        "supportingPageUrl": "https://www.lsu.edu/campus-life/greek-life/delta-chi",
+        "supportingPageScope": "school_affiliation_page",
+    }
+    assert engine._resolve_activity_gate(job, target_field="instagram_url") is None
+    assert repository.created_field_jobs == []
+
+
+def test_find_instagram_continues_when_canonical_active_status_is_already_known():
+    repository = _FakeRepository()
+    engine = FieldJobEngine(repository=repository, logger=logging.getLogger("status-gate"), worker_id="worker-1", search_degraded_mode=True)
+    job = _job("find_instagram")
+    job.payload["contactResolution"] = {
+        "queueState": "blocked_dependency",
+        "reasonCode": "status_dependency_unmet",
+        "validityClass": "canonical_valid",
+    }
+    assert engine._resolve_activity_gate(job, target_field="instagram_url") is None
+    assert repository.created_field_jobs == []
+
+
 def test_contact_jobs_continue_after_confirmed_active_status():
     repository = _FakeRepository(
         ChapterStatusDecision(

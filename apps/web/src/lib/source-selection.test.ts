@@ -19,6 +19,16 @@ describe("evaluateSourceUrl", () => {
     expect(evaluation.score).toBeGreaterThan(0.55);
   });
 
+  it("rewards chapter locator and chapter roll style paths", () => {
+    const locator = evaluateSourceUrl("https://apa1906.net/chapter-locator/");
+    const chapterRoll = evaluateSourceUrl("https://aepi.org/about/chapter-roll/");
+
+    expect(locator.isWeak).toBe(false);
+    expect(locator.score).toBeGreaterThan(0.6);
+    expect(chapterRoll.isWeak).toBe(false);
+    expect(chapterRoll.score).toBeGreaterThan(0.6);
+  });
+
   it("scores generic about pages lower than chapter directories on the same host", () => {
     const about = evaluateSourceUrl("https://www.thetachi.org/about");
     const chapters = evaluateSourceUrl("https://www.thetachi.org/chapters");

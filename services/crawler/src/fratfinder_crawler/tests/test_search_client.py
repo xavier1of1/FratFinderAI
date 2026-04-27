@@ -248,7 +248,7 @@ def test_bing_redirect_url_is_decoded():
     assert results[0].url == "https://example.org/chapter"
 
 
-def test_auto_provider_prefers_searxng_before_brave_when_available():
+def test_auto_provider_uses_free_chain_without_touching_brave_api():
     calls: list[str] = []
 
     def requester(url, params, timeout, verify, headers):
@@ -256,11 +256,17 @@ def test_auto_provider_prefers_searxng_before_brave_when_available():
         if "localhost:8888/search" in url:
             return SimpleNamespace(
                 status_code=200,
-                text='{"results":[{"title":"Sigma Chi at Demo University","url":"https://example.org/chapter","content":"Official chapter website"}]}',
-                json=lambda: {"results": [{"title": "Sigma Chi at Demo University", "url": "https://example.org/chapter", "content": "Official chapter website"}]},
+                text='{"results":[{"title":"Delta Chi at Demo University","url":"https://deltachi.example.org/chapter","content":"Official Delta Chi chapter website for Demo University"}]}',
+                json=lambda: {"results": [{"title": "Delta Chi at Demo University", "url": "https://deltachi.example.org/chapter", "content": "Official Delta Chi chapter website for Demo University"}]},
                 raise_for_status=lambda: None,
             )
-        raise AssertionError("Fallback providers should not be used when SearXNG succeeds")
+        if "bing.com" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text="""<html><body><ol><li class="b_algo"><h2><a href="https://deltachi.example.org/chapter">Delta Chi at Demo University</a></h2><div class="b_caption"><p>Official chapter website</p></div></li></ol></body></html>""",
+                raise_for_status=lambda: None,
+            )
+        raise AssertionError(f"Unexpected fallback provider call: {url}")
 
     client = SearchClient(
         Settings(
@@ -272,11 +278,11 @@ def test_auto_provider_prefers_searxng_before_brave_when_available():
         get_requester=requester,
     )
 
-    results = client.search("sigma chi demo university website")
+    results = client.search("delta chi demo university website")
 
     assert len(results) == 1
-    assert results[0].provider == "searxng_json"
-    assert calls == ["http://localhost:8888/search"]
+    assert calls[0] in {"http://localhost:8888/search", "https://www.bing.com/search"}
+    assert all("brave" not in call for call in calls)
 
 
 def test_auto_provider_falls_back_to_duckduckgo_when_searxng_unavailable():
@@ -303,6 +309,7 @@ def test_auto_provider_falls_back_to_duckduckgo_when_searxng_unavailable():
             database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
             CRAWLER_SEARCH_PROVIDER="auto",
             CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,duckduckgo_html,bing_html",
         ),
         get_requester=requester,
     )
@@ -313,6 +320,54 @@ def test_auto_provider_falls_back_to_duckduckgo_when_searxng_unavailable():
     assert results[0].provider == "duckduckgo_html"
     assert calls[0] == "http://localhost:8888/search"
     assert calls[1].startswith("https://lite.duckduckgo.com")
+
+
+def test_auto_provider_uses_paid_provider_before_html_fallback_when_enabled():
+    get_calls: list[str] = []
+    post_calls: list[str] = []
+
+    def get_requester(url, params, timeout, verify, headers):
+        get_calls.append(url)
+        if "localhost:8888/search" in url:
+            raise requests.ConnectionError("searx unavailable")
+        raise AssertionError(f"HTML fallback should not be used when a configured paid provider succeeds: {url}")
+
+    def post_requester(url, json, timeout, verify, headers):
+        post_calls.append(url)
+        assert url == "https://google.serper.dev/search"
+        return SimpleNamespace(
+            status_code=200,
+            text='{"organic":[{"title":"Sigma Chi at Demo University","link":"https://example.org/chapter","snippet":"Official chapter website"}]}',
+            json=lambda: {
+                "organic": [
+                    {
+                        "title": "Sigma Chi at Demo University",
+                        "link": "https://example.org/chapter",
+                        "snippet": "Official chapter website",
+                    }
+                ]
+            },
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="auto",
+            CRAWLER_V3_PAID_SEARCH_ENABLED=True,
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_SERPER_API_KEY="test-key",
+        ),
+        get_requester=get_requester,
+        post_requester=post_requester,
+    )
+
+    results = client.search("sigma chi demo university website")
+
+    assert len(results) == 1
+    assert results[0].provider == "serper_api"
+    assert get_calls == ["http://localhost:8888/search"]
+    assert post_calls == ["https://google.serper.dev/search"]
 
 
 def test_searxng_json_uses_shorter_timeout_and_reports_unresponsive_engines():
@@ -417,6 +472,50 @@ def test_auto_free_ignores_opt_in_api_providers_and_uses_html_fallbacks():
     assert results[0].provider == "duckduckgo_html"
     assert get_calls[0] == "http://localhost:8888/search"
     assert any(call.startswith("https://lite.duckduckgo.com") for call in get_calls)
+
+
+def test_auto_free_ignores_paid_providers_even_when_paid_search_is_enabled():
+    get_calls: list[str] = []
+    post_calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        get_calls.append(url)
+        if "localhost:8888/search" in url:
+            raise requests.ConnectionError("searx unavailable")
+        if "duckduckgo" in url:
+            return SimpleNamespace(
+                status_code=200,
+                text=(
+                    "<html><body><table>"
+                    "<tr><td><a href=\"//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fchapter\">Sigma Chi Demo</a></td></tr>"
+                    "</table></body></html>"
+                ),
+                raise_for_status=lambda: None,
+            )
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    def post_requester(url, json, timeout, verify, headers):
+        post_calls.append(url)
+        raise AssertionError("auto_free should not call paid search providers")
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="auto_free",
+            CRAWLER_V3_PAID_SEARCH_ENABLED=True,
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_SERPER_API_KEY="test-key",
+            CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,duckduckgo_html,bing_html",
+        ),
+        get_requester=requester,
+        post_requester=post_requester,
+    )
+
+    results = client.search("sigma chi demo university website")
+
+    assert len(results) == 1
+    assert results[0].provider == "duckduckgo_html"
+    assert post_calls == []
 
 
 def test_auto_free_skips_unconfigured_api_providers_and_uses_duckduckgo_html():

@@ -38,13 +38,24 @@ const POSITIVE_URL_MARKERS = [
   "chapter",
   "chapters",
   "chapter-directory",
+  "chapter-locator",
+  "chapterlocator",
+  "chapter-roll",
+  "chapters-by-state",
   "find-a-chapter",
   "findachapter",
+  "locate",
+  "locate-chapter",
+  "chapter-listing",
+  "chapterlisting",
   "our-chapters",
+  "active-chapters",
   "locations",
   "locator",
   "map",
-  "undergraduate"
+  "campuses",
+  "undergraduate",
+  "undergraduates"
 ];
 
 const WEAK_URL_MARKERS = [
@@ -85,6 +96,9 @@ const POSITIVE_TEXT_MARKERS = [
   "chapter map",
   "undergraduate",
   "active chapters",
+  "chapter locator",
+  "chapter roll",
+  "chapters by state",
   "chapter experience"
 ];
 

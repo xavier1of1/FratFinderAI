@@ -18,7 +18,11 @@ from fratfinder_crawler.candidate_sanitizer import (
     sanitize_as_website,
     sanitize_candidate,
 )
-from fratfinder_crawler.field_job_support import job_supporting_page_ready
+from fratfinder_crawler.field_job_support import (
+    job_has_canonical_active_status,
+    job_has_existing_instagram_support,
+    job_supporting_page_ready,
+)
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.models import (
     CONTACT_SPECIFICITY_AMBIGUOUS,
@@ -59,6 +63,16 @@ from fratfinder_crawler.precision_tools import (
     tool_site_scope_classifier,
 )
 from fratfinder_crawler.search import SearchClient, SearchResult, SearchUnavailableError
+from fratfinder_crawler.social import (
+    InstagramCandidateBank,
+    InstagramSourceType,
+    audit_existing_instagram_candidate,
+    build_chapter_instagram_identity,
+    build_instagram_search_queries,
+    candidate_from_chapter_evidence,
+    score_instagram_candidate,
+)
+from fratfinder_crawler.social.instagram_resolver import instagram_write_threshold
 from fratfinder_crawler.status import (
     CampusSourceDocument,
     ChapterStatusDecision,
@@ -530,6 +544,7 @@ class FieldJobEngine:
         adaptive_policy_version: str | None = None,
         provider_window_state: dict[str, Any] | None = None,
         enrichment_observations_enabled: bool = True,
+        validate_existing_instagram: bool = False,
     ):
         self._repository = repository
         self._logger = logger
@@ -563,6 +578,7 @@ class FieldJobEngine:
         self._adaptive_policy_version = str(adaptive_policy_version or getattr(adaptive_policy, "policy_version", "") or "").strip() or None
         self._provider_window_state = dict(provider_window_state or {})
         self._enrichment_observations_enabled = bool(enrichment_observations_enabled)
+        self._validate_existing_instagram = bool(validate_existing_instagram)
         self._search_errors_encountered = False
         self._search_queries_attempted = 0
         self._search_queries_failed = 0
@@ -1128,9 +1144,19 @@ class FieldJobEngine:
 
         if job.field_name == FIELD_JOB_FIND_INSTAGRAM:
             existing_instagram = sanitize_as_instagram(job.instagram_url)
-            if existing_instagram and self._existing_instagram_is_confident(job, existing_instagram):
-                self._trace("already_populated", target="instagram_url")
-                return self._already_populated_result(job.field_name, existing_instagram)
+            if existing_instagram:
+                audit_result = self._instagram_audit_result(job, existing_instagram)
+                if audit_result is not None:
+                    self._trace(
+                        "instagram_existing_audited",
+                        target="instagram_url",
+                        status=str(audit_result.completed_payload.get("status") or ""),
+                        reason=str(audit_result.completed_payload.get("reasonCode") or ""),
+                    )
+                    return audit_result
+                if self._existing_instagram_is_confident(job, existing_instagram):
+                    self._trace("already_populated", target="instagram_url")
+                    return self._already_populated_result(job.field_name, existing_instagram)
             invalid_entity_result = self._resolve_invalid_entity_gate(job, target_field="instagram_url")
             if invalid_entity_result is not None:
                 return invalid_entity_result
@@ -2408,6 +2434,22 @@ class FieldJobEngine:
         )
 
     def _resolve_activity_gate(self, job: FieldJob, *, target_field: str) -> FieldJobResult | None:
+        if job.field_name == FIELD_JOB_FIND_INSTAGRAM:
+            if job_has_canonical_active_status(job):
+                self._trace(
+                    "status_engine_validation",
+                    status="bypassed_with_canonical_active_status",
+                    school=self._school_name_for_job(job),
+                )
+                return None
+            if job_has_existing_instagram_support(job, self._repository):
+                self._trace(
+                    "status_engine_validation",
+                    status="bypassed_with_instagram_support",
+                    school=self._school_name_for_job(job),
+                )
+                return None
+
         status_decision = self._get_or_resolve_status_decision(job)
         if status_decision is not None:
             decision = self._activity_decision_from_status_decision(
@@ -3074,9 +3116,258 @@ class FieldJobEngine:
                 return best_external
 
         return _best_match(matches)
+
+    def _build_instagram_identity(self, job: FieldJob):
+        fraternity_display = _display_name(job.fraternity_slug)
+        return build_chapter_instagram_identity(
+            fraternity_name=fraternity_display,
+            fraternity_slug=job.fraternity_slug,
+            school_name=self._school_name_for_job(job),
+            chapter_name=job.chapter_name,
+            school_aliases=_school_aliases(
+                self._school_name_for_job(job),
+                enable_school_initials=self._enable_school_initials,
+                min_school_initial_length=self._min_school_initial_length,
+            ),
+            fraternity_aliases=_fraternity_query_aliases(fraternity_display, job.fraternity_slug),
+        )
+
+    def _instagram_source_provider(self, source_type: InstagramSourceType) -> str:
+        if source_type in {
+            InstagramSourceType.NATIONALS_CHAPTER_ENTRY,
+            InstagramSourceType.NATIONALS_CHAPTER_PAGE,
+            InstagramSourceType.NATIONALS_DIRECTORY_ROW,
+        }:
+            return "nationals_directory"
+        if source_type in {
+            InstagramSourceType.VERIFIED_CHAPTER_WEBSITE,
+            InstagramSourceType.CHAPTER_WEBSITE_STRUCTURED_DATA,
+            InstagramSourceType.CHAPTER_WEBSITE_SOCIAL_LINK,
+        }:
+            return "chapter_website"
+        if source_type in {
+            InstagramSourceType.OFFICIAL_SCHOOL_CHAPTER_PAGE,
+            InstagramSourceType.OFFICIAL_SCHOOL_DIRECTORY_ROW,
+        }:
+            return "search_page"
+        if source_type in {
+            InstagramSourceType.SEARCH_RESULT_PROFILE,
+            InstagramSourceType.GENERATED_HANDLE_SEARCH,
+        }:
+            return "search_result"
+        if source_type in {
+            InstagramSourceType.PROVENANCE_SUPPORTING_PAGE,
+            InstagramSourceType.AUTHORITATIVE_BUNDLE,
+        }:
+            return "provenance"
+        return "instagram_candidate_bank"
+
+    def _resolution_evidence_for_instagram_candidate(
+        self,
+        candidate,
+        *,
+        reason_code: str,
+        decision_stage: str,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        page_scope = candidate.page_scope
+        if not page_scope:
+            if candidate.source_type in {
+                InstagramSourceType.OFFICIAL_SCHOOL_CHAPTER_PAGE,
+                InstagramSourceType.OFFICIAL_SCHOOL_DIRECTORY_ROW,
+            }:
+                page_scope = PAGE_SCOPE_SCHOOL_AFFILIATION
+            elif candidate.source_type in {
+                InstagramSourceType.VERIFIED_CHAPTER_WEBSITE,
+                InstagramSourceType.CHAPTER_WEBSITE_STRUCTURED_DATA,
+                InstagramSourceType.CHAPTER_WEBSITE_SOCIAL_LINK,
+            }:
+                page_scope = PAGE_SCOPE_CHAPTER_SITE
+            elif candidate.source_type in {
+                InstagramSourceType.NATIONALS_CHAPTER_ENTRY,
+                InstagramSourceType.NATIONALS_CHAPTER_PAGE,
+                InstagramSourceType.NATIONALS_DIRECTORY_ROW,
+            }:
+                page_scope = PAGE_SCOPE_NATIONALS_CHAPTER
+            else:
+                page_scope = PAGE_SCOPE_UNRELATED
+        metadata = {
+            "query": candidate.metadata.get("query"),
+            "relatedWebsiteUrl": candidate.metadata.get("relatedWebsiteUrl"),
+            **(extra_metadata or {}),
+        }
+        return {
+            "decisionStage": decision_stage,
+            "evidenceUrl": candidate.evidence_url or candidate.source_url or candidate.profile_url,
+            "sourceType": str(candidate.source_type),
+            "pageScope": page_scope,
+            "contactSpecificity": candidate.contact_specificity or _contact_specificity_for_page_scope(page_scope),
+            "confidence": round(float(candidate.confidence or 0.0), 4),
+            "reasonCode": reason_code,
+            "metadata": {key: value for key, value in metadata.items() if value is not None},
+        }
+
+    def _candidate_match_from_instagram_candidate(self, candidate) -> CandidateMatch:
+        source_url = candidate.evidence_url or candidate.source_url or candidate.profile_url
+        source_snippet = (
+            candidate.source_snippet
+            or candidate.local_container_text
+            or candidate.surrounding_text
+            or candidate.handle
+        )
+        return CandidateMatch(
+            value=candidate.profile_url,
+            confidence=float(candidate.confidence or 0.0),
+            source_url=source_url,
+            source_snippet=source_snippet[:400],
+            field_name="instagram_url",
+            source_provider=self._instagram_source_provider(candidate.source_type),
+            related_website_url=str(candidate.metadata.get("relatedWebsiteUrl") or "") or None,
+            query=str(candidate.metadata.get("query") or "") or None,
+        )
+
+    def _fetch_instagram_bank_candidates(self, job: FieldJob):
+        fetcher = getattr(self._repository, "fetch_instagram_candidates_for_chapters", None)
+        if fetcher is None:
+            return []
+        rows = fetcher([job.chapter_id]) or []
+        bank = InstagramCandidateBank()
+        for row in rows:
+            candidate = candidate_from_chapter_evidence(row)
+            if candidate is None:
+                continue
+            candidate.metadata["fraternitySlug"] = job.fraternity_slug
+            bank.add_candidate(job.chapter_id, candidate)
+        bank.dedupe_by_handle_and_source()
+        identity = self._build_instagram_identity(job)
+        return [score_instagram_candidate(candidate, identity) for candidate in bank.get_candidates_for_chapter(job.chapter_id)]
+
+    def _find_instagram_candidate_from_candidate_bank(self, job: FieldJob) -> CandidateMatch | None:
+        candidates = self._fetch_instagram_bank_candidates(job)
+        accepted = [
+            candidate
+            for candidate in candidates
+            if not candidate.reject_reasons and candidate.confidence >= instagram_write_threshold(candidate)
+        ]
+        accepted.sort(key=lambda item: item.confidence, reverse=True)
+        return self._candidate_match_from_instagram_candidate(accepted[0]) if accepted else None
+
+    def _instagram_audit_result(self, job: FieldJob, existing_instagram: str) -> FieldJobResult | None:
+        candidates = self._fetch_instagram_bank_candidates(job)
+        should_audit = self._validate_existing_instagram or (
+            not self._existing_instagram_is_confident(job, existing_instagram) and bool(candidates)
+        )
+        if not should_audit:
+            return None
+        decision = audit_existing_instagram_candidate(
+            chapter_id=job.chapter_id,
+            existing_url=existing_instagram,
+            identity=self._build_instagram_identity(job),
+            candidates=candidates,
+        )
+        candidate = decision.accepted_candidate
+        if decision.outcome == "existing_value_confirmed" and candidate is not None and decision.selected_url:
+            normalized_url = sanitize_as_instagram(decision.selected_url) or decision.selected_url
+            resolution_evidence = self._resolution_evidence_for_instagram_candidate(
+                candidate,
+                reason_code=decision.reason_code,
+                decision_stage="existing_instagram_audit",
+            )
+            return FieldJobResult(
+                chapter_updates={"instagram_url": normalized_url},
+                completed_payload={
+                    "status": "verified",
+                    "instagram_url": normalized_url,
+                    "confidence": f"{decision.confidence:.2f}",
+                    "reasonCode": decision.reason_code,
+                    "source_url": candidate.evidence_url or candidate.source_url or normalized_url,
+                    "resolutionEvidence": resolution_evidence,
+                    "decision_trace": self._build_decision_trace_summary(),
+                },
+                field_state_updates={"instagram_url": "found"},
+                provenance_records=[
+                    ProvenanceRecord(
+                        source_slug=job.source_slug or "instagram_audit",
+                        source_url=candidate.evidence_url or candidate.source_url or normalized_url,
+                        field_name="instagram_url",
+                        field_value=normalized_url,
+                        source_snippet=(candidate.source_snippet or candidate.local_container_text or candidate.handle)[:400],
+                        confidence=decision.confidence,
+                    )
+                ],
+            )
+        if decision.outcome == "existing_value_replaced" and candidate is not None and decision.selected_url:
+            normalized_url = sanitize_as_instagram(decision.selected_url) or decision.selected_url
+            resolution_evidence = self._resolution_evidence_for_instagram_candidate(
+                candidate,
+                reason_code=decision.reason_code,
+                decision_stage="existing_instagram_audit",
+                extra_metadata={"allowReplaceExisting": True, "previousUrl": decision.previous_url},
+            )
+            return FieldJobResult(
+                chapter_updates={"instagram_url": normalized_url},
+                completed_payload={
+                    "status": "updated",
+                    "instagram_url": normalized_url,
+                    "confidence": f"{decision.confidence:.2f}",
+                    "reasonCode": decision.reason_code,
+                    "source_url": candidate.evidence_url or candidate.source_url or normalized_url,
+                    "allowReplaceExisting": True,
+                    "resolutionEvidence": resolution_evidence,
+                    "decision_trace": self._build_decision_trace_summary(),
+                },
+                field_state_updates={"instagram_url": "found"},
+                provenance_records=[
+                    ProvenanceRecord(
+                        source_slug=job.source_slug or "instagram_audit",
+                        source_url=candidate.evidence_url or candidate.source_url or normalized_url,
+                        field_name="instagram_url",
+                        field_value=normalized_url,
+                        source_snippet=(candidate.source_snippet or candidate.local_container_text or candidate.handle)[:400],
+                        confidence=decision.confidence,
+                    )
+                ],
+            )
+        if decision.outcome == "review_required":
+            resolution_evidence = None
+            if candidate is not None:
+                resolution_evidence = self._resolution_evidence_for_instagram_candidate(
+                    candidate,
+                    reason_code=decision.reason_code,
+                    decision_stage="existing_instagram_audit",
+                    extra_metadata={"previousUrl": decision.previous_url},
+                )
+            completed_payload = {
+                "status": "review_required",
+                "reasonCode": decision.reason_code,
+                "previousUrl": decision.previous_url,
+                "decision_trace": self._build_decision_trace_summary(),
+            }
+            if resolution_evidence is not None:
+                completed_payload["resolutionEvidence"] = resolution_evidence
+            return FieldJobResult(
+                chapter_updates={},
+                completed_payload=completed_payload,
+                field_state_updates={"instagram_url": "low_confidence"},
+                review_item=ReviewItemCandidate(
+                    item_type="instagram_candidate",
+                    reason=decision.reason_code,
+                    source_slug=job.source_slug,
+                    chapter_slug=job.chapter_slug,
+                    payload={
+                        "fieldName": "instagram_url",
+                        "candidateValue": decision.selected_url,
+                        "previousUrl": decision.previous_url,
+                        "decisionTrace": self._build_decision_trace_summary(),
+                    },
+                ),
+            )
+        return None
+
     def _find_instagram_candidate(self, job: FieldJob) -> CandidateMatch | None:
         matches: list[CandidateMatch] = []
         current_website = _current_website_url(job)
+        probe_attempted = False
 
         if current_website and _website_trust_tier(job, current_website) == "tier1":
             self._trace("instagram_strategy", stage="trusted_chapter_website")
@@ -3088,6 +3379,13 @@ class FieldJobEngine:
                 if best_website is not None and best_website.confidence >= self._found_threshold(job, "instagram_url", best_website):
                     return best_website
 
+        self._trace("instagram_strategy", stage="provenance")
+        provenance_match = self._find_instagram_candidate_from_provenance(job)
+        if provenance_match is not None:
+            matches.append(provenance_match)
+            if provenance_match.confidence >= self._found_threshold(job, "instagram_url", provenance_match):
+                return provenance_match
+
         self._trace("instagram_strategy", stage="nationals")
         nationals_matches = self._find_target_candidates_from_nationals(job, target="instagram")
         if nationals_matches:
@@ -3095,6 +3393,33 @@ class FieldJobEngine:
             best_nationals = _best_match(matches)
             if best_nationals is not None and best_nationals.confidence >= self._found_threshold(job, "instagram_url", best_nationals):
                 return best_nationals
+
+        if job.source_base_url:
+            self._trace("instagram_strategy", stage="source_page")
+            source_document = self._fetch_search_document(job.source_base_url, provider="source_page")
+            if source_document is not None:
+                source_matches = self._extract_instagram_matches(source_document, job)
+                matches.extend(source_matches)
+                best_source = _best_match(matches)
+                if best_source is not None and best_source.confidence >= self._found_threshold(job, "instagram_url", best_source):
+                    return best_source
+
+        self._trace("instagram_strategy", stage="candidate_bank")
+        candidate_bank_match = self._find_instagram_candidate_from_candidate_bank(job)
+        if candidate_bank_match is not None:
+            matches.append(candidate_bank_match)
+            if candidate_bank_match.confidence >= self._found_threshold(job, "instagram_url", candidate_bank_match):
+                return candidate_bank_match
+
+        if self._instagram_direct_probe_enabled:
+            probe_attempted = True
+            self._trace("instagram_strategy", stage="direct_handle_probe")
+            probe_matches = self._probe_instagram_handle_candidates(job)
+            if probe_matches:
+                matches.extend(probe_matches)
+                best_probe = _best_match(matches)
+                if best_probe is not None and best_probe.confidence >= self._found_threshold(job, "instagram_url", best_probe):
+                    return best_probe
 
         self._trace("instagram_strategy", stage="search")
         for document in self._search_documents(job, target="instagram", include_existing=False):
@@ -3107,25 +3432,9 @@ class FieldJobEngine:
                 return best_external
 
         best_external = _best_match(matches)
-        if best_external is not None and best_external.confidence >= 0.88:
-            return best_external
-
-        if job.source_base_url:
-            self._trace("instagram_strategy", stage="source_page")
-            source_document = self._fetch_search_document(job.source_base_url, provider="source_page")
-            if source_document is not None:
-                source_matches = self._extract_instagram_matches(source_document, job)
-                matches.extend(source_matches)
-                best_source = _best_match(matches)
-                if best_source is not None and best_source.confidence >= self._found_threshold(job, "instagram_url", best_source):
-                    return best_source
-
-        self._trace("instagram_strategy", stage="provenance")
-        provenance_match = self._find_instagram_candidate_from_provenance(job)
-        if provenance_match is not None:
-            matches.append(provenance_match)
-
-        if self._instagram_direct_probe_enabled and self._search_queries_succeeded == 0 and self._search_queries_failed > 0:
+        if self._instagram_direct_probe_enabled and not probe_attempted and not (
+            best_external is not None and best_external.confidence >= 0.88
+        ):
             self._trace("instagram_strategy", stage="direct_handle_probe")
             probe_matches = self._probe_instagram_handle_candidates(job)
             if probe_matches:
@@ -3133,6 +3442,10 @@ class FieldJobEngine:
                 best_probe = _best_match(matches)
                 if best_probe is not None and best_probe.confidence >= self._found_threshold(job, "instagram_url", best_probe):
                     return best_probe
+            best_external = _best_match(matches)
+
+        if best_external is not None and best_external.confidence >= 0.88:
+            return best_external
 
         return _best_match(matches)
 
@@ -4068,6 +4381,12 @@ class FieldJobEngine:
                 ]
             )
         else:
+            identity_queries = build_instagram_search_queries(
+                identity=self._build_instagram_identity(job),
+                school_domains=campus_domains,
+                chapter_website_url=_current_website_url(job),
+                max_queries=max(self._instagram_max_queries, 5),
+            )
             fraternity_compact = _compact_text(fraternity)
             handle_queries = _instagram_handle_queries(
                 job,
@@ -4107,6 +4426,8 @@ class FieldJobEngine:
                 query_parts.append([alias_variant, university, "chapter website"])
 
         queries = [" ".join(part for part in parts if part).strip() for parts in query_parts]
+        if target == "instagram":
+            queries = [*queries, *identity_queries]
         if self._search_provider == "bing_html":
             negative_terms = self._bing_negative_terms(job)
             if negative_terms:
@@ -4329,7 +4650,13 @@ class FieldJobEngine:
                 return 0.99
             if match.source_provider in {"search_result", "search_page"} and (candidate_tier == "tier1" or source_tier == "tier1"):
                 return 0.92
-        if match.source_provider in {"search_result", "search_page"}:
+        if match.source_provider == "search_page":
+            return {
+                "website_url": 0.96,
+                "contact_email": 0.92,
+                "instagram_url": 0.88,
+            }.get(target_field, 0.90)
+        if match.source_provider == "search_result":
             return {
                 "website_url": 0.96,
                 "contact_email": 0.92,
@@ -4621,44 +4948,70 @@ class FieldJobEngine:
         school_match = _school_matches(job, combined)
         fraternity_match = _fraternity_matches(job, combined)
         chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
+        chapter_designation = _chapter_designation_signal(job, combined)
         source_tier = _website_trust_tier(job, document.url or "")
         handle_has_fraternity = _instagram_handle_has_fraternity_token(instagram_url, job)
         local_identity = _instagram_handle_has_local_identity(instagram_url, job)
+        school_brand_handle = _instagram_handle_looks_like_school_brand(instagram_url, job)
+        effective_local_identity = local_identity and not school_brand_handle
         if document.provider == "source_page":
+            if _instagram_handle_looks_national_generic(instagram_url, job):
+                self._record_candidate_rejection("instagram", "national_generic_handle")
+                return False
             if _instagram_looks_institutional_or_directory_account(instagram_url, document) or (
-                _instagram_handle_looks_like_school_brand(instagram_url, job) and not handle_has_fraternity
+                school_brand_handle and not (effective_local_identity or chapter_match or chapter_designation > 0)
             ):
                 self._record_candidate_rejection("instagram", "institutional_account")
                 return False
-            if not handle_has_fraternity:
-                self._record_candidate_rejection("instagram", "missing_handle_fraternity_token")
-                return False
-            if not local_identity and not chapter_match and _chapter_designation_signal(job, combined) <= 0:
+            if not (effective_local_identity or chapter_match or chapter_designation > 0):
                 self._record_candidate_rejection("instagram", "missing_local_identity")
                 return False
-            return fraternity_match and (school_match or chapter_match or local_identity)
+            if not (school_match or chapter_match or effective_local_identity):
+                self._record_candidate_rejection("instagram", "missing_school_anchor")
+                return False
+            if not (fraternity_match or chapter_match or effective_local_identity or chapter_designation > 0):
+                self._record_candidate_rejection("instagram", "missing_fraternity_anchor")
+                return False
+            if not effective_local_identity and not chapter_match and chapter_designation <= 0 and handle_score < 2:
+                self._record_candidate_rejection("instagram", "missing_local_identity")
+                return False
+            return True
         if document.provider not in {"search_result", "search_page"}:
+            if source_tier == "tier1":
+                if _instagram_looks_institutional_or_directory_account(instagram_url, document) or (
+                    school_brand_handle and not (effective_local_identity or chapter_match or chapter_designation > 0)
+                ):
+                    self._record_candidate_rejection("instagram", "institutional_account")
+                    return False
+                return (school_match or chapter_match or effective_local_identity) and (
+                    fraternity_match or chapter_match or effective_local_identity or chapter_designation > 0
+                )
             return True
         if source_tier == "tier1":
             if _instagram_looks_institutional_or_directory_account(instagram_url, document) or (
-                _instagram_handle_looks_like_school_brand(instagram_url, job) and not handle_has_fraternity
+                school_brand_handle and not (effective_local_identity or chapter_match or chapter_designation > 0)
             ):
                 self._record_candidate_rejection("instagram", "institutional_account")
                 return False
-            if not handle_has_fraternity:
-                self._record_candidate_rejection("instagram", "missing_handle_fraternity_token")
+            if not (handle_has_fraternity or effective_local_identity or chapter_match or chapter_designation > 0):
+                self._record_candidate_rejection("instagram", "missing_local_identity")
                 return False
-            if not fraternity_match and not chapter_match and _chapter_designation_signal(job, combined) <= 0:
+            if not school_match and not chapter_match and not effective_local_identity:
+                self._record_candidate_rejection("instagram", "missing_school_anchor")
+                return False
+            if not fraternity_match and not chapter_match and not effective_local_identity and chapter_designation <= 0 and handle_score < 2:
                 self._record_candidate_rejection("instagram", "missing_fraternity_anchor")
                 return False
-            return school_match and (fraternity_match or chapter_match or handle_score >= 2)
+            return (school_match or chapter_match or effective_local_identity) and (
+                fraternity_match or chapter_match or effective_local_identity or chapter_designation > 0
+            )
         if _instagram_has_conflicting_org_signal(job, combined) and handle_score < 5:
             self._record_candidate_rejection("instagram", "conflicting_org_signal")
             return False
         if _chapter_designation_signal(job, combined) < 0:
             self._record_candidate_rejection("instagram", "chapter_designation_mismatch")
             return False
-        if not handle_has_fraternity and _chapter_designation_signal(job, combined) <= 0:
+        if not handle_has_fraternity and chapter_designation <= 0 and not effective_local_identity and not chapter_match:
             self._record_candidate_rejection("instagram", "missing_handle_fraternity_token")
             return False
         if handle_score >= 4 and (school_match or fraternity_match):
@@ -4984,6 +5337,9 @@ def _fraternity_query_aliases(display_name: str | None, fraternity_slug: str | N
     initials = _initialism(display)
     if len(initials) >= 2:
         aliases.append(initials)
+    greek_tokens = [token for token in _normalized_match_text(display).split() if token]
+    if len(greek_tokens) >= 2:
+        aliases.append(" ".join(greek_tokens[:2]))
     slug_tokens = " ".join(token for token in _normalized_match_text(fraternity_slug).split() if token not in {"main", "national"})
     if slug_tokens and slug_tokens not in [token.lower() for token in aliases]:
         aliases.append(slug_tokens)
@@ -5044,11 +5400,37 @@ def _school_handle_aliases(
             min_school_initial_length=min_school_initial_length,
         )
     )
+    compact_school = _compact_text(normalized)
+    if len(compact_school) >= 4:
+        aliases.append(compact_school)
+        if len(compact_school) <= 8:
+            aliases.append(f"{compact_school}u")
+    school_initials = _school_initials(normalized)
+    if enable_school_initials and len(school_initials) >= 2:
+        aliases.append(school_initials.lower())
     for token in _significant_tokens(normalized):
         compact = _compact_text(token)
-        if len(compact) >= 4:
+        if len(compact) >= 3:
             aliases.append(compact)
+            if len(compact) <= 8:
+                aliases.append(f"{compact}u")
     return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _instagram_probe_website_aliases(job: FieldJob) -> list[str]:
+    website_url = _current_website_url(job)
+    if not website_url:
+        return []
+    hostname = (urlparse(website_url).hostname or "").lower()
+    if not hostname:
+        return []
+    parts = [part for part in hostname.split(".") if part and part not in {"www", "com", "org", "edu", "net", "ca"}]
+    aliases: list[str] = []
+    if parts:
+        aliases.append(_compact_text(parts[0]))
+    if len(parts) >= 2 and len(parts[0]) <= 3:
+        aliases.append(_compact_text(parts[0] + parts[1]))
+    return list(dict.fromkeys(alias for alias in aliases if 2 <= len(alias) <= 15))
 
 
 def _instagram_probe_handles(
@@ -5061,10 +5443,13 @@ def _instagram_probe_handles(
 ) -> list[str]:
     fraternity_display = _display_name(job.fraternity_slug)
     fraternity_aliases = _fraternity_query_aliases(fraternity_display, job.fraternity_slug)
+    fraternity_tokens = [token for token in _normalized_match_text(fraternity_display).split() if token]
+    if len(fraternity_tokens) >= 2:
+        fraternity_aliases.append(" ".join(fraternity_tokens[:2]))
     fraternity_compacts = [
         _compact_text(alias)
         for alias in fraternity_aliases
-        if len(_compact_text(alias)) >= 3
+        if len(_compact_text(alias)) >= 2
     ]
     fraternity_compacts = list(dict.fromkeys(fraternity_compacts))
     if enable_compact_fraternity:
@@ -5078,13 +5463,15 @@ def _instagram_probe_handles(
         enable_school_initials=enable_school_initials,
         min_school_initial_length=min_school_initial_length,
     )
+    school_aliases.extend(_instagram_probe_website_aliases(job))
+    school_aliases = list(dict.fromkeys(alias for alias in school_aliases if alias))
 
     handles: list[str] = []
-    for school_alias in school_aliases[:3]:
+    for school_alias in school_aliases[:8]:
         compact_school = _compact_text(school_alias)
         if not compact_school:
             continue
-        for fraternity_compact in fraternity_compacts[:4]:
+        for fraternity_compact in fraternity_compacts[:8]:
             if not fraternity_compact:
                 continue
             handles.extend(
@@ -5095,7 +5482,8 @@ def _instagram_probe_handles(
                     f"{fraternity_compact}_{compact_school}",
                 ]
             )
-    return list(dict.fromkeys(handle for handle in handles if 6 <= len(handle) <= 30))[: max(1, max_candidates)]
+    final_limit = max(12, max_candidates * 3)
+    return list(dict.fromkeys(handle for handle in handles if 4 <= len(handle) <= 30))[:final_limit]
 
 
 def _email_followup_links(document: SearchDocument, website_url: str, *, limit: int) -> list[str]:
@@ -5417,6 +5805,29 @@ def _search_result_is_useful(job: FieldJob, result: SearchResult, target: str) -
 
 def _should_fetch_search_result_page(job: FieldJob, result: SearchResult, target: str) -> bool:
     if target == "instagram":
+        result_host = (urlparse(result.url).netloc or "").lower()
+        if result_host in {"instagram.com", "www.instagram.com"} or result_host.endswith(".instagram.com"):
+            return False
+        if _website_trust_tier(job, result.url) == "tier1":
+            return True
+        lowered = _normalized_match_text(f"{result.title} {result.snippet} {result.url}")
+        if any(
+            marker in lowered
+            for marker in (
+                "instagram",
+                "chapter",
+                "student organization",
+                "student org",
+                "fraternity",
+                "sorority",
+                "greek life",
+                "ifc",
+            )
+        ):
+            return True
+        website_host = (urlparse(_current_website_url(job) or "").netloc or "").lower()
+        if website_host and (result_host == website_host or result_host.endswith(f".{website_host}")):
+            return True
         return False
     if target == "email":
         if _website_trust_tier(job, result.url) == "tier1":
@@ -5941,13 +6352,20 @@ def _instagram_looks_relevant_to_job(instagram_url: str, job: FieldJob, *, docum
     handle_score = _instagram_handle_match_score(instagram_url, job)
     if _instagram_handle_looks_national_generic(instagram_url, job):
         return False
-    if handle_score >= 4:
+    school_brand_handle = _instagram_handle_looks_like_school_brand(instagram_url, job)
+    if handle_score >= 4 and not school_brand_handle:
         return True
-    if handle_score >= 3 and _has_nongeneric_chapter_signal(job) and _instagram_handle_has_fraternity_token(instagram_url, job):
+    if (
+        handle_score >= 3
+        and not school_brand_handle
+        and _has_nongeneric_chapter_signal(job)
+        and _instagram_handle_has_fraternity_token(instagram_url, job)
+    ):
         return True
     if document is None:
         return False
     combined = _instagram_candidate_text(document, instagram_url)
+    chapter_designation = _chapter_designation_signal(job, combined)
     if _school_has_conflicting_signal(job, combined):
         return False
     if _instagram_has_conflicting_org_signal(job, combined) and handle_score < 5:
@@ -5955,50 +6373,56 @@ def _instagram_looks_relevant_to_job(instagram_url: str, job: FieldJob, *, docum
     fraternity_match = _fraternity_matches(job, combined)
     chapter_match = _has_nongeneric_chapter_signal(job) and _chapter_matches(job, combined)
     local_identity = _instagram_handle_has_local_identity(instagram_url, job)
+    school_match = _school_matches(job, combined)
+    effective_local_identity = local_identity and not school_brand_handle
+    if school_brand_handle and school_match and not (fraternity_match or chapter_match or effective_local_identity or chapter_designation > 0):
+        return False
     if document.provider == "chapter_website":
         if _instagram_looks_institutional_or_directory_account(instagram_url, document):
             return False
-        if _website_trust_tier(job, document.url or "") == "tier1" and not (local_identity or fraternity_match or chapter_match or _chapter_designation_signal(job, combined) > 0):
+        if _website_trust_tier(job, document.url or "") == "tier1" and not (effective_local_identity or fraternity_match or chapter_match or _chapter_designation_signal(job, combined) > 0):
             return False
-        if local_identity:
+        if effective_local_identity:
             return True
-        return _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match)
+        return fraternity_match and (school_match or chapter_match)
     if document.provider == "source_page":
         if _instagram_looks_institutional_or_directory_account(instagram_url, document):
             return False
-        if _instagram_handle_looks_like_school_brand(instagram_url, job) and not _instagram_handle_has_fraternity_token(instagram_url, job):
+        if school_brand_handle and not (effective_local_identity or chapter_match or chapter_designation > 0):
             return False
-        if not _instagram_handle_has_fraternity_token(instagram_url, job):
+        if not (effective_local_identity or chapter_match or chapter_designation > 0):
             return False
         if chapter_match:
             return True
-        return local_identity and _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match)
+        if effective_local_identity and (school_match or chapter_designation > 0):
+            return True
+        return fraternity_match and (school_match or chapter_designation > 0)
     if document.provider in {"provenance", "nationals_directory"}:
         if chapter_match:
             return True
         if handle_score >= 4:
             return True
-        if local_identity and _instagram_handle_has_fraternity_token(instagram_url, job):
+        if effective_local_identity and _instagram_handle_has_fraternity_token(instagram_url, job):
             return True
-        if handle_score >= 2 and _instagram_handle_has_fraternity_token(instagram_url, job) and _school_matches(job, combined):
+        if handle_score >= 2 and _instagram_handle_has_fraternity_token(instagram_url, job) and school_match:
             return True
-        if handle_score >= 3 and _school_matches(job, combined):
+        if handle_score >= 3 and school_match:
             return True
         return False
     if _website_trust_tier(job, document.url or "") == "tier1":
         if _instagram_looks_institutional_or_directory_account(instagram_url, document):
             return False
-        if _instagram_handle_looks_like_school_brand(instagram_url, job) and not _instagram_handle_has_fraternity_token(instagram_url, job):
+        if school_brand_handle and not (effective_local_identity or chapter_match or chapter_designation > 0):
             return False
-        if not _instagram_handle_has_fraternity_token(instagram_url, job):
+        if not (_instagram_handle_has_fraternity_token(instagram_url, job) or effective_local_identity or chapter_match or chapter_designation > 0):
             return False
-        return _school_matches(job, combined) and (
-            _fraternity_matches(job, combined)
+        return school_match and (
+            fraternity_match
             or chapter_match
-            or _chapter_designation_signal(job, combined) > 0
-            or local_identity
+            or chapter_designation > 0
+            or effective_local_identity
         )
-    return _fraternity_matches(job, combined) and (_school_matches(job, combined) or chapter_match)
+    return fraternity_match and (school_match or chapter_match)
 
 
 def _instagram_has_conflicting_org_signal(job: FieldJob, text: str) -> bool:

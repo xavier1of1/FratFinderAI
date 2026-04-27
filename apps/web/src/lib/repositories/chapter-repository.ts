@@ -8,15 +8,55 @@ type ChapterListQueryRow = ChapterListItem & {
   nationalInstagramUrl: string | null;
 };
 
-const STATE_NORMALIZATION_CASE = `
+const STATE_CODES = new Set([
+  "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME",
+  "MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI",
+  "SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"
+]);
+
+const CHAPTER_VISIBILITY_CLAUSE = `
+  NOT (
+    COALESCE(c.field_states ->> 'website_url', '') = 'invalid_entity'
+    AND COALESCE(c.field_states ->> 'instagram_url', '') = 'invalid_entity'
+    AND COALESCE(c.field_states ->> 'contact_email', '') = 'invalid_entity'
+  )
+`;
+
+const STATE_NAME_TO_CODE: Record<string, string> = {
+  ALABAMA: "AL", ALASKA: "AK", ARIZONA: "AZ", ARKANSAS: "AR", CALIFORNIA: "CA", COLORADO: "CO", CONNECTICUT: "CT", DELAWARE: "DE", "DISTRICT OF COLUMBIA": "DC",
+  FLORIDA: "FL", GEORGIA: "GA", HAWAII: "HI", IDAHO: "ID", ILLINOIS: "IL", INDIANA: "IN", IOWA: "IA", KANSAS: "KS", KENTUCKY: "KY", LOUISIANA: "LA",
+  MAINE: "ME", MARYLAND: "MD", MASSACHUSETTS: "MA", MICHIGAN: "MI", MINNESOTA: "MN", MISSISSIPPI: "MS", MISSOURI: "MO", MONTANA: "MT", NEBRASKA: "NE", NEVADA: "NV",
+  "NEW HAMPSHIRE": "NH", "NEW JERSEY": "NJ", "NEW MEXICO": "NM", "NEW YORK": "NY", "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", OHIO: "OH", OKLAHOMA: "OK", OREGON: "OR", PENNSYLVANIA: "PA",
+  "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD", TENNESSEE: "TN", TEXAS: "TX", UTAH: "UT", VERMONT: "VT", VIRGINIA: "VA", WASHINGTON: "WA", "WEST VIRGINIA": "WV",
+  WISCONSIN: "WI", WYOMING: "WY"
+};
+
+function normalizeStateValue(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const upper = trimmed.toUpperCase();
+  if (STATE_CODES.has(upper)) {
+    return upper;
+  }
+  const collapsed = trimmed.replace(/[^A-Za-z ]/g, " ").replace(/\s+/g, " ").trim().toUpperCase();
+  return STATE_NAME_TO_CODE[collapsed] ?? null;
+}
+
+function buildStateNormalizationCase(stateRef: string) {
+  return `
   CASE
-    WHEN c.state IS NULL OR btrim(c.state) = '' THEN NULL
-    WHEN upper(btrim(c.state)) IN (
+    WHEN ${stateRef} IS NULL OR btrim(${stateRef}) = '' THEN NULL
+    WHEN upper(btrim(${stateRef})) IN (
       'AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME',
       'MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI',
       'SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
-    ) THEN upper(btrim(c.state))
-    ELSE CASE regexp_replace(lower(btrim(c.state)), '[^a-z ]', '', 'g')
+    ) THEN upper(btrim(${stateRef}))
+    ELSE CASE regexp_replace(lower(btrim(${stateRef})), '[^a-z ]', '', 'g')
       WHEN 'alabama' THEN 'AL'
       WHEN 'alaska' THEN 'AK'
       WHEN 'arizona' THEN 'AZ'
@@ -71,6 +111,24 @@ const STATE_NORMALIZATION_CASE = `
       ELSE NULL
     END
   END
+`;
+}
+
+const CHAPTER_STATE_NORMALIZATION_CASE = buildStateNormalizationCase("c.state");
+const CONSENSUS_STATE_NORMALIZATION_CASE = buildStateNormalizationCase("c2.state");
+
+const UNIVERSITY_STATE_CONSENSUS_CTE = `
+  university_state_consensus AS (
+    SELECT
+      lower(btrim(c2.university_name)) AS university_key,
+      MIN(${CONSENSUS_STATE_NORMALIZATION_CASE}) AS inferred_state,
+      COUNT(*) FILTER (WHERE ${CONSENSUS_STATE_NORMALIZATION_CASE} IS NOT NULL) AS known_rows,
+      COUNT(DISTINCT ${CONSENSUS_STATE_NORMALIZATION_CASE}) FILTER (WHERE ${CONSENSUS_STATE_NORMALIZATION_CASE} IS NOT NULL) AS distinct_states
+    FROM chapters c2
+    WHERE ${CHAPTER_VISIBILITY_CLAUSE.replaceAll("c.", "c2.")}
+      AND NULLIF(btrim(c2.university_name), '') IS NOT NULL
+    GROUP BY lower(btrim(c2.university_name))
+  )
 `;
 
 function normalizeCompact(value: string | null | undefined) {
@@ -179,6 +237,7 @@ export async function listChapters(params: {
   const dbPool = getDbPool();
   const { rows } = await dbPool.query<ChapterListQueryRow>(
     `
+      WITH ${UNIVERSITY_STATE_CONSENSUS_CTE}
       SELECT
         c.id,
         f.slug AS "fraternitySlug",
@@ -187,7 +246,7 @@ export async function listChapters(params: {
         c.name,
         c.university_name AS "universityName",
         c.city,
-        c.state,
+        COALESCE(${CHAPTER_STATE_NORMALIZATION_CASE}, usc.inferred_state) AS state,
         c.country,
         CASE WHEN c.website_url ~* '^https?://' THEN c.website_url ELSE NULL END AS "websiteUrl",
         c.instagram_url AS "instagramUrl",
@@ -201,6 +260,10 @@ export async function listChapters(params: {
       FROM chapters c
       JOIN fraternities f ON f.id = c.fraternity_id
       LEFT JOIN national_profiles np ON np.fraternity_slug = f.slug
+      LEFT JOIN university_state_consensus usc
+        ON lower(btrim(c.university_name)) = usc.university_key
+        AND usc.known_rows > 0
+        AND usc.distinct_states = 1
       LEFT JOIN LATERAL (
         SELECT s.slug
         FROM chapter_provenance cp
@@ -210,11 +273,7 @@ export async function listChapters(params: {
         LIMIT 1
       ) latest_source ON TRUE
       WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.university_name ILIKE '%' || $1 || '%')
-        AND NOT (
-          COALESCE(c.field_states ->> 'website_url', '') = 'invalid_entity'
-          AND COALESCE(c.field_states ->> 'instagram_url', '') = 'invalid_entity'
-          AND COALESCE(c.field_states ->> 'contact_email', '') = 'invalid_entity'
-        )
+        AND ${CHAPTER_VISIBILITY_CLAUSE}
       ORDER BY c.updated_at DESC, c.id DESC
       LIMIT $2 OFFSET $3
     `,
@@ -237,27 +296,83 @@ export async function getChapterListMetadata(params: {
     fraternity_slugs: string[] | null;
     state_options: string[] | null;
     chapter_statuses: string[] | null;
+    with_website_count: number;
+    with_instagram_count: number;
+    with_email_count: number;
   }>(
     `
-      WITH filtered AS (
+      WITH ${UNIVERSITY_STATE_CONSENSUS_CTE},
+      filtered AS (
         SELECT
           f.slug AS fraternity_slug,
-          NULLIF(btrim(c.state), '') AS state,
-          NULLIF(btrim(c.chapter_status), '') AS chapter_status
+          COALESCE(${CHAPTER_STATE_NORMALIZATION_CASE}, usc.inferred_state) AS state,
+          NULLIF(btrim(c.chapter_status), '') AS chapter_status,
+          NULLIF(btrim(c.website_url), '') AS website_url,
+          NULLIF(btrim(c.instagram_url), '') AS instagram_url,
+          NULLIF(btrim(c.contact_email), '') AS contact_email,
+          c.contact_provenance AS contact_provenance,
+          NULLIF(btrim(np.contact_email), '') AS national_email,
+          NULLIF(btrim(np.instagram_url), '') AS national_instagram_url
         FROM chapters c
         JOIN fraternities f ON f.id = c.fraternity_id
+        LEFT JOIN national_profiles np ON np.fraternity_slug = f.slug
+        LEFT JOIN university_state_consensus usc
+          ON lower(btrim(c.university_name)) = usc.university_key
+          AND usc.known_rows > 0
+          AND usc.distinct_states = 1
         WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.university_name ILIKE '%' || $1 || '%')
-          AND NOT (
-            COALESCE(c.field_states ->> 'website_url', '') = 'invalid_entity'
-            AND COALESCE(c.field_states ->> 'instagram_url', '') = 'invalid_entity'
-            AND COALESCE(c.field_states ->> 'contact_email', '') = 'invalid_entity'
-          )
+          AND ${CHAPTER_VISIBILITY_CLAUSE}
       )
       SELECT
         COUNT(*)::int AS total_count,
         COALESCE(array_agg(DISTINCT fraternity_slug ORDER BY fraternity_slug), ARRAY[]::text[]) AS fraternity_slugs,
         COALESCE(array_agg(DISTINCT state ORDER BY state) FILTER (WHERE state IS NOT NULL), ARRAY[]::text[]) AS state_options,
-        COALESCE(array_agg(DISTINCT chapter_status ORDER BY chapter_status) FILTER (WHERE chapter_status IS NOT NULL), ARRAY[]::text[]) AS chapter_statuses
+        COALESCE(array_agg(DISTINCT chapter_status ORDER BY chapter_status) FILTER (WHERE chapter_status IS NOT NULL), ARRAY[]::text[]) AS chapter_statuses,
+        COUNT(*) FILTER (WHERE website_url IS NOT NULL AND website_url ~* '^https?://')::int AS with_website_count,
+        COUNT(*) FILTER (
+          WHERE instagram_url IS NOT NULL
+            AND NOT (
+              (
+                COALESCE(contact_provenance -> 'instagram_url' ->> 'contactProvenanceType', '') NOT IN (
+                  'chapter_specific',
+                  'school_specific',
+                  'national_specific_to_chapter'
+                )
+              )
+              AND national_instagram_url IS NOT NULL
+              AND lower(regexp_replace(instagram_url, '[^a-z0-9]+', '', 'g')) = lower(regexp_replace(national_instagram_url, '[^a-z0-9]+', '', 'g'))
+            )
+            AND NOT (
+              COALESCE(contact_provenance -> 'instagram_url' ->> 'contactProvenanceType', '') NOT IN (
+                'chapter_specific',
+                'school_specific',
+                'national_specific_to_chapter'
+              )
+              AND lower(regexp_replace(instagram_url, '[^a-z0-9]+', '', 'g')) ~ '(hq|ihq|national|nationals|officialhq)'
+            )
+        )::int AS with_instagram_count,
+        COUNT(*) FILTER (
+          WHERE contact_email IS NOT NULL
+            AND NOT (
+              (
+                COALESCE(contact_provenance -> 'contact_email' ->> 'contactProvenanceType', '') NOT IN (
+                  'chapter_specific',
+                  'school_specific',
+                  'national_specific_to_chapter'
+                )
+              )
+              AND national_email IS NOT NULL
+              AND lower(contact_email) = lower(national_email)
+            )
+            AND NOT (
+              COALESCE(contact_provenance -> 'contact_email' ->> 'contactProvenanceType', '') NOT IN (
+                'chapter_specific',
+                'school_specific',
+                'national_specific_to_chapter'
+              )
+              AND split_part(lower(contact_email), '@', 1) ~ '(fsl|graduateprogram|graduateprograms|greeklife|greek\\.life|hq|ihq|leadership|national|nationals|office|ofsl|reslife|studentaffairs|studentengagement|studentinvolvement|studentlife|studentorg|studentorganization|studentorganizations)'
+            )
+        )::int AS with_email_count
       FROM filtered
     `,
     [search]
@@ -267,14 +382,20 @@ export async function getChapterListMetadata(params: {
     total_count: 0,
     fraternity_slugs: [],
     state_options: [],
-    chapter_statuses: []
+    chapter_statuses: [],
+    with_website_count: 0,
+    with_instagram_count: 0,
+    with_email_count: 0
   };
 
   return {
     totalCount: Number(summary.total_count ?? 0),
     fraternitySlugs: summary.fraternity_slugs ?? [],
     stateOptions: summary.state_options ?? [],
-    chapterStatuses: summary.chapter_statuses ?? []
+    chapterStatuses: summary.chapter_statuses ?? [],
+    withWebsiteCount: Number(summary.with_website_count ?? 0),
+    withInstagramCount: Number(summary.with_instagram_count ?? 0),
+    withEmailCount: Number(summary.with_email_count ?? 0)
   };
 }
 
@@ -282,14 +403,15 @@ export async function listChapterMapSummary(): Promise<ChapterMapStateSummary[]>
   const dbPool = getDbPool();
   const { rows } = await dbPool.query<ChapterMapStateSummary>(
     `
-      WITH normalized AS (
-        SELECT ${STATE_NORMALIZATION_CASE} AS state_code
+      WITH ${UNIVERSITY_STATE_CONSENSUS_CTE},
+      normalized AS (
+        SELECT COALESCE(${CHAPTER_STATE_NORMALIZATION_CASE}, usc.inferred_state) AS state_code
         FROM chapters c
-        WHERE NOT (
-          COALESCE(c.field_states ->> 'website_url', '') = 'invalid_entity'
-          AND COALESCE(c.field_states ->> 'instagram_url', '') = 'invalid_entity'
-          AND COALESCE(c.field_states ->> 'contact_email', '') = 'invalid_entity'
-        )
+        LEFT JOIN university_state_consensus usc
+          ON lower(btrim(c.university_name)) = usc.university_key
+          AND usc.known_rows > 0
+          AND usc.distinct_states = 1
+        WHERE ${CHAPTER_VISIBILITY_CLAUSE}
       )
       SELECT
         state_code AS "stateCode",
@@ -316,6 +438,7 @@ export async function updateChapterRecord(params: {
   contactEmail: string | null;
 }): Promise<ChapterListItem | null> {
   const dbPool = getDbPool();
+  const normalizedState = normalizeStateValue(params.state);
   const { rows } = await dbPool.query<ChapterListItem>(
     `
       WITH updated AS (
@@ -373,7 +496,7 @@ export async function updateChapterRecord(params: {
       params.name,
       params.universityName,
       params.city,
-      params.state,
+      normalizedState,
       params.chapterStatus,
       params.websiteUrl,
       params.instagramUrl,
