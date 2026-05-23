@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -18,6 +20,7 @@ from fratfinder_crawler.provider_catalog import (
     canonical_free_provider_order,
     normalize_free_provider_order,
 )
+from fratfinder_crawler.search.searxng_health import classify_unresponsive_engine_failure, effective_searxng_engines
 
 _DDG_HTML_ENDPOINT = "https://html.duckduckgo.com/html/"
 _DDG_LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
@@ -83,6 +86,12 @@ class SearchUnavailableError(RuntimeError):
 
 
 class SearchClient:
+    _GLOBAL_ADMISSION_LOCK = threading.RLock()
+    _GLOBAL_PROVIDER_IN_FLIGHT: dict[str, int] = {}
+    _GLOBAL_PROVIDER_NEXT_ALLOWED_AT: dict[str, float] = {}
+    _GLOBAL_PROVIDER_COOLDOWN_UNTIL: dict[str, float] = {}
+    _GLOBAL_RESULT_CACHE: dict[tuple[str, str, str, str, int], tuple[float, list[SearchResult]]] = {}
+
     def __init__(
         self,
         settings: Settings,
@@ -103,7 +112,11 @@ class SearchClient:
         self._preferred_searxng_endpoint: str | None = None
         self._min_request_interval_seconds = max(0.0, float(settings.crawler_search_min_request_interval_ms) / 1000.0)
         self._provider_min_request_interval_seconds: dict[str, float] = {
-            "searxng_json": max(0.0, float(settings.crawler_search_provider_pacing_ms_searxng_json) / 1000.0),
+            "searxng_json": max(
+                0.0,
+                float(settings.crawler_search_provider_pacing_ms_searxng_json) / 1000.0,
+                float(getattr(settings, "crawler_search_searxng_min_interval_ms", 0) or 0) / 1000.0,
+            ),
             "tavily_api": max(0.0, float(settings.crawler_search_provider_pacing_ms_tavily_api) / 1000.0),
             "serper_api": max(0.0, float(settings.crawler_search_provider_pacing_ms_serper_api) / 1000.0),
             "bing_html": max(0.0, float(settings.crawler_search_provider_pacing_ms_bing_html) / 1000.0),
@@ -122,6 +135,14 @@ class SearchClient:
         else:
             self._get_requester = get_requester or requests.get
             self._post_requester = post_requester or requests.post
+
+    @classmethod
+    def clear_global_runtime_state(cls) -> None:
+        with cls._GLOBAL_ADMISSION_LOCK:
+            cls._GLOBAL_PROVIDER_IN_FLIGHT.clear()
+            cls._GLOBAL_PROVIDER_NEXT_ALLOWED_AT.clear()
+            cls._GLOBAL_PROVIDER_COOLDOWN_UNTIL.clear()
+            cls._GLOBAL_RESULT_CACHE.clear()
 
     def search(self, query: str, max_results: int | None = None) -> list[SearchResult]:
         if not self._settings.crawler_search_enabled:
@@ -209,22 +230,8 @@ class SearchClient:
     def effective_auto_provider_order(settings: Settings, *, free_only: bool = False) -> list[str]:
         provider_order, _warnings = normalize_free_provider_order(settings.crawler_search_provider_order_free)
         free_order = list(dict.fromkeys(provider_order or canonical_free_provider_order()))
-        if free_only or not bool(getattr(settings, "crawler_v3_paid_search_enabled", False)):
-            return free_order
-
-        paid_order = [
-            provider
-            for provider in _AUTO_PAID_PROVIDER_ORDER
-            if SearchClient._provider_configured_for_settings(settings, provider)
-        ]
-        if not paid_order:
-            return free_order
-
-        if "searxng_json" in free_order:
-            expanded = ["searxng_json", *paid_order, *[provider for provider in free_order if provider != "searxng_json"]]
-        else:
-            expanded = [*paid_order, *free_order]
-        return list(dict.fromkeys(expanded))
+        _ = free_only
+        return free_order
 
     @staticmethod
     def _provider_configured_for_settings(settings: Settings, provider: str) -> bool:
@@ -232,7 +239,12 @@ class SearchClient:
             return bool(
                 [
                     endpoint
-                    for endpoint in str(getattr(settings, "crawler_search_searxng_base_url", "") or "").split(",")
+                    for endpoint in ",".join(
+                        [
+                            str(getattr(settings, "crawler_search_searxng_base_urls", "") or ""),
+                            str(getattr(settings, "crawler_search_searxng_base_url", "") or ""),
+                        ]
+                    ).split(",")
                     if endpoint.strip()
                 ]
             )
@@ -311,6 +323,85 @@ class SearchClient:
     def _cache_query_results(self, cache_key: tuple[str, str, int], results: list[SearchResult]) -> None:
         if results or self._settings.crawler_search_cache_empty_results:
             self._query_cache[cache_key] = list(results)
+
+    def _searxng_cache_key(self, endpoint: str, query: str, max_results: int) -> tuple[str, str, str, str, int]:
+        return (
+            "searxng_json",
+            endpoint.rstrip("/"),
+            effective_searxng_engines(self._settings),
+            query.strip().lower(),
+            max(1, int(max_results)),
+        )
+
+    def _get_cached_searxng_results(self, query: str, max_results: int) -> tuple[str, list[SearchResult]] | None:
+        ttl_seconds = int(getattr(self._settings, "crawler_search_result_cache_ttl_seconds", 0) or 0)
+        if ttl_seconds <= 0:
+            return None
+        now = time.monotonic()
+        with self._GLOBAL_ADMISSION_LOCK:
+            for endpoint in self._ordered_searxng_endpoints():
+                key = self._searxng_cache_key(endpoint, query, max_results)
+                cached = self._GLOBAL_RESULT_CACHE.get(key)
+                if cached is None:
+                    continue
+                expires_at, results = cached
+                if expires_at <= now:
+                    self._GLOBAL_RESULT_CACHE.pop(key, None)
+                    continue
+                return endpoint, list(results)
+        return None
+
+    def _cache_searxng_results(self, endpoint: str, query: str, max_results: int, results: list[SearchResult]) -> None:
+        ttl_seconds = int(getattr(self._settings, "crawler_search_result_cache_ttl_seconds", 0) or 0)
+        if ttl_seconds <= 0 or not results:
+            return
+        key = self._searxng_cache_key(endpoint, query, max_results)
+        with self._GLOBAL_ADMISSION_LOCK:
+            self._GLOBAL_RESULT_CACHE[key] = (time.monotonic() + ttl_seconds, list(results))
+
+    @contextlib.contextmanager
+    def _global_provider_admission(self, provider: str, provider_endpoint: str | None = None):
+        state_key = self._provider_state_key(provider, provider_endpoint)
+        if provider != "searxng_json":
+            yield
+            return
+
+        max_in_flight = max(1, int(getattr(self._settings, "crawler_search_searxng_max_in_flight", 1) or 1))
+        min_interval = max(0.0, float(getattr(self._settings, "crawler_search_searxng_min_interval_ms", 0) or 0) / 1000.0)
+        admission_wait = max(0.0, float(getattr(self._settings, "crawler_search_searxng_admission_wait_seconds", 10.0) or 0.0))
+        deadline = time.monotonic() + admission_wait
+        admitted = False
+
+        while True:
+            with self._GLOBAL_ADMISSION_LOCK:
+                now = time.monotonic()
+                cooldown_until = self._GLOBAL_PROVIDER_COOLDOWN_UNTIL.get(state_key, 0.0)
+                if cooldown_until > now:
+                    raise SearchUnavailableError(f"{state_key} temporarily unavailable (global cooldown)")
+                in_flight = int(self._GLOBAL_PROVIDER_IN_FLIGHT.get(state_key, 0) or 0)
+                next_allowed = float(self._GLOBAL_PROVIDER_NEXT_ALLOWED_AT.get(state_key, 0.0) or 0.0)
+                if in_flight < max_in_flight and next_allowed <= now:
+                    self._GLOBAL_PROVIDER_IN_FLIGHT[state_key] = in_flight + 1
+                    self._GLOBAL_PROVIDER_NEXT_ALLOWED_AT[state_key] = now + min_interval
+                    admitted = True
+                    break
+
+                wait_seconds = max(0.01, min(0.25, max(next_allowed - now, 0.05)))
+
+            if time.monotonic() + wait_seconds > deadline:
+                raise SearchUnavailableError(f"{state_key} temporarily unavailable (admission timeout)")
+            time.sleep(wait_seconds)
+
+        try:
+            yield
+        finally:
+            if admitted:
+                with self._GLOBAL_ADMISSION_LOCK:
+                    current = int(self._GLOBAL_PROVIDER_IN_FLIGHT.get(state_key, 0) or 0)
+                    if current <= 1:
+                        self._GLOBAL_PROVIDER_IN_FLIGHT.pop(state_key, None)
+                    else:
+                        self._GLOBAL_PROVIDER_IN_FLIGHT[state_key] = current - 1
 
     def consume_last_provider_attempts(self) -> list[dict[str, object]]:
         attempts = list(self._last_provider_attempts)
@@ -429,10 +520,20 @@ class SearchClient:
             return "circuit_open"
         if "json disabled" in message or "403" in message and "json" in message:
             return "json_disabled"
+        if "rate_limited_429" in message or "too many request" in message or "rate limit" in message:
+            return "rate_limited_429"
+        if "challenge_or_anomaly" in message:
+            return "challenge_or_anomaly"
+        if "captcha" in message or "access denied" in message or "forbidden" in message or "blocked" in message:
+            return "challenge_or_anomaly"
         if "unresponsive engines" in message:
             return "engine_unresponsive"
+        if "no parseable search results" in message or "returned no results" in message:
+            return "parse_empty"
         if "endpoint down" in message:
             return "endpoint_down"
+        if "global cooldown" in message or "admission timeout" in message:
+            return "provider_unavailable"
         if "anomaly" in message or "challenge" in message or "captcha" in message:
             return "challenge_or_anomaly"
         if "temporarily unavailable" in message:
@@ -506,6 +607,31 @@ class SearchClient:
             self._provider_failure_streak[base_provider] = self._provider_failure_streak.get(base_provider, 0) + 1
         if cooldown_seconds > 0 and streak >= threshold:
             self._provider_circuit_open_until[provider] = time.monotonic() + cooldown_seconds
+
+    def _record_global_provider_success(self, state_key: str) -> None:
+        with self._GLOBAL_ADMISSION_LOCK:
+            self._GLOBAL_PROVIDER_COOLDOWN_UNTIL.pop(state_key, None)
+
+    def _record_global_provider_failure(self, state_key: str, *, failure_type: str) -> None:
+        if failure_type not in {
+            "json_disabled",
+            "endpoint_down",
+            "connection_refused",
+            "dns_error",
+            "timeout",
+            "rate_limited_429",
+            "challenge_or_anomaly",
+        }:
+            return
+        # SearXNG can report unresponsive upstream engines for one query while
+        # remaining perfectly capable of serving the next query. Do not turn
+        # that query-level low-signal condition into a process-wide endpoint
+        # cooldown; harder transport/auth failures still back off below.
+        backoff_seconds = max(0, int(getattr(self._settings, "crawler_search_searxng_backoff_seconds", 0) or 0))
+        if backoff_seconds <= 0:
+            return
+        with self._GLOBAL_ADMISSION_LOCK:
+            self._GLOBAL_PROVIDER_COOLDOWN_UNTIL[state_key] = time.monotonic() + backoff_seconds
 
     def _search_duckduckgo_html(self, query: str, max_results: int) -> list[SearchResult]:
         response = self._get_requester(
@@ -635,6 +761,19 @@ class SearchClient:
         if not endpoints:
             raise SearchUnavailableError("SearXNG base URL is required when provider is searxng_json")
 
+        cached = self._get_cached_searxng_results(query, max_results)
+        if cached is not None:
+            endpoint, results = cached
+            self._record_provider_success(self._provider_state_key("searxng_json", endpoint))
+            self._record_provider_attempt(
+                "searxng_json",
+                "cache_hit",
+                result_count=len(results),
+                provider_endpoint=endpoint,
+                latency_ms=0,
+            )
+            return results
+
         last_error: Exception | None = None
         for endpoint_base_url in endpoints:
             state_key = self._provider_state_key("searxng_json", endpoint_base_url)
@@ -655,24 +794,30 @@ class SearchClient:
 
             self._apply_request_spacing("searxng_json")
             try:
-                results = self._search_single_searxng_endpoint(endpoint_base_url, query, max_results)
+                with self._global_provider_admission("searxng_json", endpoint_base_url):
+                    results = self._search_single_searxng_endpoint(endpoint_base_url, query, max_results)
             except SearchUnavailableError as exc:
-                self._record_provider_failure(state_key)
+                failure_type = self._classify_failure_type(exc)
+                if failure_type not in {"engine_unresponsive", "parse_empty"}:
+                    self._record_provider_failure(state_key)
+                    self._record_global_provider_failure(state_key, failure_type=failure_type)
                 self._record_provider_attempt(
                     "searxng_json",
                     "unavailable",
-                    failure_type=self._classify_failure_type(exc),
+                    failure_type=failure_type,
                     provider_endpoint=endpoint_base_url,
                     latency_ms=self._elapsed_ms(endpoint_start),
                 )
                 last_error = exc
                 continue
             except requests.RequestException as exc:
+                failure_type = self._classify_request_exception(exc)
                 self._record_provider_failure(state_key)
+                self._record_global_provider_failure(state_key, failure_type=failure_type)
                 self._record_provider_attempt(
                     "searxng_json",
                     "request_error",
-                    failure_type=self._classify_request_exception(exc),
+                    failure_type=failure_type,
                     provider_endpoint=endpoint_base_url,
                     latency_ms=self._elapsed_ms(endpoint_start),
                     http_status=getattr(getattr(exc, "response", None), "status_code", None),
@@ -681,7 +826,9 @@ class SearchClient:
                 continue
 
             self._record_provider_success(state_key)
+            self._record_global_provider_success(state_key)
             self._preferred_searxng_endpoint = endpoint_base_url
+            self._cache_searxng_results(endpoint_base_url, query, max_results, results)
             self._record_provider_attempt(
                 "searxng_json",
                 "success",
@@ -698,7 +845,7 @@ class SearchClient:
     def _search_single_searxng_endpoint(self, base_url: str, query: str, max_results: int) -> list[SearchResult]:
         endpoint = f"{base_url.rstrip('/')}/search"
         params: dict[str, str | int] = {"q": query, "format": "json"}
-        engines = (self._settings.crawler_search_searxng_engines or "").strip()
+        engines = effective_searxng_engines(self._settings)
         if engines:
             params["engines"] = engines
         timeout = min(self._settings.crawler_http_timeout_seconds, 4.0)
@@ -730,6 +877,11 @@ class SearchClient:
         if not results:
             unresponsive_engines = payload.get("unresponsive_engines")
             if isinstance(unresponsive_engines, list) and unresponsive_engines:
+                provider_failure = classify_unresponsive_engine_failure(unresponsive_engines)
+                if provider_failure:
+                    raise SearchUnavailableError(
+                        f"SearXNG engine blocked ({provider_failure}): {', '.join(str(item) for item in unresponsive_engines)}"
+                    )
                 raise SearchUnavailableError(
                     f"SearXNG returned no results and reported unresponsive engines: {', '.join(str(item) for item in unresponsive_engines)}"
                 )

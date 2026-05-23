@@ -86,6 +86,39 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_parser.add_argument("--delay-ms", type=int, default=None, help="Optional delay between cohort queries")
     smoke_parser.add_argument("--output-path", default=None, help="Optional JSON report output path")
 
+    refresh_school_parser = subparsers.add_parser(
+        "refresh-school-evidence",
+        help="Bounded official-school evidence refresh for blocked status/school-verification jobs",
+    )
+    refresh_school_parser.add_argument("--limit", type=int, default=50)
+    refresh_school_parser.add_argument("--reason", default=None, help="Comma-separated blocked reasons to refresh")
+    refresh_school_parser.add_argument("--fraternity-slug", default=None)
+    refresh_school_parser.add_argument("--school", default=None, help="Exact or case-insensitive school name filter")
+    refresh_school_parser.add_argument("--dry-run", action="store_true", help="Select and report candidates without provider fetches or writes")
+    refresh_school_parser.add_argument("--output-path", default=None)
+    refresh_school_parser.add_argument("--skip-preflight", action="store_true")
+    refresh_school_parser.add_argument(
+        "--max-seconds",
+        type=int,
+        default=180,
+        help="Wall-clock guard for non-dry-run refresh work; use 0 to disable",
+    )
+
+    searxng_health_parser = subparsers.add_parser("searxng-health", help="Run raw SearXNG endpoint diagnostics")
+    searxng_health_parser.add_argument("--query", action="append", default=None, help="Probe query; may be repeated")
+    searxng_health_parser.add_argument("--engines", default=None, help="Optional SearXNG engines allowlist for the probe")
+    searxng_health_parser.add_argument("--include-docker-logs", action="store_true", help="Include recent SearXNG container logs")
+    searxng_health_parser.add_argument("--container-name", default="searxng", help="Docker container name for optional log capture")
+    searxng_health_parser.add_argument("--log-tail", type=int, default=80, help="Docker log lines to include")
+
+    searxng_smoke_parser = subparsers.add_parser("searxng-engine-smoke", help="Run one-engine-at-a-time SearXNG engine diagnostics")
+    searxng_smoke_parser.add_argument("--endpoint", default=None, help="SearXNG endpoint to test; defaults to the first configured endpoint")
+    searxng_smoke_parser.add_argument("--engines", default=None, help="Comma-separated engine names to test")
+    searxng_smoke_parser.add_argument("--query", action="append", default=None, help="Smoke query; may be repeated")
+    searxng_smoke_parser.add_argument("--max-queries", type=int, default=None, help="Optional cap on queries per engine")
+    searxng_smoke_parser.add_argument("--delay-ms", type=int, default=None, help="Optional delay between probes")
+    searxng_smoke_parser.add_argument("--output-path", default=None, help="Optional JSON report output path")
+
     subparsers.add_parser("doctor", help="Report effective crawler settings, env resolution, provider reachability, and worker liveness")
 
     baseline_parser = subparsers.add_parser("system-baseline", help="Capture a live baseline snapshot for accuracy, queue state, and provider health")
@@ -282,6 +315,50 @@ def main() -> None:
             output_path=args.output_path,
             delay_ms=args.delay_ms,
         )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "refresh-school-evidence":
+        result = service.refresh_school_evidence(
+            limit=args.limit,
+            reason=args.reason,
+            fraternity_slug=args.fraternity_slug,
+            school=args.school,
+            dry_run=args.dry_run,
+            output_path=args.output_path,
+            run_preflight=not args.skip_preflight,
+            max_seconds=None if args.max_seconds == 0 else args.max_seconds,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "searxng-health":
+        result = service.searxng_health(
+            queries=args.query,
+            engines=args.engines,
+            include_docker_logs=args.include_docker_logs,
+            container_name=args.container_name,
+            log_tail=args.log_tail,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+    if args.command == "searxng-engine-smoke":
+        engines = [item.strip() for item in str(args.engines or "").split(",") if item.strip()] if args.engines else None
+        result = service.searxng_engine_smoke(
+            endpoint=args.endpoint,
+            engines=engines,
+            queries=args.query,
+            max_queries=args.max_queries,
+            delay_ms=args.delay_ms,
+        )
+        if args.output_path:
+            from pathlib import Path
+
+            path = Path(args.output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+            result["outputPath"] = str(path)
         print(json.dumps(result, indent=2, default=str))
         return
 

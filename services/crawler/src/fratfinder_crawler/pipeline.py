@@ -22,11 +22,14 @@ from fratfinder_crawler.field_job_support import (
     job_has_canonical_active_status,
     job_has_existing_instagram_support,
     job_supporting_page_ready,
+    safe_school_name_repair_candidates,
+    school_identity_requires_repair_before_match,
 )
 from fratfinder_crawler.field_jobs import FIELD_JOB_FIND_EMAIL, FIELD_JOB_FIND_WEBSITE, FieldJobEngine
 from fratfinder_crawler.http.client import HttpClient
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.normalization import classify_chapter_validity
+from fratfinder_crawler.school_verification import cached_school_verification_is_claimable
 from fratfinder_crawler.search import SearchClient, SearchUnavailableError
 from fratfinder_crawler.models import (
     FIELD_JOB_FIND_INSTAGRAM,
@@ -50,6 +53,13 @@ from fratfinder_crawler.provider_catalog import (
     normalize_free_provider_order,
     provider_names,
 )
+from fratfinder_crawler.search.searxng_health import (
+    effective_searxng_engines,
+    probe_searxng_endpoint,
+    run_searxng_engine_smoke as run_raw_searxng_engine_smoke,
+    run_searxng_health as run_raw_searxng_health,
+    searxng_endpoints_from_settings,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +72,39 @@ _SUPPORTED_GRAPH_DURABILITY_MODES = {"exit", "async", "sync"}
 class CrawlService:
     def __init__(self, settings: Settings):
         self._settings = settings
+        self._search_preflight_cache: dict[str, tuple[float, dict[str, object]]] = {}
+
+    def _heartbeat_worker_phase(
+        self,
+        worker_id: str | None,
+        *,
+        phase: str,
+        lease_seconds: int,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        if not worker_id:
+            return
+        try:
+            with get_connection(self._settings) as connection:
+                request_repository = RequestGraphRepository(connection)
+                if hasattr(request_repository, "update_worker_phase"):
+                    request_repository.update_worker_phase(
+                        worker_id,
+                        phase=phase,
+                        lease_seconds=lease_seconds,
+                        metadata=metadata,
+                    )
+                else:  # pragma: no cover - compatibility with test doubles
+                    request_repository.heartbeat_worker_process(worker_id, lease_seconds=lease_seconds)
+        except Exception as exc:  # pragma: no cover - diagnostics must not stop work
+            log_event(
+                LOGGER,
+                "field_job_worker_phase_heartbeat_failed",
+                level=logging.WARNING,
+                worker_id=worker_id,
+                phase=phase,
+                error=str(exc),
+            )
 
     def run(
         self,
@@ -213,6 +256,7 @@ class CrawlService:
         try:
             with get_connection(self._settings) as connection:
                 request_repository = RequestGraphRepository(connection)
+                request_repository.expire_stale_worker_processes("request")
                 request_repository.upsert_worker_process(
                     worker_id=self._settings.crawler_v3_request_worker_id,
                     workload_lane="request",
@@ -387,6 +431,7 @@ class CrawlService:
         try:
             with get_connection(self._settings) as connection:
                 request_repository = RequestGraphRepository(connection)
+                request_repository.expire_stale_worker_processes("contact_resolution")
                 request_repository.upsert_worker_process(
                     worker_id=worker_id,
                     workload_lane="contact_resolution",
@@ -396,10 +441,19 @@ class CrawlService:
                         "runtimeMode": effective_runtime_mode,
                         "graphDurability": effective_graph_durability,
                         "workerType": "field_job_supervisor",
+                        "phase": "starting",
+                        "phaseStartedAt": _utc_now_iso(),
+                        "lastHeartbeatAt": _utc_now_iso(),
                     },
                 )
 
             while True:
+                self._heartbeat_worker_phase(
+                    worker_id,
+                    phase="polling",
+                    lease_seconds=lease_seconds,
+                    metadata={"runtimeMode": effective_runtime_mode, "graphDurability": effective_graph_durability},
+                )
                 with get_connection(self._settings) as connection:
                     repository = CrawlerRepository(connection)
                     request_repository = RequestGraphRepository(connection)
@@ -412,6 +466,16 @@ class CrawlService:
                     idle_cycles += 1
                     if once or len(summaries) >= batch_limit:
                         break
+                    self._heartbeat_worker_phase(
+                        worker_id,
+                        phase="sleeping",
+                        lease_seconds=lease_seconds,
+                        metadata={
+                            "queueCounts": queue_counts,
+                            "idleCycles": idle_cycles,
+                            "sleepSeconds": effective_poll_seconds,
+                        },
+                    )
                     time.sleep(effective_poll_seconds)
                     continue
 
@@ -422,11 +486,20 @@ class CrawlService:
                     run_preflight=run_preflight,
                     runtime_mode=effective_runtime_mode,
                     graph_durability=effective_graph_durability,
+                    worker_phase_id=worker_id,
                 )
                 summaries.append(summary)
                 with get_connection(self._settings) as connection:
                     request_repository = RequestGraphRepository(connection)
-                    request_repository.heartbeat_worker_process(worker_id, lease_seconds=lease_seconds)
+                    if hasattr(request_repository, "update_worker_phase"):
+                        request_repository.update_worker_phase(
+                            worker_id,
+                            phase="polling",
+                            lease_seconds=lease_seconds,
+                            metadata={"lastBatchSummary": _compact_field_job_batch_summary(summary)},
+                        )
+                    else:  # pragma: no cover
+                        request_repository.heartbeat_worker_process(worker_id, lease_seconds=lease_seconds)
                 if once:
                     break
         finally:
@@ -1758,12 +1831,19 @@ class CrawlService:
                 and website_field_state not in {"", "missing", "low_confidence"}
             )
             has_dependency_support = _job_supporting_page_ready(job)
+            existing_reason_code = ""
+            if isinstance(job.payload.get("contactResolution"), dict):
+                existing_reason_code = str((job.payload.get("contactResolution") or {}).get("reasonCode") or "").strip()
+            if not existing_reason_code:
+                existing_reason_code = str(job.blocked_reason or "").strip()
+            is_status_dependency_blocked = existing_reason_code in _STATUS_DEPENDENCY_REASON_FAMILY
             if (
                 decision.validity_class == "canonical_valid"
                 and job.field_name == FIELD_JOB_FIND_EMAIL
                 and bool(getattr(self._settings, "crawler_search_require_confident_website_for_email", True))
                 and not has_confident_website
                 and not has_dependency_support
+                and not is_status_dependency_blocked
             ):
                 has_pending_website_job = repository.has_pending_field_job(job.chapter_id, FIELD_JOB_FIND_WEBSITE)
                 reason_code = "dependency_wait" if has_pending_website_job else "website_required"
@@ -1803,6 +1883,66 @@ class CrawlService:
                     current_reason_code = str((job.payload.get("contactResolution") or {}).get("reasonCode") or "").strip()
                 if not current_reason_code:
                     current_reason_code = str(job.blocked_reason or "").strip()
+                current_reason_code = _refine_status_dependency_reason(repository, job, current_reason_code)
+                provider_blocking_reasons = {"provider_degraded", "transient_network", "provider_low_signal"}
+                dependency_blocking_reasons = {
+                    "dependency_wait",
+                    "website_required",
+                    "status_dependency_unmet",
+                    "status_no_decision",
+                    "status_unknown",
+                    "status_review_required",
+                    "status_unresolved",
+                    "status_evidence_refresh_required",
+                    "school_evidence_missing",
+                }
+                if (
+                    job.field_name == FIELD_JOB_VERIFY_SCHOOL
+                    and current_queue_state == "actionable"
+                    and not current_reason_code
+                ):
+                    needs_repair = school_identity_requires_repair_before_match(job, next_claim_attempt=True)
+                    has_cached_school_evidence = False if needs_repair else _job_has_cached_school_verification_evidence(repository, job)
+                    if needs_repair or not has_cached_school_evidence:
+                        next_queue_state = "blocked_repairable" if needs_repair else "blocked_dependency"
+                        reason_code = "identity_semantically_incomplete" if needs_repair else "school_evidence_missing"
+                        repository.patch_queued_field_job(
+                            job.id,
+                            payload_patch={
+                                "queueTriage": {
+                                    "outcome": "isolate_school_identity_repair" if needs_repair else "defer_school_match_until_cached_evidence",
+                                    "validityClass": decision.validity_class,
+                                    **({"repairReason": reason_code} if needs_repair else {}),
+                                },
+                                "contactResolution": {
+                                    "queueState": next_queue_state,
+                                    "validityClass": decision.validity_class,
+                                    "reasonCode": reason_code,
+                                },
+                            },
+                            status="queued",
+                            scheduled_delay_seconds=max(
+                                int(getattr(self._settings, "crawler_search_transient_long_cooldown_seconds", 900)),
+                                int(getattr(self._settings, "crawler_search_dependency_wait_seconds", 300)),
+                            ),
+                            last_error=(
+                                "Deferred school-match attempt until school identity is repaired"
+                                if needs_repair
+                                else "Deferred school-match attempt until cached official school evidence is available"
+                            ),
+                            terminal_failure=False,
+                        )
+                        if needs_repair:
+                            triage_summary["repairIsolated"] = int(triage_summary["repairIsolated"]) + 1
+                        else:
+                            triage_summary["dependencyJobsLeftBlocked"] = int(triage_summary["dependencyJobsLeftBlocked"]) + 1
+                            triage_summary["dependencyDeferred"] = int(triage_summary["dependencyDeferred"]) + 1
+                        repair_summary["reconciledHistorical"] += 1
+                        continue
+                if current_queue_state == "actionable" and current_reason_code in provider_blocking_reasons:
+                    current_queue_state = "blocked_provider"
+                elif current_queue_state == "actionable" and current_reason_code in dependency_blocking_reasons:
+                    current_queue_state = "blocked_dependency"
                 if (
                     current_queue_state == "actionable"
                     and not _preflight_snapshot_is_healthy(preflight_snapshot)
@@ -1822,16 +1962,29 @@ class CrawlService:
                     "dependency_wait",
                     "website_required",
                     "status_dependency_unmet",
+                    "status_no_decision",
+                    "status_unknown",
+                    "status_review_required",
+                    "status_unresolved",
+                    "status_evidence_refresh_required",
+                    "school_evidence_missing",
                 }:
                     can_reactivate = False
-                    if current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}:
+                    if current_reason_code in provider_blocking_reasons:
                         triage_summary["providerRetryCandidatesConsidered"] = int(triage_summary["providerRetryCandidatesConsidered"]) + 1
                         can_reactivate = _preflight_snapshot_is_healthy(preflight_snapshot) or _job_is_degraded_authoritative_candidate(repository, job)
-                    elif current_reason_code == "status_dependency_unmet" and job.field_name == FIELD_JOB_FIND_INSTAGRAM:
+                    elif current_reason_code in {"status_dependency_unmet", "status_no_decision"} and job.field_name == FIELD_JOB_FIND_INSTAGRAM:
                         can_reactivate = (
-                            job_has_canonical_active_status(job)
+                            _job_has_active_status_decision(repository, job)
+                            or job_has_canonical_active_status(job)
                             or job_has_existing_instagram_support(job, repository)
                         )
+                    elif current_reason_code in {"status_dependency_unmet", "status_no_decision"}:
+                        can_reactivate = _job_has_active_status_decision(repository, job)
+                    elif current_reason_code in {"status_review_required", "status_unresolved", "status_unknown", "status_evidence_refresh_required"}:
+                        can_reactivate = False
+                    elif current_reason_code == "school_evidence_missing" and job.field_name == FIELD_JOB_VERIFY_SCHOOL:
+                        can_reactivate = _job_has_cached_school_verification_evidence(repository, job)
                     else:
                         can_reactivate = _job_supporting_page_ready(job) or _job_has_reusable_official_school_evidence(repository, job)
                     if can_reactivate:
@@ -1840,7 +1993,7 @@ class CrawlService:
                             triage_summary["providerRetryCandidatesAdmitted"] = int(triage_summary["providerRetryCandidatesAdmitted"]) + 1
                         else:
                             triage_summary["dependencyReactivatedFromExistingSupport"] = int(triage_summary["dependencyReactivatedFromExistingSupport"]) + 1
-                    elif current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}:
+                    elif current_reason_code in provider_blocking_reasons:
                         next_queue_state = "blocked_provider"
                         triage_summary["providerRetryCandidatesSkipped"] = int(triage_summary["providerRetryCandidatesSkipped"]) + 1
                     else:
@@ -1851,7 +2004,7 @@ class CrawlService:
                             int(getattr(self._settings, "crawler_search_transient_long_cooldown_seconds", 900)),
                             int(getattr(self._settings, "crawler_search_dependency_wait_seconds", 300)),
                         )
-                        if current_reason_code in {"provider_degraded", "transient_network", "provider_low_signal"}
+                        if current_reason_code in provider_blocking_reasons
                         else None
                     )
                     last_error = "" if can_reactivate else None
@@ -1874,7 +2027,15 @@ class CrawlService:
                     terminal_failure=False,
                 )
                 triage_summary["actionableRetained"] = int(triage_summary["actionableRetained"]) + 1
-                if next_queue_state == "blocked_dependency" and current_reason_code in {"dependency_wait", "website_required", "status_dependency_unmet"}:
+                if next_queue_state == "blocked_dependency" and current_reason_code in {
+                    "dependency_wait",
+                    "website_required",
+                    "status_dependency_unmet",
+                    "status_no_decision",
+                    "status_unknown",
+                    "status_evidence_refresh_required",
+                    "school_evidence_missing",
+                }:
                     triage_summary["dependencyDeferred"] = int(triage_summary["dependencyDeferred"]) + 1
                     if job.field_name in {FIELD_JOB_FIND_EMAIL, FIELD_JOB_VERIFY_WEBSITE, FIELD_JOB_FIND_INSTAGRAM}:
                         missing_fields: list[str] = []
@@ -2253,11 +2414,13 @@ class CrawlService:
         runtime_mode: str | None = None,
         graph_durability: str | None = None,
         validate_existing_instagram: bool = False,
+        worker_phase_id: str | None = None,
     ) -> dict[str, object]:
         self._assert_live_runtime_configuration()
         effective_workers = workers or self._settings.crawler_field_job_max_workers
         effective_runtime_mode = self._resolve_field_job_runtime_mode(runtime_mode)
         effective_graph_durability = self._resolve_field_job_graph_durability(graph_durability)
+        lease_seconds = max(30, int(self._settings.crawler_field_job_worker_lease_seconds))
         degraded_mode = False
         preflight_enabled = self._settings.crawler_search_preflight_enabled if run_preflight is None else run_preflight
         preflight_snapshot: dict[str, object] | None = None
@@ -2265,6 +2428,13 @@ class CrawlService:
 
         stale_jobs_recovered = 0
         stale_graph_runs_recovered = 0
+        failed_job_recovery_summary: dict[str, int] = {
+            "recovered": 0,
+            "actionable": 0,
+            "blocked_provider": 0,
+            "blocked_dependency": 0,
+            "blocked_repairable": 0,
+        }
         triage_summary: dict[str, int | bool] = {
             "triaged": 0,
             "invalidCancelled": 0,
@@ -2310,6 +2480,13 @@ class CrawlService:
             stale_jobs_recovered = repository.reconcile_stale_field_jobs(
                 self._settings.crawler_field_job_stale_claim_minutes
             )
+            recover_failed_field_jobs = getattr(repository, "recover_failed_field_jobs", None)
+            if callable(recover_failed_field_jobs):
+                failed_job_recovery_summary = recover_failed_field_jobs(
+                    limit=max(25, min(limit * 5, 250)),
+                    source_slug=source_slug,
+                    field_name=field_name,
+                )
             if repository.field_job_graph_tables_ready():
                 stale_graph_runs_recovered = repository.reconcile_stale_field_job_graph_runs(
                     self._settings.crawler_field_job_graph_run_stale_minutes
@@ -2323,11 +2500,12 @@ class CrawlService:
             ):
                 field_job_worker_recoveries_started = 1
 
-        if stale_jobs_recovered or stale_graph_runs_recovered:
+        if stale_jobs_recovered or stale_graph_runs_recovered or failed_job_recovery_summary.get("recovered"):
             log_event(
                 LOGGER,
                 "field_job_stale_runtime_state_reconciled",
                 stale_jobs_recovered=stale_jobs_recovered,
+                failed_jobs_recovered=failed_job_recovery_summary,
                 stale_graph_runs_recovered=stale_graph_runs_recovered,
                 stale_claim_minutes=self._settings.crawler_field_job_stale_claim_minutes,
                 stale_graph_run_minutes=self._settings.crawler_field_job_graph_run_stale_minutes,
@@ -2336,6 +2514,12 @@ class CrawlService:
             )
 
         if preflight_enabled and self._settings.crawler_search_enabled:
+            self._heartbeat_worker_phase(
+                worker_phase_id,
+                phase="preflight",
+                lease_seconds=lease_seconds,
+                metadata={"limit": limit, "workers": effective_workers},
+            )
             preflight_snapshot = self.search_preflight()
             healthy = bool(preflight_snapshot.get("healthy", False))
             if not healthy:
@@ -2367,6 +2551,7 @@ class CrawlService:
                     }
                     aggregate.update(_field_job_batch_delta_payload(before_metrics, before_metrics, processed=0))
                     aggregate["stale_jobs_recovered"] = stale_jobs_recovered
+                    aggregate["failed_jobs_recovered"] = failed_job_recovery_summary
                     aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
                     aggregate["queue_triage"] = triage_summary
                     aggregate["chapter_repair"] = repair_summary
@@ -2388,6 +2573,12 @@ class CrawlService:
         if policy_pack.get("worker_cap") is not None:
             effective_workers = max(1, min(effective_workers, int(policy_pack["worker_cap"])))
 
+        self._heartbeat_worker_phase(
+            worker_phase_id,
+            phase="triage",
+            lease_seconds=lease_seconds,
+            metadata={"limit": limit, "workers": effective_workers, "degradedMode": degraded_mode},
+        )
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
             triage_summary, repair_summary = self._reconcile_field_job_queue(
@@ -2438,6 +2629,7 @@ class CrawlService:
             }
             aggregate.update(_field_job_batch_delta_payload(before_metrics, before_metrics, processed=0))
             aggregate["stale_jobs_recovered"] = stale_jobs_recovered
+            aggregate["failed_jobs_recovered"] = failed_job_recovery_summary
             aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
             log_event(
                 LOGGER,
@@ -2454,6 +2646,12 @@ class CrawlService:
             )
             return aggregate
 
+        self._heartbeat_worker_phase(
+            worker_phase_id,
+            phase="claiming",
+            lease_seconds=lease_seconds,
+            metadata={"limit": limit, "workers": len(worker_limits), "degradedMode": degraded_mode},
+        )
         supervisor = FieldJobSupervisorGraphRuntime(
             worker_limits=worker_limits,
             runtime_mode=effective_runtime_mode,
@@ -2474,8 +2672,20 @@ class CrawlService:
                 validate_existing_instagram=validate_existing_instagram,
             ),
         )
+        self._heartbeat_worker_phase(
+            worker_phase_id,
+            phase="executing",
+            lease_seconds=lease_seconds,
+            metadata={"limit": limit, "workers": len(worker_limits), "degradedMode": degraded_mode},
+        )
         aggregate = supervisor.run()
 
+        self._heartbeat_worker_phase(
+            worker_phase_id,
+            phase="aggregating",
+            lease_seconds=lease_seconds,
+            metadata={"limit": limit, "workers": len(worker_limits), "lastBatchSummary": _compact_field_job_batch_summary(aggregate)},
+        )
         with get_connection(self._settings) as connection:
             after_metrics = CrawlerRepository(connection).get_accuracy_recovery_metrics()
 
@@ -2485,6 +2695,7 @@ class CrawlService:
         )
         aggregate.update(_field_job_batch_delta_payload(before_metrics, after_metrics, processed=int(aggregate.get("processed", 0) or 0)))
         aggregate["stale_jobs_recovered"] = stale_jobs_recovered
+        aggregate["failed_jobs_recovered"] = failed_job_recovery_summary
         aggregate["stale_graph_runs_recovered"] = stale_graph_runs_recovered
         aggregate["queue_triage"] = triage_summary
         aggregate["chapter_repair"] = repair_summary
@@ -2546,6 +2757,10 @@ class CrawlService:
             "mid_batch_provider_reorders": 0,
             "degraded_authoritative_claimed": 0,
             "verify_school_cache_hit": 0,
+            "verify_school_status_decision_hit": 0,
+            "verify_school_activity_cache_hit": 0,
+            "verify_school_school_policy_hit": 0,
+            "verify_school_evidence_missing": 0,
             "verify_school_official_url_reused": 0,
             "verify_school_provider_search_attempted": 0,
             "preflight_probe_queries": [],
@@ -2586,10 +2801,24 @@ class CrawlService:
                     "workerIndex": worker_index,
                     "totalWorkers": total_workers,
                     "degradedMode": current_degraded_mode,
+                    "phase": "starting",
+                    "phaseStartedAt": _utc_now_iso(),
+                    "lastHeartbeatAt": _utc_now_iso(),
                 },
             )
             try:
                 while remaining > 0:
+                    self._heartbeat_worker_phase(
+                        worker_id,
+                        phase="claiming",
+                        lease_seconds=lease_seconds,
+                        metadata={
+                            "remaining": remaining,
+                            "workerIndex": worker_index,
+                            "totalWorkers": total_workers,
+                            "degradedMode": current_degraded_mode,
+                        },
+                    )
                     segment_limit = min(remaining, jobs_per_recheck) if recheck_enabled and not current_degraded_mode else remaining
                     max_search_pages = self._settings.crawler_search_max_pages_per_job
                     dependency_wait_seconds = self._settings.crawler_search_dependency_wait_seconds
@@ -2666,6 +2895,17 @@ class CrawlService:
                         enrichment_observations_enabled=self._settings.crawler_adaptive_enrichment_observations_enabled,
                         validate_existing_instagram=validate_existing_instagram,
                     )
+                    self._heartbeat_worker_phase(
+                        worker_id,
+                        phase="executing",
+                        lease_seconds=lease_seconds,
+                        metadata={
+                            "segmentLimit": segment_limit,
+                            "remaining": remaining,
+                            "workerIndex": worker_index,
+                            "totalWorkers": total_workers,
+                        },
+                    )
                     result = self._run_field_job_runtime(
                         repository=repository,
                         engine=engine,
@@ -2678,7 +2918,17 @@ class CrawlService:
                     )
                     result.update(engine.consume_last_batch_metrics())
                     aggregate = _merge_field_job_chunk_results(aggregate, result)
-                    request_repository.heartbeat_worker_process(worker_id, lease_seconds=lease_seconds)
+                    self._heartbeat_worker_phase(
+                        worker_id,
+                        phase="aggregating",
+                        lease_seconds=lease_seconds,
+                        metadata={
+                            "remaining": remaining,
+                            "lastBatchSummary": _compact_field_job_batch_summary(result),
+                            "workerIndex": worker_index,
+                            "totalWorkers": total_workers,
+                        },
+                    )
                     handled = int(result.get("processed", 0) or 0) + int(result.get("requeued", 0) or 0) + int(result.get("failed_terminal", 0) or 0)
                     if handled <= 0:
                         break
@@ -2780,6 +3030,27 @@ class CrawlService:
         query_pool = _SEARCH_PREFLIGHT_QUERIES
         probe_count = max(1, min(len(query_pool), probes or self._settings.crawler_search_preflight_probe_count))
         selected_queries = query_pool[:probe_count]
+        cache_ttl = max(0, int(getattr(self._settings, "crawler_search_preflight_cache_ttl_seconds", 0) or 0))
+        cache_key = json.dumps(
+            {
+                "probes": probe_count,
+                "queries": selected_queries,
+                "provider": self._settings.crawler_search_provider,
+                "order": _provider_order_from_settings(self._settings),
+                "searxngEndpoints": _searxng_endpoints_from_settings(self._settings),
+                "searxngEngines": effective_searxng_engines(self._settings),
+            },
+            sort_keys=True,
+        )
+        if cache_ttl > 0:
+            cached = self._search_preflight_cache.get(cache_key)
+            if cached is not None:
+                expires_at, payload = cached
+                if expires_at > time.monotonic():
+                    cached_payload = dict(payload)
+                    cached_payload["cache_hit"] = True
+                    return cached_payload
+                self._search_preflight_cache.pop(cache_key, None)
         successes = 0
         probe_outcomes: list[dict[str, object]] = []
         provider_health: dict[str, dict[str, object]] = {}
@@ -2870,6 +3141,8 @@ class CrawlService:
         if not healthy:
             snapshot["reason"] = "probe_success_below_threshold"
         snapshot["provider_window_state"] = _provider_window_state_from_preflight(snapshot)
+        if cache_ttl > 0:
+            self._search_preflight_cache[cache_key] = (time.monotonic() + cache_ttl, dict(snapshot))
         log_event(LOGGER, "search_preflight_completed", **snapshot)
         return snapshot
 
@@ -2924,7 +3197,7 @@ class CrawlService:
                       COUNT(*)::int AS count,
                       CASE
                         WHEN COALESCE(queue_state, 'actionable') = 'blocked_repairable'
-                          OR COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                          OR COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'status_identity_repair_required', 'repair_exhausted')
                           THEN 'repair_backlog'
                         WHEN COALESCE(queue_state, 'actionable') = 'blocked_provider'
                           THEN 'provider_dependent_search'
@@ -2953,7 +3226,7 @@ class CrawlService:
                       COUNT(*)::int AS count,
                       CASE
                         WHEN COALESCE(queue_state, 'actionable') = 'blocked_repairable'
-                          OR COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                          OR COALESCE(NULLIF(BTRIM(blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'status_identity_repair_required', 'repair_exhausted')
                           THEN 'repair_backlog'
                         WHEN COALESCE(queue_state, 'actionable') = 'blocked_provider'
                           THEN 'provider_dependent_search'
@@ -2980,7 +3253,7 @@ class CrawlService:
                       COALESCE(s.slug, 'unknown') AS source_slug,
                       CASE
                         WHEN COALESCE(fj.queue_state, 'actionable') = 'blocked_repairable'
-                          OR COALESCE(NULLIF(BTRIM(fj.blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                          OR COALESCE(NULLIF(BTRIM(fj.blocked_reason), ''), 'unknown') IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'status_identity_repair_required', 'repair_exhausted')
                           THEN 'repair_backlog'
                         WHEN COALESCE(fj.queue_state, 'actionable') = 'blocked_provider'
                           THEN 'provider_dependent_search'
@@ -3023,23 +3296,17 @@ class CrawlService:
                     """
                 )
                 deferred_age_buckets = [dict(row) for row in cursor.fetchall()]
-                cursor.execute(
-                    """
-                    SELECT
-                      COUNT(*) FILTER (
-                        WHERE status = 'active'
-                          AND workload_lane = 'contact_resolution'
-                          AND (lease_expires_at IS NULL OR lease_expires_at > NOW())
-                      )::int AS active_workers,
-                      COUNT(*) FILTER (
-                        WHERE workload_lane = 'contact_resolution'
-                          AND lease_expires_at IS NOT NULL
-                          AND lease_expires_at <= NOW()
-                      )::int AS stale_workers
-                    FROM worker_processes
-                    """
+                worker_process_stats_getter = getattr(repository, "get_field_job_worker_process_stats", None)
+                field_worker_processes = (
+                    worker_process_stats_getter("contact_resolution")
+                    if callable(worker_process_stats_getter)
+                    else {
+                        "active_workers": 0,
+                        "stale_workers": 0,
+                        "active_worker_phases": [],
+                        "phase_counts": {},
+                    }
                 )
-                field_worker_processes = dict(cursor.fetchone() or {})
                 cursor.execute(
                     """
                     SELECT
@@ -3595,8 +3862,8 @@ class CrawlService:
         warnings.extend(blocking_issues)
 
         queue: dict[str, int] = {}
-        field_workers: dict[str, int] = {}
-        request_workers: dict[str, int] = {}
+        field_workers: dict[str, object] = {}
+        request_workers: dict[str, object] = {}
         with get_connection(self._settings) as connection:
             repository = CrawlerRepository(connection)
             queue = repository.get_field_job_queue_counts()
@@ -3611,6 +3878,13 @@ class CrawlService:
                 "searchProvider": self._settings.crawler_search_provider,
                 "searchProviderOrderFree": _provider_order_from_settings(self._settings),
                 "automaticChainProviders": _automatic_provider_order_from_settings(self._settings),
+                "searxngEndpoints": _searxng_endpoints_from_settings(self._settings),
+                "searxngEngines": effective_searxng_engines(self._settings),
+                "searxngMaxInFlight": self._settings.crawler_search_searxng_max_in_flight,
+                "searxngMinIntervalMs": self._settings.crawler_search_searxng_min_interval_ms,
+                "searxngBackoffSeconds": self._settings.crawler_search_searxng_backoff_seconds,
+                "searchResultCacheTtlSeconds": self._settings.crawler_search_result_cache_ttl_seconds,
+                "searchPreflightCacheTtlSeconds": self._settings.crawler_search_preflight_cache_ttl_seconds,
                 "optInOnlyProviders": [
                     name for name, metadata in PROVIDER_CATALOG.items() if not metadata.automatic_chain_allowed and not metadata.deprecated
                 ],
@@ -3639,6 +3913,42 @@ class CrawlService:
             },
             "warnings": warnings,
         }
+
+    def searxng_health(
+        self,
+        *,
+        queries: list[str] | None = None,
+        engines: str | None = None,
+        include_docker_logs: bool = False,
+        container_name: str = "searxng",
+        log_tail: int = 80,
+    ) -> dict[str, object]:
+        return run_raw_searxng_health(
+            self._settings,
+            queries=queries,
+            engines=engines,
+            include_docker_logs=include_docker_logs,
+            container_name=container_name,
+            log_tail=log_tail,
+        )
+
+    def searxng_engine_smoke(
+        self,
+        *,
+        endpoint: str | None = None,
+        engines: list[str] | None = None,
+        queries: list[str] | None = None,
+        max_queries: int | None = None,
+        delay_ms: int | None = None,
+    ) -> dict[str, object]:
+        return run_raw_searxng_engine_smoke(
+            self._settings,
+            endpoint=endpoint,
+            engines=engines,
+            queries=queries,
+            max_queries=max_queries,
+            delay_ms=delay_ms,
+        )
 
     def search_provider_smoke(
         self,
@@ -3684,6 +3994,155 @@ class CrawlService:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
             output["outputPath"] = str(path)
+        return output
+
+    def refresh_school_evidence(
+        self,
+        *,
+        limit: int = 50,
+        reason: str | None = None,
+        fraternity_slug: str | None = None,
+        school: str | None = None,
+        dry_run: bool = True,
+        output_path: str | None = None,
+        run_preflight: bool = True,
+        max_seconds: int | None = 180,
+    ) -> dict[str, object]:
+        started_at = time.monotonic()
+        reasons = [item.strip() for item in str(reason or "").split(",") if item.strip()] or [
+            "school_evidence_missing",
+            "status_no_decision",
+            "status_unknown",
+            "status_evidence_refresh_required",
+            "status_dependency_unmet",
+        ]
+        preflight_snapshot = self.search_preflight() if run_preflight and self._settings.crawler_search_enabled else None
+        degraded_mode = bool(preflight_snapshot is not None and not bool(preflight_snapshot.get("healthy", False)))
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            jobs = repository.list_field_jobs_for_school_evidence_refresh(
+                limit=limit,
+                reason_codes=reasons,
+                fraternity_slug=fraternity_slug,
+                school_name=school,
+            )
+
+        candidates = [
+            {
+                "fieldJobId": job.id,
+                "chapterId": job.chapter_id,
+                "chapterSlug": job.chapter_slug,
+                "fieldName": job.field_name,
+                "fraternitySlug": job.fraternity_slug,
+                "schoolName": job.university_name,
+                "blockedReason": job.blocked_reason,
+                "reasonCode": ((job.payload.get("contactResolution") or {}).get("reasonCode") if isinstance(job.payload.get("contactResolution"), dict) else None),
+            }
+            for job in jobs
+        ]
+        output: dict[str, object] = {
+            "capturedAt": _utc_now_iso(),
+            "dryRun": dry_run,
+            "selected": len(jobs),
+            "reasons": reasons,
+            "degradedMode": degraded_mode,
+            "preflightHealthy": None if preflight_snapshot is None else bool(preflight_snapshot.get("healthy", False)),
+            "processed": 0,
+            "decisionsWritten": 0,
+            "missingAfterRefresh": 0,
+            "stoppedReason": None,
+            "durationSeconds": 0.0,
+            "reconciled": {},
+            "candidates": candidates,
+        }
+        if dry_run or not jobs:
+            output["durationSeconds"] = round(time.monotonic() - started_at, 3)
+            if output_path:
+                path = Path(output_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
+                output["outputPath"] = str(path)
+            return output
+
+        with get_connection(self._settings) as connection:
+            repository = CrawlerRepository(connection)
+            current_search_settings = _search_settings_from_preflight(self._settings, preflight_snapshot)
+            engine = FieldJobEngine(
+                repository=repository,
+                logger=LOGGER,
+                worker_id="school-evidence-refresh",
+                base_backoff_seconds=self._settings.crawler_field_job_base_backoff_seconds,
+                source_slug=None,
+                field_name=FIELD_JOB_VERIFY_SCHOOL,
+                search_client=SearchClient(current_search_settings),
+                search_provider=self._settings.crawler_search_provider,
+                max_search_pages=max(1, min(self._settings.crawler_search_max_pages_per_job, 2)),
+                negative_result_cooldown_days=self._settings.crawler_search_negative_cooldown_days,
+                dependency_wait_seconds=self._settings.crawler_search_dependency_wait_seconds,
+                require_confident_website_for_email=self._settings.crawler_search_require_confident_website_for_email,
+                email_escape_on_provider_block=self._settings.crawler_search_email_escape_on_provider_block,
+                email_escape_min_website_failures=self._settings.crawler_search_email_escape_min_website_failures,
+                transient_short_retries=self._settings.crawler_search_transient_short_retries,
+                transient_long_cooldown_seconds=self._settings.crawler_search_transient_long_cooldown_seconds,
+                min_no_candidate_backoff_seconds=self._settings.crawler_search_min_no_candidate_backoff_seconds,
+                email_max_queries=1,
+                instagram_max_queries=1,
+                enable_school_initials=self._settings.crawler_search_enable_school_initials,
+                min_school_initial_length=self._settings.crawler_search_min_school_initial_length,
+                enable_compact_fraternity=self._settings.crawler_search_enable_compact_fraternity,
+                instagram_enable_handle_queries=False,
+                instagram_direct_probe_enabled=False,
+                greedy_collect_mode=False,
+                search_degraded_mode=degraded_mode,
+                adaptive_policy=None,
+                adaptive_runtime_mode="school_evidence_refresh",
+                adaptive_policy_mode="shadow",
+                adaptive_policy_version=self._settings.crawler_policy_version,
+                provider_window_state=_provider_window_state_from_preflight(preflight_snapshot, degraded_mode=degraded_mode),
+                enrichment_observations_enabled=False,
+                validate_existing_instagram=False,
+            )
+            for job in jobs:
+                if max_seconds is not None and max_seconds > 0 and (time.monotonic() - started_at) >= max_seconds:
+                    output["stoppedReason"] = "max_seconds_reached"
+                    break
+                try:
+                    decision = engine._build_status_decision(job)  # explicit refresh path; hot verify_school_match remains cache-only.
+                except Exception as exc:
+                    log_event(
+                        LOGGER,
+                        "school_evidence_refresh_job_failed",
+                        level=logging.WARNING,
+                        field_job_id=job.id,
+                        chapter_id=job.chapter_id,
+                        error=str(exc),
+                    )
+                    output["processed"] = int(output.get("processed", 0) or 0) + 1
+                    continue
+                output["processed"] = int(output.get("processed", 0) or 0) + 1
+                if decision is None:
+                    output["missingAfterRefresh"] = int(output.get("missingAfterRefresh", 0) or 0) + 1
+                else:
+                    output["decisionsWritten"] = int(output.get("decisionsWritten", 0) or 0) + 1
+
+            triage, repair = self._reconcile_field_job_queue(
+                repository,
+                source_slug=None,
+                field_name=None,
+                limit=max(1_000, max(1, limit) * 20),
+                policy_pack=self._resolve_field_job_policy_pack(None),
+                preflight_snapshot=preflight_snapshot,
+            )
+            output["reconciled"] = {"queueTriage": triage, "chapterRepair": repair}
+
+        output["durationSeconds"] = round(time.monotonic() - started_at, 3)
+        if output_path:
+            path = Path(output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
+            output["outputPath"] = str(path)
+        log_event(LOGGER, "school_evidence_refresh_finished", **{key: value for key, value in output.items() if key != "candidates"})
         return output
 
     def _run_search_provider_smoke_cohort(
@@ -3847,74 +4306,20 @@ def _persist_search_provider_attempts(
 
 
 def _searxng_endpoints_from_settings(settings: Settings) -> list[str]:
-    endpoints: list[str] = []
-    raw_multi = str(getattr(settings, "crawler_search_searxng_base_urls", "") or "").strip()
-    if raw_multi:
-        for token in raw_multi.split(","):
-            value = str(token or "").strip().rstrip("/")
-            if value and value not in endpoints:
-                endpoints.append(value)
-    single = str(getattr(settings, "crawler_search_searxng_base_url", "") or "").strip().rstrip("/")
-    if not endpoints and single:
-        endpoints.append(single)
-    return endpoints
+    return searxng_endpoints_from_settings(settings)
 
 
 def _probe_searxng_endpoint(endpoint: str, settings: Settings, *, timeout: float) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "baseUrl": endpoint,
-        "configured": True,
-        "reachable": False,
-        "jsonParseable": False,
-        "resultBearing": False,
-        "healthReason": "endpoint_down",
-        "latencyMs": None,
-        "httpStatus": None,
-    }
-    started_at = time.monotonic()
-    try:
-        response = requests.get(
-            f"{endpoint.rstrip('/')}/search",
-            params={"q": "fratfinder health check", "format": "json"},
-            timeout=timeout,
-            verify=settings.crawler_http_verify_ssl,
-        )
-        payload["httpStatus"] = int(getattr(response, "status_code", 0) or 0)
-        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
-        if response.status_code == 403:
-            payload["healthReason"] = "json_disabled"
-            return payload
-        response.raise_for_status()
-        body = response.json() if hasattr(response, "json") else json.loads(getattr(response, "text", "{}") or "{}")
-        payload["reachable"] = True
-        payload["jsonParseable"] = isinstance(body, dict)
-        results = body.get("results") if isinstance(body, dict) else None
-        payload["resultBearing"] = isinstance(results, list) and len(results) > 0
-        unresponsive_engines = body.get("unresponsive_engines") if isinstance(body, dict) else None
-        if isinstance(unresponsive_engines, list) and unresponsive_engines and not payload["resultBearing"]:
-            payload["healthReason"] = "engine_unresponsive"
-        elif payload["resultBearing"]:
-            payload["healthReason"] = "healthy"
-        else:
-            payload["healthReason"] = "empty_results"
-    except requests.Timeout:
-        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
-        payload["healthReason"] = "timeout"
-    except requests.ConnectionError as exc:
-        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
-        message = str(exc).lower()
-        payload["healthReason"] = "dns_error" if ("getaddrinfo" in message or "name or service not known" in message or "dns" in message) else "endpoint_down"
-        payload["detail"] = str(exc)
-    except requests.RequestException as exc:
-        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
-        payload["healthReason"] = "request_error_only"
-        payload["detail"] = str(exc)
-    except (ValueError, json.JSONDecodeError) as exc:
-        payload["latencyMs"] = max(0, int(round((time.monotonic() - started_at) * 1000.0)))
-        payload["reachable"] = True
-        payload["healthReason"] = "json_disabled"
-        payload["detail"] = str(exc)
-    return payload
+    probe = probe_searxng_endpoint(
+        endpoint=endpoint,
+        query="fratfinder",
+        engines=effective_searxng_engines(settings) or None,
+        timeout=timeout,
+        verify_ssl=settings.crawler_http_verify_ssl,
+        user_agent="FratFinderAI doctor/1.0",
+    ).as_dict()
+    probe["configured"] = True
+    return probe
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
@@ -4453,7 +4858,7 @@ def _empty_provider_health_bucket() -> dict[str, object]:
 def _record_provider_attempt_in_bucket(bucket: dict[str, object], attempt: dict[str, object]) -> None:
     bucket["attempts"] = int(bucket.get("attempts", 0) or 0) + 1
     status = str(attempt.get("status") or "")
-    if status == "success":
+    if status in {"success", "cache_hit"}:
         bucket["successes"] = int(bucket.get("successes", 0) or 0) + 1
     elif status == "unavailable":
         bucket["unavailable"] = int(bucket.get("unavailable", 0) or 0) + 1
@@ -4573,6 +4978,10 @@ def _merge_field_job_chunk_results(aggregate: dict[str, object], result: dict[st
         "mid_batch_provider_reorders",
         "degraded_authoritative_claimed",
         "verify_school_cache_hit",
+        "verify_school_status_decision_hit",
+        "verify_school_activity_cache_hit",
+        "verify_school_school_policy_hit",
+        "verify_school_evidence_missing",
         "verify_school_official_url_reused",
         "verify_school_provider_search_attempted",
     ):
@@ -4727,18 +5136,65 @@ def _job_has_reusable_official_school_evidence(repository: CrawlerRepository, jo
     return bool(str(url or "").strip())
 
 
+def _job_has_active_status_decision(repository: CrawlerRepository, job: FieldJob) -> bool:
+    getter = getattr(repository, "get_latest_chapter_status_decision", None)
+    if not callable(getter):
+        return False
+    try:
+        decision = getter(job.chapter_id)
+    except Exception:
+        return False
+    final_status = getattr(decision, "final_status", "") or ""
+    final_status_value = getattr(final_status, "value", final_status)
+    return str(final_status_value).strip().lower() == "active"
+
+
+_STATUS_DEPENDENCY_REASON_FAMILY = {
+    "status_dependency_unmet",
+    "status_no_decision",
+    "status_unknown",
+    "status_review_required",
+    "status_unresolved",
+    "status_evidence_refresh_required",
+}
+
+
+def _refine_status_dependency_reason(repository: CrawlerRepository, job: FieldJob, current_reason_code: str) -> str:
+    normalized = str(current_reason_code or "").strip()
+    if normalized not in _STATUS_DEPENDENCY_REASON_FAMILY:
+        return normalized
+    getter = getattr(repository, "get_latest_chapter_status_decision", None)
+    if not callable(getter):
+        return "status_no_decision" if normalized in {"status_dependency_unmet", "status_unresolved"} else normalized
+    try:
+        decision = getter(job.chapter_id)
+    except Exception:
+        decision = None
+    if decision is None:
+        return "status_no_decision" if normalized in {"status_dependency_unmet", "status_unresolved"} else normalized
+    final_status = getattr(decision, "final_status", "") or ""
+    final_status_value = str(getattr(final_status, "value", final_status) or "").strip().lower()
+    if final_status_value == "active":
+        return "status_dependency_unmet"
+    if final_status_value == "review":
+        return "status_review_required"
+    if final_status_value == "unknown":
+        return "status_unknown"
+    if final_status_value == "inactive":
+        return "status_review_required"
+    return normalized or "status_evidence_refresh_required"
+
+
+def _job_has_cached_school_verification_evidence(repository: CrawlerRepository, job: FieldJob) -> bool:
+    try:
+        return cached_school_verification_is_claimable(job=job, repository=repository)
+    except Exception:
+        return False
+
+
 def _job_is_degraded_authoritative_candidate(repository: CrawlerRepository, job: FieldJob) -> bool:
     if job.field_name == FIELD_JOB_VERIFY_SCHOOL:
-        cached_school_policy = repository.get_school_policy(job.university_name)
-        cached_chapter_activity = repository.get_chapter_activity(
-            fraternity_slug=job.fraternity_slug,
-            school_name=job.university_name,
-        )
-        return (
-            _cached_school_policy_is_decisive(cached_school_policy)
-            or _cached_chapter_activity_is_decisive(cached_chapter_activity)
-            or _job_has_reusable_official_school_evidence(repository, job)
-        )
+        return _job_has_cached_school_verification_evidence(repository, job)
     if job.field_name == FIELD_JOB_VERIFY_WEBSITE:
         return _job_supporting_page_ready(job)
     if job.field_name in {FIELD_JOB_FIND_INSTAGRAM, FIELD_JOB_FIND_EMAIL}:
@@ -4775,12 +5231,23 @@ def _field_job_queue_lane(*, queue_state: str | None, blocked_reason: str | None
     if normalized_state == "blocked_repairable" or normalized_reason in {
         "queued_for_entity_repair",
         "identity_semantically_incomplete",
+        "status_identity_repair_required",
         "repair_exhausted",
     }:
         return "repair_backlog"
     if normalized_reason in {"provider_degraded", "transient_network", "provider_low_signal"}:
         return "provider_dependent_search"
-    if normalized_reason in {"dependency_wait", "website_required"}:
+    if normalized_reason in {
+        "dependency_wait",
+        "website_required",
+        "status_dependency_unmet",
+        "status_no_decision",
+        "status_unknown",
+        "status_review_required",
+        "status_unresolved",
+        "status_evidence_refresh_required",
+        "school_evidence_missing",
+    }:
         return "dependency_blocked"
     if normalized_field in {FIELD_JOB_VERIFY_SCHOOL, FIELD_JOB_VERIFY_WEBSITE}:
         return "authoritative_resolution"
@@ -4791,7 +5258,7 @@ def _queue_health_payload(
     queue: dict[str, object],
     *,
     deferred_reason_breakdown: list[dict[str, object]],
-    field_worker_processes: dict[str, int],
+    field_worker_processes: dict[str, object],
     liveness_alert_poll_windows: int,
 ) -> dict[str, object]:
     queued_jobs = max(0, int(queue.get("queued_jobs", 0) or 0))
@@ -4900,6 +5367,21 @@ def _increment_repair_family_summary(summary: dict[str, int], repair_family: str
         return
     summary[key] = int(summary.get(key, 0) or 0) + int(amount or 0)
 
+
+def _compact_field_job_batch_summary(summary: dict[str, object] | None) -> dict[str, object]:
+    raw = dict(summary or {})
+    return {
+        "processed": int(raw.get("processed", 0) or 0),
+        "requeued": int(raw.get("requeued", 0) or 0),
+        "failedTerminal": int(raw.get("failed_terminal", raw.get("failedTerminal", 0)) or 0),
+        "runtimeModeUsed": str(raw.get("runtime_mode_used") or raw.get("runtimeModeUsed") or ""),
+        "providerDegradedDeferred": int(raw.get("provider_degraded_deferred", 0) or 0),
+        "dependencyWaitDeferred": int(raw.get("dependency_wait_deferred", 0) or 0),
+        "verifySchoolEvidenceMissing": int(raw.get("verify_school_evidence_missing", 0) or 0),
+        "verifySchoolProviderSearchAttempted": int(raw.get("verify_school_provider_search_attempted", 0) or 0),
+    }
+
+
 def _slugify(value: str) -> str:
     return "-".join(token for token in "".join(ch if ch.isalnum() else " " for ch in value.lower()).split())
 
@@ -4987,9 +5469,6 @@ _REPAIR_SCHOOL_PATTERNS = (
 
 def _classify_field_job_identity(job: FieldJob):
     repair_context_parts = [job.chapter_slug]
-    candidate_school = job.payload.get("candidateSchoolName")
-    if isinstance(candidate_school, str) and candidate_school.strip():
-        repair_context_parts.append(candidate_school)
     return classify_chapter_validity(
         ExtractedChapter(
             name=job.chapter_name,
@@ -5010,7 +5489,9 @@ def _infer_university_name_for_job(job: FieldJob, snippets: list[str]) -> str | 
     candidates: list[str] = []
     payload_candidate = job.payload.get("candidateSchoolName")
     if isinstance(payload_candidate, str) and payload_candidate.strip():
-        candidates.append(payload_candidate.strip())
+        candidates.extend(_repair_school_candidate_variants(payload_candidate))
+    if job.university_name:
+        candidates.extend(_repair_school_candidate_variants(job.university_name))
     for snippet in snippets[:20]:
         text = snippet.strip()
         if not text:
@@ -5019,7 +5500,7 @@ def _infer_university_name_for_job(job: FieldJob, snippets: list[str]) -> str | 
             for match in pattern.findall(text):
                 candidate = " ".join(str(match).split())
                 if 4 <= len(candidate) <= 96:
-                    candidates.append(candidate)
+                    candidates.extend(_repair_school_candidate_variants(candidate))
     seen: set[str] = set()
     deduped: list[str] = []
     for candidate in candidates:
@@ -5045,6 +5526,10 @@ def _infer_university_name_for_job(job: FieldJob, snippets: list[str]) -> str | 
         if decision.validity_class == "canonical_valid":
             return candidate
     return None
+
+
+def _repair_school_candidate_variants(value: object) -> list[str]:
+    return safe_school_name_repair_candidates(value)
 
 
 def _utc_now_iso() -> str:

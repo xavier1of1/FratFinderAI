@@ -4,6 +4,13 @@
 - Incremented the platform version to `3.0.3` across the root workspace, web app, crawler service, contracts package, and active surfaced version labels.
 
 ### Added
+- Added worker phase metadata for field-job workers (`polling`, `preflight`, `triage`, `claiming`, `executing`, `aggregating`, `sleeping`) so queue health can distinguish idle/polling workers from dead workers.
+- Added `refresh-school-evidence`, a bounded official-school evidence refresh CLI with dry-run, reason filters, output JSON, and wall-clock guarding so school-evidence unblockers run outside hot `verify_school_match`.
+- Added a cache-first `school_verification` resolver so `verify_school_match` can make deterministic decisions from candidate-school identity, status decisions, chapter-activity cache, and school-policy cache without provider search.
+- Added raw SearXNG operational diagnostics through `searxng-health` and `searxng-engine-smoke`, plus `docs/SystemReport/SEARXNG_HEALTH_INVESTIGATION_AND_STABILIZATION_2026-04-28.md` to capture endpoint/engine failure evidence.
+- Added additive search reliability tables in `infra/supabase/migrations/0036_search_provider_health_cache.sql` for future durable result caching, provider admission state, and preflight health snapshots.
+- Added Docker Compose `search` profile services for primary/rescue SearXNG endpoints and local operations notes in `infra/docker/searxng/README.md`.
+- Added `infra/supabase/migrations/0035_request_stage_promotion_recovery.sql` plus web/operator handling for the new `promotion_recovery_needed` request stage when crawls see chapter-like records but produce no promoted rows or enrichment work.
 - Added `infra/supabase/migrations/0027_school_policy_and_chapter_activity.sql` to introduce durable `school_greek_life_registry` and `fraternity_school_activity_cache` tables for campus policy and school-specific chapter activity validation.
 - Added a `purge_inactive_schools` request-graph stage plus crawler/UI state to expose school-policy and chapter-activity validation before contact enrichment is admitted.
 - Added precision helpers for campus policy, school chapter-list validation, site-scope classification, directory block matching, and Greek-string detection to support authoritative school/nationals-first validation.
@@ -19,6 +26,13 @@
   - `apps/web/src/lib/repositories/nationals-profile-repository.ts`
 
 ### Changed
+- School-name repair now uses a shared conservative normalizer for queue repair/reconciliation, including safe `At <school>` cleanup and status-suffix removal while rejecting generic shells such as `At The University`.
+- Field-job processing now performs a bounded recovery pass for known recoverable failed jobs before claiming work, restoring only the newest failed row per chapter/field and preserving typed provider/dependency/repair blockers instead of blindly making everything actionable.
+- Configured ordered SearXNG endpoint failover with primary/rescue URLs while keeping `max_in_flight=1`; later engine smoke showed the local `startpage` pin was suspended/CAPTCHA-blocked and should not be treated as smoke-approved until it recovers.
+- Queue reconciliation now splits generic `status_dependency_unmet` into actionable status reason families (`status_no_decision`, `status_unknown`, `status_review_required`, `status_evidence_refresh_required`, and `status_identity_repair_required`) without relaxing contact/status gates.
+- SearXNG requests are now paced, admission-controlled, endpoint-backoff protected, and eligible for short positive-result caching so repeated unhealthy engine windows do not get hammered by worker loops.
+- `doctor` now reports effective SearXNG endpoints, engine pins/profiles, pacing/admission settings, and endpoint-level health details.
+- Request source recovery now uses explicit target school/chapter context when present, so school-scoped runs can recover through school roster or chapter-context evidence before falling back to fraternity-only discovery.
 - Campus policy validation now runs from official school evidence only and reuses stored `unknown` results only when they came from a real official-school page, preventing stale or inconsistent legacy `unknown` rows from blocking fresh validation.
 - School-list validation now understands LSU-style tabbed scorecard layouts and follows strong same-host school links like `Community Scorecard` before making an inactive decision.
 - School matching is now stricter for `University of ...` names so wrong-school results like `Indiana University of Pennsylvania` do not count as `University of Pennsylvania`, while legitimate titles like `Theta Chi | University of Rhode Island` still match.
@@ -41,6 +55,21 @@
 - Candidate sanitization now rejects placeholder Instagram handles such as `instagram.com/node`, and the final demo-safety cleanup quarantines those deterministic artifacts plus cross-school `.edu` emails from chapter-specific national pages when they clearly do not match the target campus.
 
 ### Fixed
+- Fixed failed-job retry safety so PostgreSQL NUL-byte serialization failures, transient provider failures, and stale typed blockers can be retried without violating the active field-job uniqueness constraint.
+- Fixed remaining repository write boundaries so NUL bytes are stripped from school policy/activity cache rows, review items, generic evidence rows, inline enrichment payloads, provenance rows, and contact-provenance JSON.
+- Fixed worker phase heartbeat SQL typing so phase observability cannot crash LangGraph field-job workers, and made phase heartbeat writes diagnostic-only.
+- Fixed official status/evidence persistence so PostgreSQL NUL bytes are stripped from campus-status sources, zones, evidence rows, and decision traces before insert.
+- Fixed `verify_school_match` so normal field-job batches no longer run provider-backed official-school discovery, no longer treat generic `allowed` Greek-life policy as active chapter verification, and block cache misses as `school_evidence_missing`.
+- Fixed a `verify_school_match` hot-loop bottleneck where repeated low-confidence school identities and semantic shells such as `At The University` kept consuming the primary school-match lane instead of moving into the repair backlog.
+- Fixed queue triage for repeated `verify_school_match` retries so already-attempted school-match jobs without a persisted blocker are cooled into dependency/repair lanes before workers spend claim slots on them again.
+- Fixed production queue hygiene so blocked field jobs infer their lane from reason codes, legacy blocked rows receive default `blocked_reason` values, PostgreSQL NUL bytes are stripped at the repository boundary, and insufficient-school-data verification work stays dependency-blocked instead of becoming terminal failure noise.
+- Fixed SearXNG observability so JSON-disabled, endpoint-down, engine-unresponsive, empty-result, healthy, and healthy-degraded states are separated instead of being flattened into generic provider degradation.
+- Fixed SearXNG suspended/CAPTCHA engine handling so blocked upstream-engine payloads trigger endpoint cooldown and provider-specific `challenge_or_anomaly` / `rate_limited_429` diagnostics instead of being treated as ordinary query-level `engine_unresponsive` misses.
+- Fixed the field-job scheduler and status-gate loop so prerequisite work is claimed before contact enrichment, stale `blocked_reason` values are cleared when jobs become actionable, unresolved/review status decisions stay dependency-blocked instead of duplicating verification work, and managed search providers remain explicit opt-in rather than entering the automatic chain from configured keys alone.
+- Fixed `doctor` provider diagnostics so SearXNG reachability checks use bounded connect/read timeouts and avoid inherited proxy/environment behavior, preventing the ops report from hanging while still reporting endpoint health.
+- Fixed the request-graph source-quality boundary so snake-case discovery results such as `is_weak` are normalized before recovery decisions, preventing valid recovered sources from being treated as weak.
+- Fixed zero-promotion crawl completion semantics so records-seen/no-upsert runs no longer report success unless provisional chapter candidates are evaluated and either promoted, reviewed, or rejected.
+- Fixed queue triage so `candidateSchoolName` is treated as a repair hint for missing school identity, not enough evidence to keep a weak field job in the hot actionable lane.
 - Fixed a queue-oscillation bug in historical triage where already deferred canonical jobs were being reset back to `actionable`, causing provider- and dependency-backed jobs to thrash instead of cooling down.
 - Fixed the field-job claim/runtime path so the `require_confident_website_for_email` policy is respected consistently by both the main engine claim loop and the LangGraph runtime.
 - Fixed the stress-harness queue tail so repaired or exhausted chapters no longer leave stranded actionable email jobs when website discovery is still missing.
@@ -53,6 +82,43 @@
 - Fixed standalone fraternity-branded hosts such as chapter-owned `*.com` domains from being misclassified as official school-affiliation pages when the host also resembled a campus name.
 
 ### Validated
+- Validated SearXNG suspended-engine cooldown and local-env-isolated search tests with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_search_client.py services/crawler/src/fratfinder_crawler/tests/test_searxng_health.py -q`
+  The targeted suite reported `38 passed`; a reloaded live worker then processed `120` additional field jobs with `0` requeues, `0` terminal failures, and `verify_school_provider_search_attempted = 0`.
+- Validated failed-job recovery with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_repository_queue_state.py services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py -q`
+  - Two bounded live field-job runs using `process-field-jobs --limit 20 --workers 4 --runtime-mode langgraph_primary --graph-durability sync --run-preflight`
+  The two live runs recovered `196` stuck failed jobs safely, processed `40` jobs, produced `0` requeues and `0` terminal failures, kept `verify_school_provider_search_attempted = 0`, and left `nationals_only_contact_rows = 0`.
+- Validated queue-bottleneck fixes with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_repository_queue_state.py services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py services/crawler/src/fratfinder_crawler/tests/test_searxng_health.py services/crawler/src/fratfinder_crawler/tests/status/test_status_first_field_jobs.py`
+  - `python -m fratfinder_crawler.cli searxng-engine-smoke --engines brave,duckduckgo,karmasearch,bing,google,startpage,mojeek,qwant,wikidata,wikipedia --max-queries 2 --delay-ms 500`
+  - `python -m fratfinder_crawler.cli refresh-school-evidence --limit 10 --reason school_evidence_missing --max-seconds 180 --output-path docs/SystemReport/refresh_school_evidence_2026-04-28.json`
+  - `python -m fratfinder_crawler.cli process-field-jobs --limit 120 --workers 4 --runtime-mode langgraph_primary --graph-durability sync --run-preflight`
+- Validated school-match repair-lane routing with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py::test_verify_school_match_uses_authoritative_activity_when_candidate_school_missing services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py::test_verify_school_match_allows_first_low_confidence_school_attempt_to_use_authoritative_activity services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py::test_verify_school_match_routes_repeated_low_confidence_school_identity_to_repair_backlog services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py::test_verify_school_match_routes_placeholder_school_identity_to_repair_backlog services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py::test_verify_school_match_preserves_attempt_when_school_data_is_insufficient -q`
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_repository_queue_state.py services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py services/crawler/src/fratfinder_crawler/tests/test_search_client.py services/crawler/src/fratfinder_crawler/tests/test_discovery.py -q`
+- Validated the production queue hygiene pass with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_repository_queue_state.py services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py services/crawler/src/fratfinder_crawler/tests/test_search_client.py services/crawler/src/fratfinder_crawler/tests/test_discovery.py -q`
+  - `python -m fratfinder_crawler.cli doctor`
+  - `python -m fratfinder_crawler.cli search-preflight --probes 4`
+- Validated SearXNG stabilization with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_search_client.py services/crawler/src/fratfinder_crawler/tests/test_searxng_health.py services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py services/crawler/src/fratfinder_crawler/tests/test_repository_queue_state.py`
+  - `python -m fratfinder_crawler.cli searxng-health --query "delta chi chapter directory" --query "sigma chi official chapter directory" --include-docker-logs --log-tail 40`
+  - `python -m fratfinder_crawler.cli searxng-engine-smoke --engines startpage,mojeek,bing,google,duckduckgo,brave,qwant,aol,karmasearch --max-queries 4 --delay-ms 250`
+  - `python -m fratfinder_crawler.cli search-preflight --probes 4`
+  - `python -m fratfinder_crawler.cli doctor`
+  - `docker compose -f infra/docker/docker-compose.yml config --quiet`
+- Validated the queue-throughput recovery fix with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_search_client.py services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py services/crawler/src/fratfinder_crawler/tests/status/test_status_first_field_jobs.py services/crawler/src/fratfinder_crawler/tests/test_repository_queue_state.py`
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_search_client.py services/crawler/src/fratfinder_crawler/tests/test_pipeline_workers.py services/crawler/src/fratfinder_crawler/tests/status/test_status_first_field_jobs.py services/crawler/src/fratfinder_crawler/tests/test_repository_queue_state.py services/crawler/src/fratfinder_crawler/tests/test_config_runtime.py`
+  - `python -m fratfinder_crawler.cli doctor`
+  - `python -m fratfinder_crawler.cli process-field-jobs --limit 60 --workers 4 --runtime-mode langgraph_primary --graph-durability sync --run-preflight`
+  The bounded live batch improved from `0 processed / 60 requeued` before the scheduler-priority fix to `56 processed / 3 requeued / 1 failed_terminal`, with `nationals_only_contact_rows` remaining `0`.
+- Validated VT-style school-conditioned recovery and zero-promotion recovery behavior with:
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_request_graph_runtime.py services/crawler/src/fratfinder_crawler/tests/social/test_instagram_resolution.py services/crawler/src/fratfinder_crawler/tests/status services/crawler/src/fratfinder_crawler/tests/regression/test_historical_status_and_contact_failures.py -q`
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py -q`
+  - `python -m pytest services/crawler/src/fratfinder_crawler/tests -q`
+  - `pnpm.cmd --filter @fratfinder/web typecheck`
 - Validated school-policy and chapter-activity changes with:
   - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_field_jobs_engine.py -q`
   - `python -m pytest services/crawler/src/fratfinder_crawler/tests/test_precision_tools.py services/crawler/src/fratfinder_crawler/tests/test_request_graph_runtime.py -q`

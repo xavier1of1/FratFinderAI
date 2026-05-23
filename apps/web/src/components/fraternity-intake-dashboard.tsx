@@ -420,9 +420,9 @@ export function FraternityIntakeDashboard({
               </div>
 
               <div className="stageRail">
-                {["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "completed"].map((stage) => {
-                  const currentIndex = ["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "completed", "failed"].indexOf(selectedRequest.stage);
-                  const stepIndex = ["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "completed"].indexOf(stage);
+                {["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "promotion_recovery_needed", "completed"].map((stage) => {
+                  const currentIndex = ["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "promotion_recovery_needed", "completed", "failed"].indexOf(selectedRequest.stage);
+                  const stepIndex = ["discovery", "awaiting_confirmation", "crawl_run", "purge_inactive_schools", "enrichment", "promotion_recovery_needed", "completed"].indexOf(stage);
                   const isReached = currentIndex >= stepIndex;
                   return (
                     <div key={stage} className={`stageRailStep${selectedRequest.stage === stage ? " active" : ""}${isReached ? " reached" : ""}`}>
@@ -442,6 +442,13 @@ export function FraternityIntakeDashboard({
                       {" "}Review or replace the source URL below, then use <strong>Confirm</strong> to rerun the request.
                     </>
                   ) : null}
+                </div>
+              ) : null}
+
+              {selectedRequest.stage === "promotion_recovery_needed" ? (
+                <div className="benchmarkError" role="status">
+                  <strong>Promotion recovery needed.</strong>{" "}
+                  {selectedRequest.lastError ?? "The crawl saw chapter-like records, but none became canonical chapters or actionable enrichment jobs."}
                 </div>
               ) : null}
 

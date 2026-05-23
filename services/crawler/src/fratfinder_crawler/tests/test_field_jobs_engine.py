@@ -9,7 +9,6 @@ import requests
 
 from fratfinder_crawler.adaptive.policy import AdaptivePolicy
 from fratfinder_crawler.field_jobs import (
-    ActivityValidationDecision,
     CandidateMatch,
     FieldJobEngine,
     NationalsChapterEntry,
@@ -1315,21 +1314,94 @@ def test_verify_school_match_uses_authoritative_activity_when_candidate_school_m
     )
     repo = FakeRepository(jobs=[job], snippets_by_chapter={})
     engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
-    engine._get_or_resolve_school_policy = lambda _job: ActivityValidationDecision(school_policy_status="unknown")
-    engine._get_or_resolve_chapter_activity = lambda _job: ActivityValidationDecision(
+    repo.chapter_activities[("sigma-chi", "ohio state university")] = ChapterActivityRecord(
+        fraternity_slug="sigma-chi",
+        school_slug="ohio-state-university",
+        school_name="Ohio State University",
         chapter_activity_status="confirmed_active",
+        confidence=0.98,
         evidence_url="https://osu.edu/greek-life/chapters",
         evidence_source_type="official_school",
         reason_code="chapter_active",
-        source_snippet="Sigma Chi is listed as an active fraternity.",
-        confidence=0.98,
-        metadata={"decision": "confirmed_active"},
+        metadata={"decision": "confirmed_active", "sourceSnippet": "Sigma Chi is listed as an active fraternity."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
     )
 
     result = engine.process(limit=1)
 
     assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
     assert repo.completed[0][2]["university_name"] == "found"
+
+
+def test_verify_school_match_allows_first_low_confidence_school_attempt_to_use_authoritative_activity():
+    job = replace(
+        _job("verify_school_match", attempts=1, university_name="Ohio State University"),
+        payload={"sourceSlug": "sigma-chi-main"},
+        field_states={"university_name": "low_confidence"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+    repo.chapter_activities[("sigma-chi", "ohio state university")] = ChapterActivityRecord(
+        fraternity_slug="sigma-chi",
+        school_slug="ohio-state-university",
+        school_name="Ohio State University",
+        chapter_activity_status="confirmed_active",
+        confidence=0.98,
+        evidence_url="https://osu.edu/greek-life/chapters",
+        evidence_source_type="official_school",
+        reason_code="chapter_active",
+        metadata={"decision": "confirmed_active", "sourceSnippet": "Sigma Chi is listed as an active fraternity."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed[0][2]["university_name"] == "found"
+
+
+def test_verify_school_match_routes_repeated_low_confidence_school_identity_to_repair_backlog():
+    job = replace(
+        _job("verify_school_match", attempts=2, university_name="Arkansas State University"),
+        payload={"sourceSlug": "pi-kappa-alpha-main"},
+        field_states={"university_name": "low_confidence"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    def _unexpected_status_resolution(_job):
+        raise AssertionError("low-confidence retry should not enter provider-backed status resolution")
+
+    engine._get_or_resolve_status_decision = _unexpected_status_resolution
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.requeue_preserve_attempt_flags == [True]
+    contact_resolution = repo.requeue_payload_patches[0]["contactResolution"]
+    assert contact_resolution["queueState"] == "blocked_repairable"
+    assert contact_resolution["reasonCode"] == "identity_semantically_incomplete"
+
+
+def test_verify_school_match_routes_placeholder_school_identity_to_repair_backlog():
+    job = replace(
+        _job("verify_school_match", attempts=1, university_name="At The University"),
+        payload={"sourceSlug": "theta-chi-main"},
+        field_states={"university_name": "found"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    contact_resolution = repo.requeue_payload_patches[0]["contactResolution"]
+    assert contact_resolution["queueState"] == "blocked_repairable"
+    assert contact_resolution["reasonCode"] == "identity_semantically_incomplete"
 
 
 def test_verify_school_match_marks_inactive_when_authoritative_policy_banned():
@@ -1342,14 +1414,18 @@ def test_verify_school_match_marks_inactive_when_authoritative_policy_banned():
     )
     repo = FakeRepository(jobs=[job], snippets_by_chapter={})
     engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
-    engine._get_or_resolve_school_policy = lambda _job: ActivityValidationDecision(
-        school_policy_status="banned",
+    repo.school_policies["norwich university"] = SchoolPolicyRecord(
+        school_slug="norwich-university",
+        school_name="Norwich University",
+        greek_life_status="banned",
+        confidence=0.99,
         evidence_url="https://archives.norwich.edu/example.pdf",
         evidence_source_type="official_school",
         reason_code="school_policy_banned",
-        source_snippet="Fraternities are no longer fraternities by any definition.",
-        confidence=0.99,
-        metadata={"decision": "banned"},
+        metadata={"decision": "banned", "sourceSnippet": "Fraternities are no longer fraternities by any definition."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
     )
 
     result = engine.process(limit=1)
@@ -1358,7 +1434,64 @@ def test_verify_school_match_marks_inactive_when_authoritative_policy_banned():
     assert repo.inactive_applied[0]["reason_code"] == "school_policy_banned"
 
 
-def test_verify_school_match_uses_transient_network_when_authoritative_search_failed():
+def test_verify_school_match_allowed_policy_does_not_verify_chapter_activity():
+    job = replace(
+        _job("verify_school_match", university_name="Ohio State University"),
+        payload={"sourceSlug": "sigma-chi-main"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    repo.school_policies["ohio state university"] = SchoolPolicyRecord(
+        school_slug="ohio-state-university",
+        school_name="Ohio State University",
+        greek_life_status="allowed",
+        confidence=0.9,
+        evidence_url="https://osu.edu/greek-life",
+        evidence_source_type="official_school",
+        reason_code="school_policy_allowed",
+        metadata={"sourceSnippet": "Fraternity and Sorority Life recognizes Greek-letter organizations."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.completed_payloads[0]["status"] == "school_identity_verified_activity_unknown"
+    assert repo.completed[0][2] == {}
+    assert not repo.inactive_applied
+
+
+def test_verify_school_match_inactive_activity_cache_marks_inactive():
+    job = replace(
+        _job("verify_school_match", university_name="Ohio State University"),
+        payload={"sourceSlug": "sigma-chi-main"},
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    repo.chapter_activities[("sigma-chi", "ohio state university")] = ChapterActivityRecord(
+        fraternity_slug="sigma-chi",
+        school_slug="ohio-state-university",
+        school_name="Ohio State University",
+        chapter_activity_status="confirmed_inactive",
+        confidence=0.97,
+        evidence_url="https://osu.edu/greek-life/unrecognized",
+        evidence_source_type="official_school",
+        reason_code="fraternity_absent_from_official_school_list",
+        metadata={"sourceSnippet": "Sigma Chi is not recognized."},
+        last_verified_at="2026-04-08T00:00:00+00:00",
+        created_at="2026-04-08T00:00:00+00:00",
+        updated_at="2026-04-08T00:00:00+00:00",
+    )
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 1, "requeued": 0, "failed_terminal": 0}
+    assert repo.inactive_applied[0]["reason_code"] == "fraternity_absent_from_official_school_list"
+
+
+def test_verify_school_match_does_not_call_provider_backed_status_resolution_on_cache_miss():
     job = replace(
         _job("verify_school_match", university_name="Southern Methodist University"),
         payload={"sourceSlug": "delta-kappa-epsilon-main"},
@@ -1366,8 +1499,32 @@ def test_verify_school_match_uses_transient_network_when_authoritative_search_fa
     )
     repo = FakeRepository(jobs=[job], snippets_by_chapter={})
     engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
-    engine._get_or_resolve_school_policy = lambda _job: ActivityValidationDecision(school_policy_status="unknown")
-    engine._get_or_resolve_chapter_activity = lambda _job: ActivityValidationDecision(chapter_activity_status="unknown")
+
+    def _unexpected_status_resolution(_job):
+        raise AssertionError("verify_school_match should not build provider-backed status evidence")
+
+    def _unexpected_validation_documents(*args, **kwargs):
+        raise AssertionError("verify_school_match should not call provider-backed validation documents")
+
+    engine._get_or_resolve_status_decision = _unexpected_status_resolution
+    engine._build_validation_documents = _unexpected_validation_documents
+
+    result = engine.process(limit=1)
+
+    assert result == {"processed": 0, "requeued": 1, "failed_terminal": 0}
+    assert repo.requeue_payload_patches[0]["contactResolution"]["queueState"] == "blocked_dependency"
+    assert repo.requeue_payload_patches[0]["contactResolution"]["reasonCode"] == "school_evidence_missing"
+    assert engine.consume_last_batch_metrics()["verify_school_provider_search_attempted"] == 0
+
+
+def test_verify_school_match_uses_school_evidence_missing_when_no_cached_evidence_exists():
+    job = replace(
+        _job("verify_school_match", university_name="Southern Methodist University"),
+        payload={"sourceSlug": "delta-kappa-epsilon-main"},
+        fraternity_slug="delta-kappa-epsilon",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
     engine._search_errors_encountered = True
     engine._search_queries_attempted = 2
     engine._search_queries_failed = 2
@@ -1377,7 +1534,23 @@ def test_verify_school_match_uses_transient_network_when_authoritative_search_fa
     with pytest.raises(RetryableJobError) as exc_info:
         engine._verify_school_match(job)
 
-    assert exc_info.value.reason_code == "transient_network"
+    assert exc_info.value.reason_code == "school_evidence_missing"
+    assert exc_info.value.preserve_attempt is True
+
+
+def test_verify_school_match_preserves_attempt_when_school_data_is_insufficient():
+    job = replace(
+        _job("verify_school_match", university_name="Southern Methodist University"),
+        payload={"sourceSlug": "delta-kappa-epsilon-main"},
+        fraternity_slug="delta-kappa-epsilon",
+    )
+    repo = FakeRepository(jobs=[job], snippets_by_chapter={})
+    engine = FieldJobEngine(repo, logging.getLogger("test"), worker_id="worker")
+
+    with pytest.raises(RetryableJobError) as exc_info:
+        engine._verify_school_match(job)
+
+    assert exc_info.value.reason_code == "school_evidence_missing"
     assert exc_info.value.preserve_attempt is True
 
 

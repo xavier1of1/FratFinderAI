@@ -357,16 +357,70 @@ class RequestSupervisorGraphRuntime:
                 "recovery_reason": None,
             }
 
-        discovery = self._discover_source(request.fraternity_name)
-        alternate_url = discovery.get("selected_url")
-        alternate_quality = discovery.get("source_quality") or _evaluate_source_url(alternate_url)
         current_score = float(source_quality.get("score", 0.0) or 0.0)
         delta_required = 0.12 if recovery_reason == "zero_chapter" else 0.08
         normalized_current = _normalize_url(request.source_url)
-        normalized_alternate = _normalize_url(alternate_url)
-        can_switch = bool(alternate_url) and (
-            not request.source_url or normalized_current != normalized_alternate
-        ) and not bool(alternate_quality.get("isWeak", True)) and float(alternate_quality.get("score", 0.0) or 0.0) > current_score + delta_required
+        current_source_locked = _should_preserve_current_source(
+            request=request,
+            source_quality=source_quality,
+            recovery_reason=recovery_reason,
+            source_record=source_record,
+        )
+        discovery_inputs = _school_conditioned_recovery_inputs(request)
+        discovery_attempts: list[dict[str, Any]] = []
+        discovery: dict[str, Any] | None = None
+        last_discovery: dict[str, Any] | None = None
+        selected_recovery_input: dict[str, Any] | None = None
+        alternate_url: str | None = None
+        alternate_quality: dict[str, Any] = _evaluate_source_url(None)
+
+        for discovery_input in discovery_inputs:
+            candidate_discovery = dict(self._discover_source(str(discovery_input["query"])) or {})
+            last_discovery = candidate_discovery
+            candidate_url = candidate_discovery.get("selected_url")
+            candidate_quality = _normalize_source_quality_payload(candidate_discovery.get("source_quality"), fallback_url=candidate_url)
+            normalized_alternate = _normalize_url(candidate_url)
+            strict_switch = bool(candidate_url) and (
+                not request.source_url or normalized_current != normalized_alternate
+            ) and not bool(candidate_quality.get("isWeak", True)) and float(candidate_quality.get("score", 0.0) or 0.0) > current_score + delta_required
+            school_conditioned_switch = bool(discovery_input.get("schoolConditioned")) and not current_source_locked and recovery_reason == "zero_chapter" and bool(candidate_url) and (
+                not request.source_url or normalized_current != normalized_alternate
+            ) and not bool(candidate_quality.get("isWeak", True)) and float(candidate_discovery.get("selected_confidence", 0.0) or 0.0) >= 0.60
+            attempt_summary = {
+                "query": discovery_input["query"],
+                "schoolConditioned": bool(discovery_input.get("schoolConditioned")),
+                "schoolName": discovery_input.get("schoolName"),
+                "chapterName": discovery_input.get("chapterName"),
+                "selectedUrl": candidate_url,
+                "selectedConfidence": candidate_discovery.get("selected_confidence"),
+                "sourceQuality": candidate_quality,
+                "canSwitch": bool(strict_switch or school_conditioned_switch),
+                "switchPolicy": "score_delta" if strict_switch else "school_conditioned_zero_promotion_rescue" if school_conditioned_switch else None,
+            }
+            discovery_attempts.append(attempt_summary)
+            if strict_switch or school_conditioned_switch:
+                discovery = candidate_discovery
+                selected_recovery_input = discovery_input
+                alternate_url = str(candidate_url)
+                alternate_quality = candidate_quality
+                break
+
+        if discovery is None:
+            discovery = last_discovery or {
+                "fraternity_name": request.fraternity_name,
+                "fraternity_slug": request.fraternity_slug,
+                "selected_url": discovery_attempts[-1].get("selectedUrl"),
+                "selected_confidence": discovery_attempts[-1].get("selectedConfidence") or 0.0,
+                "source_quality": discovery_attempts[-1].get("sourceQuality") or _evaluate_source_url(None),
+                "candidates": [],
+                "resolution_trace": [],
+            }
+            selected_recovery_input = discovery_inputs[-1] if discovery_inputs else {"query": request.fraternity_name, "schoolConditioned": False}
+            alternate_url = discovery.get("selected_url")
+            alternate_quality = _normalize_source_quality_payload(discovery.get("source_quality"), fallback_url=alternate_url)
+
+        discovery["recovery_attempts"] = discovery_attempts
+        can_switch = any(bool(attempt.get("canSwitch")) for attempt in discovery_attempts)
 
         if not can_switch:
             if _should_preserve_current_source(
@@ -403,6 +457,7 @@ class RequestSupervisorGraphRuntime:
                     "sourceUrl": request.source_url,
                     "sourceQuality": source_quality,
                     "discovery": discovery,
+                    "recoveryDiscoveryAttempts": discovery_attempts,
                 },
             )
             return {
@@ -415,8 +470,9 @@ class RequestSupervisorGraphRuntime:
                 "recovery_reason": None,
             }
 
-        fraternity_name = str(discovery.get("fraternity_name") or request.fraternity_name)
-        fraternity_slug = str(discovery.get("fraternity_slug") or request.fraternity_slug)
+        school_conditioned_source = bool((selected_recovery_input or {}).get("schoolConditioned"))
+        fraternity_name = request.fraternity_name if school_conditioned_source else str(discovery.get("fraternity_name") or request.fraternity_name)
+        fraternity_slug = request.fraternity_slug if school_conditioned_source else str(discovery.get("fraternity_slug") or request.fraternity_slug)
         fraternity_id, fraternity_slug = self._crawler_repository.upsert_fraternity(fraternity_slug, fraternity_name, nic_affiliated=True)
         source_slug = f"{fraternity_slug}-main"
         parsed = urlparse(alternate_url)
@@ -436,6 +492,8 @@ class RequestSupervisorGraphRuntime:
                     "sourceProvenance": discovery.get("source_provenance"),
                     "fallbackReason": discovery.get("fallback_reason"),
                     "resolutionTrace": discovery.get("resolution_trace") or [],
+                    "recoveryInput": selected_recovery_input,
+                    "recoveryDiscoveryAttempts": discovery_attempts,
                 }
             },
         )
@@ -459,6 +517,8 @@ class RequestSupervisorGraphRuntime:
             "selectedCandidateRationale": discovery.get("selected_candidate_rationale"),
             "resolutionTrace": discovery.get("resolution_trace") or [],
             "candidates": discovery.get("candidates") or [],
+            "recoveryInput": selected_recovery_input,
+            "recoveryDiscoveryAttempts": discovery_attempts,
         }
         progress = _update_progress_analytics(progress, source_quality=next_quality)
         self._request_repository.update_request(
@@ -861,6 +921,41 @@ class RequestSupervisorGraphRuntime:
                     source_quality=state.get("source_quality") or _current_source_quality(request),
                     message="Request completed with deferred non-actionable queue remaining after crawl validation",
                 )
+            crawl_run = self._resolve_bound_crawl_run(state, request)
+            pending_provisional = list(
+                self._request_repository.list_provisional_chapters_for_request(
+                    request.id,
+                    statuses=("provisional",),
+                    limit=25,
+                )
+            )
+            if pending_provisional:
+                self._request_repository.append_request_event(
+                    request.id,
+                    "promotion_recovery_started",
+                    "Crawl produced provisional chapter candidates; running promotion before completion",
+                    {
+                        "crawlRunId": (crawl_run or {}).get("id"),
+                        "pendingProvisionalChapters": len(pending_provisional),
+                    },
+                )
+                return {
+                    "request": self._request_repository.get_request(request.id),
+                    "progress": progress,
+                    "cycle_state": cycle_state,
+                    "effective_config": effective_config,
+                    "skip_enrichment": True,
+                    "graph_status": "running",
+                    "terminal_reason": None,
+                }
+            if _promotion_recovery_needed(crawl_run=crawl_run, total_queue=total_queue):
+                return self._pause_for_promotion_recovery(
+                    request=request,
+                    progress=progress,
+                    cycle_state=cycle_state,
+                    effective_config=effective_config,
+                    crawl_run=crawl_run,
+                )
             self._request_repository.update_request(
                 request.id,
                 status="succeeded",
@@ -891,6 +986,58 @@ class RequestSupervisorGraphRuntime:
             "effective_config": effective_config,
             "skip_enrichment": False,
             "continue_enrichment": False,
+        }
+
+    def _pause_for_promotion_recovery(
+        self,
+        *,
+        request: FraternityCrawlRequestRecord,
+        progress: dict[str, Any],
+        cycle_state: dict[str, int],
+        effective_config: dict[str, Any],
+        crawl_run: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        recovery = {
+            "reasonCode": "promotion_recovery_needed",
+            "recordsSeen": int((crawl_run or {}).get("records_seen", 0) or 0),
+            "recordsUpserted": int((crawl_run or {}).get("records_upserted", 0) or 0),
+            "fieldJobsCreated": int((crawl_run or {}).get("field_jobs_created", 0) or 0),
+            "reviewItemsCreated": int((crawl_run or {}).get("review_items_created", 0) or 0),
+        }
+        previous_enrichment = dict((((progress.get("analytics") or {}).get("enrichment") or {})))
+        next_progress = _update_progress_analytics(
+            progress,
+            enrichment={
+                **previous_enrichment,
+                "promotionRecovery": recovery,
+            },
+        )
+        self._request_repository.update_request(
+            request.id,
+            status="draft",
+            stage="promotion_recovery_needed",
+            clear_finished_at=True,
+            progress=next_progress,
+            last_error="Crawl saw chapter-like records but did not promote any canonical or provisional chapter rows.",
+        )
+        self._request_repository.append_request_event(
+            request.id,
+            "promotion_recovery_needed",
+            "Crawl produced evidence but no promoted chapters or actionable enrichment work",
+            {
+                "crawlRunId": (crawl_run or {}).get("id"),
+                **recovery,
+            },
+        )
+        return {
+            "request": self._request_repository.get_request(request.id),
+            "progress": next_progress,
+            "cycle_state": cycle_state,
+            "effective_config": effective_config,
+            "skip_enrichment": True,
+            "graph_status": "paused",
+            "terminal_reason": "promotion_recovery_needed",
+            "request_paused": True,
         }
 
     def _run_instagram_sweep(self, state: RequestGraphState) -> dict[str, Any]:
@@ -1459,11 +1606,25 @@ class RequestSupervisorGraphRuntime:
             provisional["remaining"] = remaining
         progress["provisional"] = provisional
         if request is not None:
-            self._request_repository.update_request(request.id, progress=progress)
-        return {"progress": progress}
+            self._request_repository.update_request(
+                request.id,
+                status="succeeded",
+                stage="completed",
+                finished_at_now=True,
+                progress=progress,
+                last_error="",
+            )
+            self._request_repository.append_request_event(
+                request.id,
+                "request_completed",
+                "Request completed after provisional promotion evaluation",
+                {"provisional": provisional},
+            )
+        return {"progress": progress, "graph_status": "succeeded", "terminal_reason": "completed"}
 
     def _finalize(self, state: RequestGraphState) -> dict[str, Any]:
-        graph_status = state.get("graph_status") or ("failed" if state.get("error") else "succeeded")
+        current_status = state.get("graph_status")
+        graph_status = ("failed" if state.get("error") else "succeeded") if current_status in {None, "running"} else current_status
         return {
             "graph_status": graph_status,
             "terminal_reason": state.get("terminal_reason") or ("completed" if graph_status == "succeeded" else "failed"),
@@ -1490,6 +1651,131 @@ def _now_iso() -> str:
 
 def _normalize_url(url: str | None) -> str:
     return (url or "").rstrip("/").strip().lower()
+
+
+_SCHOOL_CONTEXT_KEYS = {
+    "school",
+    "schoolname",
+    "targetschool",
+    "targetschoolname",
+    "expectedschool",
+    "expectedschoolname",
+    "candidateschool",
+    "candidateschoolname",
+    "university",
+    "universityname",
+    "targetuniversity",
+    "targetuniversityname",
+}
+
+_CHAPTER_CONTEXT_KEYS = {
+    "chapter",
+    "chaptername",
+    "targetchapter",
+    "targetchaptername",
+    "expectedchapter",
+    "expectedchaptername",
+    "candidatechapter",
+    "candidatechaptername",
+    "chapterdesignation",
+    "expectedchapterdesignation",
+}
+
+
+def _context_key(value: str) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _clean_context_term(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    term = " ".join(value.strip().split())
+    if len(term) < 3 or len(term) > 90:
+        return None
+    lowered = term.lower()
+    if "http://" in lowered or "https://" in lowered or "@" in term:
+        return None
+    if any(ch in term for ch in "{}[]"):
+        return None
+    return term
+
+
+def _collect_context_terms(payload: Any, keys: set[str], *, limit: int = 4) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if len(found) >= limit:
+            return
+        if isinstance(value, dict):
+            for raw_key, raw_value in value.items():
+                if _context_key(str(raw_key)) in keys:
+                    cleaned = _clean_context_term(raw_value)
+                    if cleaned:
+                        marker = cleaned.lower()
+                        if marker not in seen:
+                            seen.add(marker)
+                            found.append(cleaned)
+                            if len(found) >= limit:
+                                return
+                visit(raw_value)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+                if len(found) >= limit:
+                    return
+
+    visit(payload)
+    return found
+
+
+def _school_conditioned_recovery_inputs(request: FraternityCrawlRequestRecord) -> list[dict[str, Any]]:
+    payload = {
+        "config": request.config or {},
+        "progress": request.progress or {},
+    }
+    schools = _collect_context_terms(payload, _SCHOOL_CONTEXT_KEYS, limit=2)
+    chapters = _collect_context_terms(payload, _CHAPTER_CONTEXT_KEYS, limit=2)
+    inputs: list[dict[str, Any]] = []
+    if schools:
+        school = schools[0]
+        if chapters:
+            chapter = chapters[0]
+            inputs.append(
+                {
+                    "query": f"{request.fraternity_name} {chapter} {school}",
+                    "schoolConditioned": True,
+                    "schoolName": school,
+                    "chapterName": chapter,
+                }
+            )
+        inputs.append(
+            {
+                "query": f"{request.fraternity_name} {school}",
+                "schoolConditioned": True,
+                "schoolName": school,
+                "chapterName": chapters[0] if chapters else None,
+            }
+        )
+        inputs.append(
+            {
+                "query": f"{request.fraternity_name} {school} fraternity sorority life recognized chapter",
+                "schoolConditioned": True,
+                "schoolName": school,
+                "chapterName": chapters[0] if chapters else None,
+            }
+        )
+    inputs.append({"query": request.fraternity_name, "schoolConditioned": False, "schoolName": None, "chapterName": None})
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in inputs:
+        key = str(item["query"]).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
 
 
 def _confidence_tier(value: float | None) -> str:
@@ -1524,6 +1810,15 @@ def _remaining_actionable_queue(progress: dict[str, Any] | None) -> int:
 
 def _remaining_non_actionable_queue(progress: dict[str, Any] | None) -> int:
     return max(0, _remaining_total_queue(progress) - _remaining_actionable_queue(progress))
+
+
+def _promotion_recovery_needed(*, crawl_run: dict[str, Any] | None, total_queue: int) -> bool:
+    if not crawl_run or total_queue > 0:
+        return False
+    records_seen = int(crawl_run.get("records_seen", 0) or 0)
+    records_upserted = int(crawl_run.get("records_upserted", 0) or 0)
+    field_jobs_created = int(crawl_run.get("field_jobs_created", 0) or 0)
+    return records_seen > 0 and records_upserted <= 0 and field_jobs_created <= 0
 
 
 def _residual_queue_threshold(*, progress: dict[str, Any], effective_config: dict[str, int]) -> int:
@@ -1735,6 +2030,17 @@ def _evaluate_source_url(url: str | None) -> dict[str, Any]:
         }
     except Exception:
         return {"score": 0.0, "isWeak": True, "isBlocked": False, "reasons": ["invalid_url"]}
+
+
+def _normalize_source_quality_payload(value: Any, *, fallback_url: str | None = None) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return _evaluate_source_url(fallback_url)
+    return {
+        "score": float(value.get("score", 0.0) or 0.0),
+        "isWeak": bool(value.get("isWeak", value.get("is_weak", True))),
+        "isBlocked": bool(value.get("isBlocked", value.get("is_blocked", False))),
+        "reasons": list(value.get("reasons") or []),
+    }
 
 
 def _first_source_record(crawler_repository: CrawlerRepository, source_slug: str | None) -> Any | None:

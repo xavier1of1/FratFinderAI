@@ -613,6 +613,94 @@ def test_request_graph_preserves_confirmed_directory_source_after_zero_record_cr
     assert any(event_type == "source_preserved" for event_type, _ in request_repository.events)
 
 
+def test_request_graph_recovery_uses_school_conditioned_source_queries():
+    request = replace(
+        _request(
+            source_slug=None,
+            source_url="https://facebook.com/not-valid",
+            source_confidence=0.2,
+            progress={
+                "discovery": {
+                    "sourceUrl": "https://facebook.com/not-valid",
+                    "sourceConfidence": 0.2,
+                    "confidenceTier": "low",
+                    "sourceProvenance": "search",
+                    "fallbackReason": "weak_source",
+                    "resolutionTrace": [],
+                    "candidates": [],
+                },
+                "analytics": {
+                    "sourceQuality": {
+                        "score": 0.1,
+                        "isWeak": True,
+                        "isBlocked": True,
+                        "reasons": ["blocked_host"],
+                        "recoveryAttempts": 0,
+                        "recoveredFromUrl": None,
+                        "recoveredToUrl": None,
+                        "sourceRejectedCount": 0,
+                        "sourceRecoveredCount": 0,
+                        "zeroChapterPrevented": 0,
+                    }
+                },
+            },
+        ),
+        config={
+            "fieldJobWorkers": 2,
+            "fieldJobLimitPerCycle": 10,
+            "maxEnrichmentCycles": 4,
+            "pauseMs": 0,
+            "targetSchoolName": "Virginia Tech",
+            "targetChapterName": "Alpha Chapter",
+        },
+    )
+    request_repository = _FakeRequestRepository(request)
+    crawler_repository = _FakeCrawlerRepository()
+    discovery_calls: list[str] = []
+
+    def discover_source(fraternity_name: str) -> dict[str, object]:
+        discovery_calls.append(fraternity_name)
+        if "Virginia Tech" not in fraternity_name:
+            return {"fraternity_name": fraternity_name, "selected_url": None}
+        return {
+            "fraternity_name": fraternity_name,
+            "fraternity_slug": "alpha-beta-virginia-tech",
+            "selected_url": "https://fsl.vt.edu/organizations/chapters.html",
+            "selected_confidence": 0.74,
+            "confidence_tier": "medium",
+            "source_provenance": "school_conditioned_recovery",
+            "fallback_reason": None,
+            "source_quality": {"score": 0.72, "is_weak": False, "is_blocked": False, "reasons": ["positive:chapters"]},
+            "candidates": [],
+            "resolution_trace": [{"step": "school_conditioned_test"}],
+        }
+
+    runtime = _build_runtime(
+        request_repository,
+        crawler_repository,
+        discover_source=discover_source,
+        run_crawl=lambda **_: request_repository.latest_crawl_runs.__setitem__(
+            "alpha-beta-main",
+            {
+                "id": 778,
+                "status": "succeeded",
+                "pages_processed": 1,
+                "records_seen": 1,
+                "records_upserted": 1,
+                "review_items_created": 0,
+                "field_jobs_created": 0,
+            },
+        ) or {"runtime_mode": "adaptive_assisted"},
+    )
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert discovery_calls[0] == "Alpha Beta Alpha Chapter Virginia Tech"
+    assert request_repository.request.source_slug == "alpha-beta-main"
+    assert request_repository.request.source_url == "https://fsl.vt.edu/organizations/chapters.html"
+    assert crawler_repository.upserted_sources[0]["metadata"]["discovery"]["recoveryInput"]["schoolConditioned"] is True
+
+
 def test_request_graph_runs_enrichment_cycle_until_queue_drains():
     request = _request()
     request_repository = _FakeRequestRepository(request)
@@ -665,6 +753,82 @@ def test_request_graph_runs_enrichment_cycle_until_queue_drains():
     assert request_repository.request.stage == "completed"
     assert request_repository.request.progress["analytics"]["enrichment"]["cyclesCompleted"] == 1
     assert request_repository.provider_health_snapshots[0]["provider"] == "searxng_json"
+
+
+def test_request_graph_pauses_zero_promotion_crawl_instead_of_succeeding():
+    request = _request()
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_email", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_instagram", "queued": 0, "running": 0, "done": 0, "failed": 0},
+    ]
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 779,
+            "status": "partial",
+            "pages_processed": 6,
+            "records_seen": 3,
+            "records_upserted": 0,
+            "review_items_created": 0,
+            "field_jobs_created": 0,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    runtime = _build_runtime(request_repository, _FakeCrawlerRepository(), run_crawl=run_crawl)
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "paused"
+    assert summary["terminalReason"] == "promotion_recovery_needed"
+    assert request_repository.request.status == "draft"
+    assert request_repository.request.stage == "promotion_recovery_needed"
+    assert request_repository.request.progress["analytics"]["enrichment"]["promotionRecovery"]["recordsSeen"] == 3
+    assert any(event_type == "promotion_recovery_needed" for event_type, _ in request_repository.events)
+
+
+def test_request_graph_promotes_provisional_candidates_when_no_enrichment_queue_exists():
+    request = _request()
+    request_repository = _FakeRequestRepository(request)
+    request_repository.field_snapshots["alpha-main"] = [
+        {"field": "find_website", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_email", "queued": 0, "running": 0, "done": 0, "failed": 0},
+        {"field": "find_instagram", "queued": 0, "running": 0, "done": 0, "failed": 0},
+    ]
+    request_repository.provisional_chapters = [
+        ProvisionalChapterRecord(
+            id="prov-vt",
+            fraternity_id="frat-1",
+            slug="alpha-beta-virginia-tech",
+            name="Alpha Beta Virginia Tech Provisional Chapter",
+            status="provisional",
+            request_id=request.id,
+            university_name="Virginia Tech",
+            evidence_payload={"sourceClass": "national", "validityClass": "provisional_candidate"},
+        )
+    ]
+    crawler_repository = _FakeCrawlerRepository()
+
+    def run_crawl(**_: object) -> dict[str, object]:
+        request_repository.latest_crawl_runs["alpha-main"] = {
+            "id": 780,
+            "status": "partial",
+            "pages_processed": 4,
+            "records_seen": 1,
+            "records_upserted": 0,
+            "review_items_created": 0,
+            "field_jobs_created": 0,
+        }
+        return {"runtime_mode": "adaptive_assisted"}
+
+    runtime = _build_runtime(request_repository, crawler_repository, run_crawl=run_crawl)
+    summary = runtime.run(request.id)
+
+    assert summary["status"] == "succeeded"
+    assert request_repository.request.stage == "completed"
+    assert len(crawler_repository.upserted_chapters) == 1
+    assert request_repository.provisional_updates[0]["promotion_reason"] == "auto_promoted_official_institution_signal"
+    assert any(event_type == "promotion_recovery_started" for event_type, _ in request_repository.events)
 
 
 def test_request_graph_persists_provider_specific_health_not_just_batch_health():

@@ -6,7 +6,9 @@ import fratfinder_crawler.pipeline as pipeline_module
 import pytest
 
 from fratfinder_crawler.config import Settings
+from fratfinder_crawler.field_job_support import safe_school_name_repair_candidates
 from fratfinder_crawler.models import ChapterEvidenceRecord, FieldJob
+from fratfinder_crawler.status.models import ChapterStatusDecision
 from fratfinder_crawler.pipeline import (
     CrawlService,
     _balanced_kpi_weights,
@@ -297,6 +299,10 @@ def test_run_request_worker_processes_claimed_requests_once(monkeypatch):
         def upsert_worker_process(self, **kwargs):
             _ = kwargs
 
+        def expire_stale_worker_processes(self, workload_lane: str | None = None):
+            _ = workload_lane
+            return 0
+
         def heartbeat_worker_process(self, worker_id: str, lease_seconds: int | None = None):
             _ = worker_id, lease_seconds
 
@@ -377,6 +383,7 @@ class _QueueTriageRepository:
         self.school_policy = None
         self.chapter_activity = None
         self.official_school_evidence_url = None
+        self.latest_status_decision = None
         self.instagram_candidates_by_chapter: dict[str, list[ChapterEvidenceRecord]] = {}
         self.patched: list[dict[str, object]] = []
         self.repairs: list[dict[str, object]] = []
@@ -419,6 +426,10 @@ class _QueueTriageRepository:
     def get_reusable_official_school_evidence_url(self, *, fraternity_slug: str | None, school_name: str | None):
         _ = fraternity_slug, school_name
         return self.official_school_evidence_url
+
+    def get_latest_chapter_status_decision(self, chapter_id: str):
+        _ = chapter_id
+        return self.latest_status_decision
 
     def create_field_jobs(
         self,
@@ -465,6 +476,8 @@ def _field_job(
     chapter_name: str = "Alpha Test",
     field_name: str = "find_website",
     university_name: str | None = None,
+    attempts: int = 0,
+    field_states: dict[str, str] | None = None,
     payload: dict[str, object] | None = None,
     source_slug: str | None = "alpha-main",
 ) -> FieldJob:
@@ -476,7 +489,7 @@ def _field_job(
         chapter_name=chapter_name,
         field_name=field_name,
         payload=raw_payload,
-        attempts=0,
+        attempts=attempts,
         max_attempts=3,
         claim_token="",
         source_base_url="https://example.org/chapters",
@@ -488,7 +501,7 @@ def _field_job(
         source_slug=source_slug,
         university_name=university_name,
         crawl_run_id=11,
-        field_states={},
+        field_states=field_states or {},
         priority=0,
         queue_state=str(raw_payload.get("queue_state") or "actionable"),
     )
@@ -554,6 +567,28 @@ def test_infer_university_name_for_job_prefers_valid_payload_candidate():
     inferred = _infer_university_name_for_job(job, snippets=[])
 
     assert inferred == "Example University"
+
+
+def test_infer_university_name_for_job_repairs_safe_at_school_prefix():
+    job = _field_job(
+        chapter_name="Alpha Beta",
+        university_name="At The University of Alabama",
+        payload={"sourceSlug": "alpha-main"},
+    )
+
+    inferred = _infer_university_name_for_job(job, snippets=[])
+
+    assert inferred == "University of Alabama"
+
+
+def test_safe_school_name_repair_candidates_rejects_generic_shells():
+    assert safe_school_name_repair_candidates("At The University") == []
+    assert safe_school_name_repair_candidates("The College") == []
+
+
+def test_safe_school_name_repair_candidates_cleans_status_suffixes():
+    assert safe_school_name_repair_candidates("Example University - Active") == ["Example University"]
+    assert safe_school_name_repair_candidates("At The University of Alabama (Recognized)") == ["University of Alabama"]
 
 
 def test_infer_university_name_for_job_extracts_valid_school_from_snippet():
@@ -632,6 +667,78 @@ def test_reconcile_field_job_queue_defers_email_when_website_is_missing_without_
     assert repo.patched[0]["scheduled_delay_seconds"] == 1800
     assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "defer_email_without_website"
     assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "website_required"
+
+
+def test_reconcile_field_job_queue_defers_repeated_verify_school_attempt_without_reason():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=420,
+        crawler_search_transient_long_cooldown_seconds=900,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="verify_school_match",
+                university_name="Example University",
+                attempts=1,
+                field_states={"university_name": "found"},
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+    )
+
+    assert triage["dependencyJobsLeftBlocked"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["status"] == "queued"
+    assert repo.patched[0]["scheduled_delay_seconds"] == 900
+    assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "defer_school_match_until_cached_evidence"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "blocked_dependency"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "school_evidence_missing"
+
+
+def test_reconcile_field_job_queue_isolates_repeated_low_confidence_verify_school_attempt():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=420,
+        crawler_search_transient_long_cooldown_seconds=900,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="verify_school_match",
+                university_name="Example University",
+                attempts=1,
+                field_states={"university_name": "low_confidence"},
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+    )
+
+    assert triage["repairIsolated"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["status"] == "queued"
+    assert repo.patched[0]["scheduled_delay_seconds"] == 900
+    assert repo.patched[0]["payload_patch"]["queueTriage"]["outcome"] == "isolate_school_identity_repair"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "blocked_repairable"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "identity_semantically_incomplete"
 
 
 def test_reconcile_field_job_queue_preserves_deferred_canonical_jobs():
@@ -888,6 +995,246 @@ def test_reconcile_field_job_queue_reactivates_status_blocked_instagram_when_can
     assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
 
 
+def test_reconcile_field_job_queue_does_not_reactivate_status_blocked_email_from_support_alone():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_email",
+                university_name="Example University",
+                payload={
+                    "sourceSlug": "alpha-main",
+                    "queue_state": "blocked_dependency",
+                    "contactResolution": {
+                        "queueState": "blocked_dependency",
+                        "reasonCode": "status_dependency_unmet",
+                        "supportingPageUrl": "https://example.edu/greek/alpha",
+                        "supportingPageScope": "school_affiliation_page",
+                    },
+                },
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": True},
+    )
+
+    assert triage["dependencyReactivatedFromExistingSupport"] == 0
+    assert triage["dependencyDeferred"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "blocked_dependency"
+
+
+def test_reconcile_field_job_queue_splits_generic_status_dependency_without_decision():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_email",
+                university_name="Example University",
+                payload={
+                    "sourceSlug": "alpha-main",
+                    "queue_state": "blocked_dependency",
+                    "contactResolution": {
+                        "queueState": "blocked_dependency",
+                        "reasonCode": "status_dependency_unmet",
+                    },
+                },
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": True},
+    )
+
+    assert triage["dependencyDeferred"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "blocked_dependency"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "status_no_decision"
+
+
+def test_refresh_school_evidence_dry_run_selects_blocked_candidates_without_writes(monkeypatch):
+    selected_jobs = [_field_job(field_name="verify_school_match", university_name="Example University")]
+
+    class FakeRepository:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def list_field_jobs_for_school_evidence_refresh(self, **kwargs):
+            assert kwargs["reason_codes"] == ["school_evidence_missing"]
+            return selected_jobs
+
+    monkeypatch.setattr(pipeline_module, "CrawlerRepository", FakeRepository)
+    monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(object()))
+    service = CrawlService(SimpleNamespace(crawler_search_enabled=False))
+
+    report = service.refresh_school_evidence(
+        limit=5,
+        reason="school_evidence_missing",
+        dry_run=True,
+        run_preflight=False,
+    )
+
+    assert report["dryRun"] is True
+    assert report["selected"] == 1
+    assert report["decisionsWritten"] == 0
+    assert report["candidates"][0]["fieldName"] == "verify_school_match"
+
+
+def test_reconcile_field_job_queue_reblocks_actionable_status_review_blocker():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            replace(
+                _field_job(
+                    field_name="find_instagram",
+                    university_name="Example University",
+                    payload={
+                        "sourceSlug": "alpha-main",
+                        "queue_state": "actionable",
+                        "contactResolution": {"queueState": "actionable"},
+                    },
+                ),
+                blocked_reason="status_review_required",
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": True},
+    )
+
+    assert triage["dependencyReactivatedFromExistingSupport"] == 0
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "blocked_dependency"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "status_review_required"
+
+
+def test_reconcile_field_job_queue_reblocks_actionable_provider_blocker_when_unhealthy():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_transient_long_cooldown_seconds=900,
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            replace(
+                _field_job(
+                    field_name="find_instagram",
+                    university_name="Example University",
+                    payload={
+                        "sourceSlug": "alpha-main",
+                        "queue_state": "actionable",
+                        "contactResolution": {"queueState": "actionable"},
+                    },
+                    source_slug="alpha-main",
+                ),
+                blocked_reason="provider_degraded",
+            )
+        ],
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": False},
+    )
+
+    assert triage["providerRetryCandidatesConsidered"] == 1
+    assert triage["providerRetryCandidatesSkipped"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "blocked_provider"
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["reasonCode"] == "provider_degraded"
+
+
+def test_reconcile_field_job_queue_reactivates_status_blocked_email_after_active_status_decision():
+    settings = SimpleNamespace(
+        crawler_field_job_runtime_mode="langgraph_primary",
+        crawler_field_job_graph_durability="sync",
+        crawler_search_dependency_wait_seconds=300,
+    )
+    service = CrawlService(settings)
+    repo = _QueueTriageRepository(
+        jobs=[
+            _field_job(
+                field_name="find_email",
+                university_name="Example University",
+                payload={
+                    "sourceSlug": "alpha-main",
+                    "queue_state": "blocked_dependency",
+                    "contactResolution": {
+                        "queueState": "blocked_dependency",
+                        "reasonCode": "status_dependency_unmet",
+                        "supportingPageUrl": "https://example.edu/greek/alpha",
+                        "supportingPageScope": "school_affiliation_page",
+                    },
+                },
+            )
+        ],
+    )
+    repo.latest_status_decision = ChapterStatusDecision(
+        id="decision-active",
+        chapter_id="chapter-1",
+        final_status="active",
+        school_recognition_status="recognized",
+        national_status="active",
+        reason_code="official_school_current_recognition",
+        confidence=0.96,
+        evidence_ids=["evidence-1"],
+        decision_trace={},
+    )
+
+    triage, repair = service._reconcile_field_job_queue(
+        repo,
+        source_slug="alpha-main",
+        field_name=None,
+        limit=20,
+        policy_pack=service._resolve_field_job_policy_pack("alpha-main"),
+        preflight_snapshot={"healthy": True},
+    )
+
+    assert triage["dependencyReactivatedFromExistingSupport"] == 1
+    assert repair["reconciledHistorical"] == 1
+    assert repo.patched[0]["payload_patch"]["contactResolution"]["queueState"] == "actionable"
+
+
 def test_reconcile_field_job_queue_creates_verify_school_for_status_blocked_instagram_without_support():
     settings = SimpleNamespace(
         crawler_field_job_runtime_mode="langgraph_primary",
@@ -1119,7 +1466,7 @@ def test_throughput_helper_provider_window_logic_reorders_and_detects_degradatio
     assert degraded_window["general_web_search"]["providers"][0]["challenge_or_anomaly_count"] == 3
 
 
-def test_automatic_provider_order_includes_configured_paid_providers_when_enabled():
+def test_automatic_provider_order_keeps_managed_providers_opt_in_even_when_keys_exist():
     settings = Settings(
         database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
         CRAWLER_SEARCH_PROVIDER="auto",
@@ -1130,16 +1477,10 @@ def test_automatic_provider_order_includes_configured_paid_providers_when_enable
     )
 
     assert _provider_order_from_settings(settings) == ["searxng_json", "bing_html", "duckduckgo_html"]
-    assert _automatic_provider_order_from_settings(settings) == [
-        "searxng_json",
-        "serper_api",
-        "tavily_api",
-        "bing_html",
-        "duckduckgo_html",
-    ]
+    assert _automatic_provider_order_from_settings(settings) == ["searxng_json", "bing_html", "duckduckgo_html"]
 
 
-def test_search_settings_from_preflight_disables_paid_auto_chain_when_paid_providers_are_exhausted():
+def test_search_settings_from_preflight_keeps_managed_providers_out_of_automatic_chain():
     settings = Settings(
         database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
         CRAWLER_SEARCH_PROVIDER="auto",
@@ -1159,7 +1500,6 @@ def test_search_settings_from_preflight_disables_paid_auto_chain_when_paid_provi
 
     adjusted = _search_settings_from_preflight(settings, snapshot)
 
-    assert adjusted.crawler_v3_paid_search_enabled is False
     assert _automatic_provider_order_from_settings(adjusted)[0] == "bing_html"
     assert "serper_api" not in _automatic_provider_order_from_settings(adjusted)
     assert "tavily_api" not in _automatic_provider_order_from_settings(adjusted)
@@ -1954,6 +2294,105 @@ def test_process_field_jobs_skips_dependency_prereq_creation_without_source_slug
 
     assert result["queue_triage"]["triaged"] >= 1
     assert repo.created_jobs == []
+
+
+def test_process_field_jobs_recovers_known_failed_jobs_before_claiming(monkeypatch):
+    class FakeConnection:
+        pass
+
+    class FakeRepository:
+        def __init__(self, connection):
+            self.connection = connection
+            self.recovery_called = False
+
+        def get_accuracy_recovery_metrics(self):
+            return {
+                "complete_rows": 0,
+                "chapter_specific_contact_rows": 0,
+                "nationals_only_contact_rows": 0,
+                "inactive_validated_rows": 0,
+                "confirmed_absent_website_rows": 0,
+                "active_rows_with_chapter_specific_email": 0,
+                "active_rows_with_chapter_specific_instagram": 0,
+                "active_rows_with_any_contact": 0,
+                "total_chapters": 0,
+            }
+
+        def reconcile_stale_field_jobs(self, *args, **kwargs):
+            _ = args, kwargs
+            return 0
+
+        def recover_failed_field_jobs(self, **kwargs):
+            self.recovery_called = True
+            assert kwargs["limit"] == 25
+            return {
+                "recovered": 2,
+                "actionable": 1,
+                "blocked_provider": 0,
+                "blocked_dependency": 1,
+                "blocked_repairable": 0,
+            }
+
+        def field_job_graph_tables_ready(self):
+            return False
+
+        def get_field_job_queue_counts(self):
+            return {
+                "queued_jobs": 2,
+                "actionable_jobs": 1,
+                "deferred_jobs": 0,
+                "blocked_provider_jobs": 0,
+                "blocked_dependency_jobs": 1,
+                "blocked_repairable_jobs": 0,
+                "running_jobs": 0,
+            }
+
+        def get_field_job_worker_process_stats(self, workload_lane="contact_resolution"):
+            _ = workload_lane
+            return {"active_workers": 0, "stale_workers": 0}
+
+        def list_queued_field_jobs_for_triage(self, **kwargs):
+            _ = kwargs
+            return []
+
+        def backfill_field_job_typed_queue_state(self):
+            return {"blocked_reason_populated": 0}
+
+        def queue_chapter_repair_candidates(self, **kwargs):
+            _ = kwargs
+            return {"queued": 0, "running": 0, "promotedToCanonical": 0, "downgradedToProvisional": 0, "confirmedInvalid": 0, "repairExhausted": 0, "reconciledHistorical": 0}
+
+        def claim_next_chapter_repair_job(self, worker_id: str, source_slug: str | None = None):
+            _ = worker_id, source_slug
+            return None
+
+    monkeypatch.setattr(pipeline_module, "get_connection", lambda settings: nullcontext(FakeConnection()))
+    repo = FakeRepository(FakeConnection())
+    monkeypatch.setattr(pipeline_module, "CrawlerRepository", lambda connection: repo)
+    monkeypatch.setattr(
+        pipeline_module,
+        "FieldJobSupervisorGraphRuntime",
+        lambda **kwargs: SimpleNamespace(
+            run=lambda: {
+                "processed": 0,
+                "requeued": 0,
+                "failed_terminal": 0,
+                "runtime_mode_used": "langgraph_primary",
+            }
+        ),
+    )
+
+    service = CrawlService(Settings(database_url="postgresql://postgres:postgres@localhost:5433/fratfinder"))
+    result = service.process_field_jobs(limit=5, workers=1, run_preflight=False)
+
+    assert repo.recovery_called is True
+    assert result["failed_jobs_recovered"] == {
+        "recovered": 2,
+        "actionable": 1,
+        "blocked_provider": 0,
+        "blocked_dependency": 1,
+        "blocked_repairable": 0,
+    }
 
 
 def test_infer_repair_family_prioritizes_school_normalization_and_state_prefix():

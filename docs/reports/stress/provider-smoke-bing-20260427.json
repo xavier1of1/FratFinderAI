@@ -1,0 +1,2429 @@
+{
+  "captured_at": "2026-04-27T22:29:57.735301+00:00",
+  "provider": "bing_html",
+  "baselineProvider": "duckduckgo_html",
+  "queryCount": 20,
+  "report": {
+    "provider": "bing_html",
+    "queries": [
+      {
+        "category": "national_source_discovery",
+        "query": "\"sigma chi\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 734,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 407,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5078,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"sigma chi\" \"University of Virginia\" greek life",
+        "success": false,
+        "error": "HTTPSConnectionPool(host='lite.duckduckgo.com', port=443): Max retries exceeded with url: /lite/?q=site%3A.edu+%22sigma+chi%22+%22University+of+Virginia%22+greek+life (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x0000014F8B4A9730>, 'Connection to lite.duckduckgo.com timed out. (connect timeout=5.0)'))",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 125,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 3016,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5093,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" chapter website",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 156,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 3000,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5141,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" instagram",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 250,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": true,
+          "nationalDirectoryResult": true,
+          "acceptedEvidence": true,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://psiofsigmachi.com/alumni-news/",
+          "https://aka1908.com/midatlantic/history/mar-undergraduate-chapters/",
+          "https://en.wikipedia.org/wiki/List_of_Sigma_Alpha_Epsilon_chapters"
+        ]
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"sigma chi\" \"University of Virginia\" contact email",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 3000,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 5109,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "sigma chi meaning slang forum",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 157,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"delta chi\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"delta chi\" \"Purdue University\" greek life",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 125,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"delta chi\" \"Purdue University\" chapter website",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 250,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"delta chi\" \"Purdue University\" instagram",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 188,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"delta chi\" \"Purdue University\" contact email",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 266,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "delta chi meaning slang forum",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 156,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"lambda chi alpha\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 171,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"lambda chi alpha\" \"Louisiana State University\" greek life",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 140,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"lambda chi alpha\" \"Louisiana State University\" chapter website",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 140,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"lambda chi alpha\" \"Louisiana State University\" instagram",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"lambda chi alpha\" \"Louisiana State University\" contact email",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "lambda chi alpha meaning slang forum",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 140,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"phi gamma delta\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 156,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": true,
+          "nationalDirectoryResult": true,
+          "acceptedEvidence": true,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://en.wikipedia.org/wiki/List_of_Delta_Sigma_Theta_collegiate_chapters",
+          "https://sigmadeltapi.org/about/chapter-directory/",
+          "http://www.sigmasigmaphi.org/chapters"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"phi gamma delta\" \"University of Florida\" greek life",
+        "success": false,
+        "error": "duckduckgo_html temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 187,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": true,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      }
+    ],
+    "metrics": {
+      "raw_success_rate": 0.8,
+      "request_error_rate": 0.0571,
+      "unavailable_rate": 0.5143,
+      "challenge_anomaly_rate": 0.0571,
+      "low_signal_rate": 0.2,
+      "median_latency_ms": 125.0,
+      "p95_latency_ms": 5078.0,
+      "official_school_result_rate": 0.1,
+      "national_directory_result_rate": 0.1,
+      "accepted_evidence_rate": 0.1,
+      "review_required_rate": 0.5,
+      "unsafe_candidate_rate": 0.2,
+      "cost_per_1000_queries": 0.0,
+      "cost_per_accepted_evidence": 0.0,
+      "query_count": 20,
+      "attempt_count": 70
+    }
+  },
+  "baseline": {
+    "provider": "duckduckgo_html",
+    "queries": [
+      {
+        "category": "national_source_discovery",
+        "query": "\"sigma chi\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 5094,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 875,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 641,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"sigma chi\" \"University of Virginia\" greek life",
+        "success": false,
+        "error": "SearXNG returned no results and reported unresponsive engines: ['aol', 'Suspended: HTTP protocol error'], ['duckduckgo', 'Suspended: timeout'], ['karmasearch', 'Suspended: access denied'], ['karmasearch videos', 'Suspended: access denied'], ['startpage', 'Suspended: CAPTCHA']",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 5078,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 110,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 390,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" chapter website",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 5094,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 156,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 281,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"sigma chi\" \"University of Virginia\" instagram",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "request_error",
+            "result_count": null,
+            "failure_type": "timeout",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 5079,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 156,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": true,
+          "nationalDirectoryResult": true,
+          "acceptedEvidence": true,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://psiofsigmachi.com/alumni-news/",
+          "https://aka1908.com/midatlantic/history/mar-undergraduate-chapters/",
+          "https://en.wikipedia.org/wiki/List_of_Sigma_Alpha_Epsilon_chapters"
+        ]
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"sigma chi\" \"University of Virginia\" contact email",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 250,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "engine_unresponsive",
+            "circuit_open": false,
+            "fallback_taken": false,
+            "latency_ms": 515,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "sigma chi meaning slang forum",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 156,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": true
+        },
+        "topUrls": [
+          "https://www.reddit.com/r/EnglishLearning/comments/195ptl9/what_does_sigma_mean/",
+          "https://www.reddit.com/r/GenZ/comments/1d55k5n/what_does_skibidi_and_what_the_sigma_mean/",
+          "https://www.reddit.com/r/OverwatchUniversity/comments/103gj44/a_complete_guide_to_sigma_overwatch_2_strategy/"
+        ]
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"delta chi\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 140,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"delta chi\" \"Purdue University\" greek life",
+        "success": false,
+        "error": "searxng_json::http://localhost:8888 temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 125,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"delta chi\" \"Purdue University\" chapter website",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 140,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"delta chi\" \"Purdue University\" instagram",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 140,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"delta chi\" \"Purdue University\" contact email",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 156,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "delta chi meaning slang forum",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 156,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://www.delta.com/",
+          "https://www.delta.com/flightsearch/book-a-flight",
+          "https://content.delta.com/content/www/en_US.html/"
+        ]
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"lambda chi alpha\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 157,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"lambda chi alpha\" \"Louisiana State University\" greek life",
+        "success": false,
+        "error": "searxng_json::http://localhost:8888 temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 125,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      },
+      {
+        "category": "chapter_website_discovery",
+        "query": "\"lambda chi alpha\" \"Louisiana State University\" chapter website",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 156,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "instagram_profile_discovery",
+        "query": "\"lambda chi alpha\" \"Louisiana State University\" instagram",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "email_supporting_page_recovery",
+        "query": "\"lambda chi alpha\" \"Louisiana State University\" contact email",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 172,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "negative_low_signal_trap",
+        "query": "lambda chi alpha meaning slang forum",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 157,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "low_signal",
+            "result_count": 5,
+            "failure_type": "low_signal_fallback",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": null,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": true,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://stackoverflow.com/questions/16501/what-is-a-lambda-function",
+          "https://stackoverflow.com/questions/7627098/what-is-a-lambda-expression-and-when-should-i-use-one",
+          "https://stackoverflow.com/questions/150129/what-is-a-lambda"
+        ]
+      },
+      {
+        "category": "national_source_discovery",
+        "query": "\"phi gamma delta\" chapter directory",
+        "success": true,
+        "error": null,
+        "resultCount": 5,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "success",
+            "result_count": 5,
+            "failure_type": null,
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 141,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": true,
+          "nationalDirectoryResult": true,
+          "acceptedEvidence": true,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": [
+          "https://en.wikipedia.org/wiki/List_of_Delta_Sigma_Theta_collegiate_chapters",
+          "https://sigmadeltapi.org/about/chapter-directory/",
+          "http://www.sigmasigmaphi.org/chapters"
+        ]
+      },
+      {
+        "category": "official_school_status",
+        "query": "site:.edu \"phi gamma delta\" \"University of Florida\" greek life",
+        "success": false,
+        "error": "searxng_json::http://localhost:8888 temporarily unavailable (circuit open)",
+        "resultCount": 0,
+        "providerAttempts": [
+          {
+            "provider": "duckduckgo_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          },
+          {
+            "provider": "bing_html",
+            "provider_endpoint": null,
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "challenge_or_anomaly",
+            "circuit_open": false,
+            "fallback_taken": true,
+            "latency_ms": 125,
+            "http_status": null
+          },
+          {
+            "provider": "searxng_json",
+            "provider_endpoint": "http://localhost:8888",
+            "status": "unavailable",
+            "result_count": null,
+            "failure_type": "circuit_open",
+            "circuit_open": true,
+            "fallback_taken": false,
+            "latency_ms": 0,
+            "http_status": null
+          }
+        ],
+        "classifiers": {
+          "officialSchoolResult": false,
+          "nationalDirectoryResult": false,
+          "acceptedEvidence": false,
+          "reviewRequired": false,
+          "unsafeCandidate": false
+        },
+        "topUrls": []
+      }
+    ],
+    "metrics": {
+      "raw_success_rate": 0.8,
+      "request_error_rate": 0.0556,
+      "unavailable_rate": 0.5278,
+      "challenge_anomaly_rate": 0.0556,
+      "low_signal_rate": 0.1944,
+      "median_latency_ms": 0.0,
+      "p95_latency_ms": 5078.0,
+      "official_school_result_rate": 0.1,
+      "national_directory_result_rate": 0.1,
+      "accepted_evidence_rate": 0.1,
+      "review_required_rate": 0.5,
+      "unsafe_candidate_rate": 0.2,
+      "cost_per_1000_queries": 0.0,
+      "cost_per_accepted_evidence": 0.0,
+      "query_count": 20,
+      "attempt_count": 72
+    }
+  },
+  "promotionGates": {
+    "acceptedEvidenceImprovedOrEqual": true,
+    "unsafeCandidateRateNotWorse": true,
+    "stableAuthQuotaBehavior": false,
+    "sustainableCost": true,
+    "passed": false
+  }
+}

@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fratfinder_crawler.models import FieldJob
 from fratfinder_crawler.social import InstagramSourceType, candidate_from_chapter_evidence
 
 
+_SEMANTICALLY_INCOMPLETE_SCHOOL_SLUGS = {
+    "at-the-university",
+    "the-university",
+    "university",
+    "college",
+    "the-college",
+    "state-university",
+    "university-campus",
+}
 _INSTAGRAM_STATUS_SUPPORT_SOURCE_TYPES = {
     InstagramSourceType.PROVENANCE_SUPPORTING_PAGE,
     InstagramSourceType.NATIONALS_CHAPTER_ENTRY,
@@ -17,6 +27,103 @@ _INSTAGRAM_STATUS_SUPPORT_SOURCE_TYPES = {
     InstagramSourceType.CHAPTER_WEBSITE_STRUCTURED_DATA,
     InstagramSourceType.CHAPTER_WEBSITE_SOCIAL_LINK,
 }
+
+
+def _normalized_text(value: object) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _slugify(value: object) -> str:
+    import re
+
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return re.sub(r"^-+|-+$", "", text)
+
+
+def school_name_is_semantically_incomplete(value: object) -> bool:
+    normalized = _normalized_text(value)
+    if not normalized:
+        return True
+    slug = _slugify(normalized)
+    if slug in _SEMANTICALLY_INCOMPLETE_SCHOOL_SLUGS:
+        return True
+    tokens = normalized.split()
+    generic_tokens = {"at", "the", "of", "and", "state", "university", "college", "school", "institute", "campus"}
+    if tokens and all(token in generic_tokens for token in tokens) and any(
+        token in {"university", "college", "school", "institute", "campus"} for token in tokens
+    ):
+        return True
+    if normalized.startswith("at the ") and len(tokens) <= 4:
+        return True
+    if tokens and tokens[-1] in {"university", "college", "school", "institute"}:
+        leading_tokens = tokens[:-1]
+        if leading_tokens and all(token in {"at", "the", "of", "and", "state"} for token in leading_tokens):
+            return True
+    return False
+
+
+def safe_school_name_repair_candidates(value: object) -> list[str]:
+    """Return conservative school-name variants that are safe for repair matching.
+
+    This helper intentionally does not assert that a candidate is canonical. Callers
+    must still validate the returned variants against chapter-identity rules or
+    official evidence before updating queue state or canonical data.
+    """
+    text = " ".join(str(value or "").replace("\u00a0", " ").split())
+    if not text:
+        return []
+
+    cleaned = re.sub(r"\s*\((?:active|inactive|recognized|suspended|closed)\)\s*$", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+-\s+(?:active|inactive|recognized|suspended|closed)\s*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:provisional|associate|colony|chapter)\s*$", "", cleaned, flags=re.IGNORECASE).strip(" -")
+
+    variants: list[str] = []
+    at_match = re.match(r"^(?:at|@)\s+(?P<school>.+)$", cleaned, flags=re.IGNORECASE)
+    if at_match:
+        school = at_match.group("school").strip(" -")
+        if school.lower().startswith("the university of "):
+            school = "University of " + school[len("the university of ") :]
+        elif school.lower().startswith("the "):
+            school = school[4:]
+        if school and not school_name_is_semantically_incomplete(school):
+            variants.append(school)
+
+    if not at_match and cleaned and not school_name_is_semantically_incomplete(cleaned):
+        variants.append(cleaned)
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for candidate in variants:
+        normalized = candidate.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(candidate)
+    return deduped
+
+
+def school_identity_requires_repair_before_match(job: FieldJob, *, next_claim_attempt: bool = False) -> bool:
+    school_name = str(job.university_name or "").strip()
+    school_slug = _slugify(school_name)
+    school_state = str((job.field_states or {}).get("university_name") or "").strip().lower()
+    attempts = int(job.attempts or 0) + (1 if next_claim_attempt else 0)
+    if not school_slug:
+        return True
+    if school_name_is_semantically_incomplete(school_name):
+        return True
+    if school_state in {"missing", "invalid_entity", "confirmed_absent", "inactive"}:
+        return True
+    if school_state == "low_confidence" and attempts >= 2:
+        candidate_school = _slugify(job.payload.get("candidateSchoolName"))
+        if candidate_school and candidate_school == school_slug:
+            return False
+        return True
+    return False
 
 
 def job_supporting_page_ready(job: FieldJob) -> bool:

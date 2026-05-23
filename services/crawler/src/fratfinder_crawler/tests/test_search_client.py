@@ -9,6 +9,18 @@ from fratfinder_crawler.config import Settings
 from fratfinder_crawler.search.client import SearchClient, SearchUnavailableError
 
 
+@pytest.fixture(autouse=True)
+def _clear_search_client_global_state(monkeypatch):
+    # Keep local .env SearXNG tuning from leaking into isolated SearchClient unit tests.
+    monkeypatch.setenv("CRAWLER_SEARCH_SEARXNG_BASE_URLS", "")
+    monkeypatch.setenv("CRAWLER_SEARCH_SEARXNG_ENGINES", "")
+    monkeypatch.setenv("CRAWLER_SEARCH_SEARXNG_STABLE_ENGINES", "")
+    monkeypatch.setenv("CRAWLER_SEARCH_SEARXNG_RESCUE_ENGINES", "")
+    SearchClient.clear_global_runtime_state()
+    yield
+    SearchClient.clear_global_runtime_state()
+
+
 def test_duckduckgo_html_search_parses_results():
     html = """
     <html><body>
@@ -322,7 +334,7 @@ def test_auto_provider_falls_back_to_duckduckgo_when_searxng_unavailable():
     assert calls[1].startswith("https://lite.duckduckgo.com")
 
 
-def test_auto_provider_uses_paid_provider_before_html_fallback_when_enabled():
+def test_explicit_paid_provider_still_works_when_configured():
     get_calls: list[str] = []
     post_calls: list[str] = []
 
@@ -353,7 +365,7 @@ def test_auto_provider_uses_paid_provider_before_html_fallback_when_enabled():
     client = SearchClient(
         Settings(
             database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
-            CRAWLER_SEARCH_PROVIDER="auto",
+            CRAWLER_SEARCH_PROVIDER="serper_api",
             CRAWLER_V3_PAID_SEARCH_ENABLED=True,
             CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
             CRAWLER_SEARCH_SERPER_API_KEY="test-key",
@@ -366,7 +378,7 @@ def test_auto_provider_uses_paid_provider_before_html_fallback_when_enabled():
 
     assert len(results) == 1
     assert results[0].provider == "serper_api"
-    assert get_calls == ["http://localhost:8888/search"]
+    assert get_calls == []
     assert post_calls == ["https://google.serper.dev/search"]
 
 
@@ -428,6 +440,78 @@ def test_searxng_json_provider_parses_results():
     assert len(results) == 1
     assert results[0].provider == "searxng_json"
     assert results[0].url == "https://example.org/chapter"
+
+
+def test_searxng_json_passes_configured_engine_allowlist():
+    observed_params: list[dict[str, object]] = []
+
+    def requester(url, params, timeout, verify, headers):
+        observed_params.append(dict(params))
+        return SimpleNamespace(
+            status_code=200,
+            text='{"results":[{"title":"Sigma Chi Demo","url":"https://example.org/chapter","content":"Official chapter site"}]}',
+            json=lambda: {
+                "results": [
+                    {
+                        "title": "Sigma Chi Demo",
+                        "url": "https://example.org/chapter",
+                        "content": "Official chapter site",
+                    }
+                ]
+            },
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="searxng_json",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_SEARXNG_ENGINES="startpage,mojeek",
+        ),
+        get_requester=requester,
+    )
+
+    client.search("sigma chi demo university website")
+
+    assert observed_params[0]["engines"] == "startpage,mojeek"
+
+
+def test_searxng_json_reuses_process_cache_across_clients():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(url)
+        return SimpleNamespace(
+            status_code=200,
+            text='{"results":[{"title":"Sigma Chi Demo","url":"https://example.org/chapter","content":"Official chapter site"}]}',
+            json=lambda: {
+                "results": [
+                    {
+                        "title": "Sigma Chi Demo",
+                        "url": "https://example.org/chapter",
+                        "content": "Official chapter site",
+                    }
+                ]
+            },
+            raise_for_status=lambda: None,
+        )
+
+    settings = Settings(
+        database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+        CRAWLER_SEARCH_PROVIDER="searxng_json",
+        CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+        CRAWLER_SEARCH_RESULT_CACHE_TTL_SECONDS=60,
+    )
+
+    first = SearchClient(settings, get_requester=requester).search("sigma chi demo university website")
+    second_client = SearchClient(settings, get_requester=requester)
+    second = second_client.search("sigma chi demo university website")
+    attempts = second_client.consume_last_provider_attempts()
+
+    assert first == second
+    assert len(calls) == 1
+    assert attempts[0]["status"] == "cache_hit"
 
 
 def test_auto_free_ignores_opt_in_api_providers_and_uses_html_fallbacks():
@@ -516,6 +600,24 @@ def test_auto_free_ignores_paid_providers_even_when_paid_search_is_enabled():
     assert len(results) == 1
     assert results[0].provider == "duckduckgo_html"
     assert post_calls == []
+
+
+def test_auto_keeps_managed_providers_out_of_default_chain_even_when_paid_search_is_enabled():
+    settings = Settings(
+        database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+        CRAWLER_SEARCH_PROVIDER="auto",
+        CRAWLER_V3_PAID_SEARCH_ENABLED=True,
+        CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+        CRAWLER_SEARCH_SERPER_API_KEY="test-key",
+        CRAWLER_SEARCH_TAVILY_API_KEY="test-key",
+        CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json,bing_html,duckduckgo_html",
+    )
+
+    assert SearchClient.effective_auto_provider_order(settings) == [
+        "searxng_json",
+        "bing_html",
+        "duckduckgo_html",
+    ]
 
 
 def test_auto_free_skips_unconfigured_api_providers_and_uses_duckduckgo_html():
@@ -842,3 +944,143 @@ def test_searxng_json_provider_fails_over_to_secondary_endpoint():
     assert calls == ["http://primary:8888/search", "http://secondary:8888/search"]
     assert attempts[0]["provider_endpoint"] == "http://primary:8888"
     assert attempts[1]["provider_endpoint"] == "http://secondary:8888"
+
+
+def test_searxng_engine_unresponsive_does_not_global_cooldown_next_query():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(str(params.get("q")))
+        if len(calls) == 1:
+            return SimpleNamespace(
+                status_code=200,
+                text='{"results":[],"unresponsive_engines":["duckduckgo timeout"]}',
+                json=lambda: {"results": [], "unresponsive_engines": ["duckduckgo timeout"]},
+                raise_for_status=lambda: None,
+            )
+        return SimpleNamespace(
+            status_code=200,
+            text='{"results":[{"title":"Sigma Chi Demo","url":"https://example.org/chapter","content":"Official chapter site"}]}',
+            json=lambda: {
+                "results": [
+                    {
+                        "title": "Sigma Chi Demo",
+                        "url": "https://example.org/chapter",
+                        "content": "Official chapter site",
+                    }
+                ]
+            },
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="searxng_json",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_SEARXNG_BACKOFF_SECONDS=90,
+        ),
+        get_requester=requester,
+    )
+
+    with pytest.raises(SearchUnavailableError):
+        client.search("query with no upstream results")
+
+    results = client.search("query with upstream results")
+
+    assert len(results) == 1
+    assert [attempt["failure_type"] for attempt in client.consume_last_provider_attempts()] == [None]
+    assert calls == ["query with no upstream results", "query with upstream results"]
+
+
+def test_searxng_suspended_engine_opens_global_cooldown():
+    SearchClient.clear_global_runtime_state()
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        calls.append(str(params.get("q")))
+        return SimpleNamespace(
+            status_code=200,
+            text='{"results":[],"unresponsive_engines":["startpage: Suspended: CAPTCHA"]}',
+            json=lambda: {"results": [], "unresponsive_engines": ["startpage: Suspended: CAPTCHA"]},
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="searxng_json",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_SEARXNG_BACKOFF_SECONDS=90,
+            CRAWLER_SEARCH_CIRCUIT_BREAKER_FAILURES=999,
+        ),
+        get_requester=requester,
+    )
+
+    with pytest.raises(SearchUnavailableError):
+        client.search("query with suspended upstream engine")
+    first_attempts = client.consume_last_provider_attempts()
+
+    with pytest.raises(SearchUnavailableError):
+        client.search("second query should respect endpoint cooldown")
+    second_attempts = client.consume_last_provider_attempts()
+
+    assert calls == ["query with suspended upstream engine"]
+    assert first_attempts[0]["failure_type"] == "challenge_or_anomaly"
+    assert second_attempts[0]["failure_type"] == "provider_unavailable"
+    SearchClient.clear_global_runtime_state()
+
+
+def test_searxng_query_level_empty_results_do_not_open_local_circuit():
+    calls: list[str] = []
+
+    def requester(url, params, timeout, verify, headers):
+        query = str(params.get("q"))
+        calls.append(query)
+        if query.startswith("empty"):
+            return SimpleNamespace(
+                status_code=200,
+                text='{"results":[],"unresponsive_engines":["duckduckgo timeout"]}',
+                json=lambda: {"results": [], "unresponsive_engines": ["duckduckgo timeout"]},
+                raise_for_status=lambda: None,
+            )
+        return SimpleNamespace(
+            status_code=200,
+            text='{"results":[{"title":"Sigma Chi Demo","url":"https://example.org/chapter","content":"Official chapter site"}]}',
+            json=lambda: {
+                "results": [
+                    {
+                        "title": "Sigma Chi Demo",
+                        "url": "https://example.org/chapter",
+                        "content": "Official chapter site",
+                    }
+                ]
+            },
+            raise_for_status=lambda: None,
+        )
+
+    client = SearchClient(
+        Settings(
+            database_url="postgresql://postgres:postgres@localhost:5433/fratfinder",
+            CRAWLER_SEARCH_PROVIDER="searxng_json",
+            CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+            CRAWLER_SEARCH_CIRCUIT_BREAKER_FAILURES=2,
+            CRAWLER_SEARCH_CIRCUIT_BREAKER_COOLDOWN_SECONDS=60,
+            CRAWLER_SEARCH_SEARXNG_BACKOFF_SECONDS=90,
+        ),
+        get_requester=requester,
+    )
+
+    for index in range(3):
+        with pytest.raises(SearchUnavailableError):
+            client.search(f"empty query {index}")
+
+    results = client.search("healthy query after empty results")
+
+    assert len(results) == 1
+    assert calls == [
+        "empty query 0",
+        "empty query 1",
+        "empty query 2",
+        "healthy query after empty results",
+    ]

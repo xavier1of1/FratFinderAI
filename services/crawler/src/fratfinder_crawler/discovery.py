@@ -428,12 +428,16 @@ def _resolve_alias_from_repository(
         candidate_acronym = _fraternity_acronym(candidate_name)
 
         score = 0
-        if target_compact == candidate_compact or target_compact == candidate_slug_compact:
+        exact_identity_match = target_compact == candidate_compact or target_compact == candidate_slug_compact
+        if exact_identity_match:
             score += 6
         overlap = len(target_tokens.intersection(candidate_tokens))
         if overlap > 0:
             score += overlap
-        if target_acronym and target_acronym == candidate_acronym:
+        # Shared acronyms are not safe identity evidence by themselves:
+        # Delta Sigma Pi and Delta Sigma Phi both compress to "DSP".
+        # Curated short aliases are handled earlier in _ALIAS_CANONICALS.
+        if exact_identity_match and target_acronym and target_acronym == candidate_acronym:
             score += 4
 
         if score > best_score:

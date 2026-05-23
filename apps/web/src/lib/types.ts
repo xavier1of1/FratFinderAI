@@ -391,6 +391,7 @@ export type FraternityCrawlRequestStage =
   | "crawl_run"
   | "purge_inactive_schools"
   | "enrichment"
+  | "promotion_recovery_needed"
   | "completed"
   | "failed";
 
@@ -400,6 +401,8 @@ export interface FraternityCrawlRequestConfig {
   maxEnrichmentCycles: number;
   pauseMs: number;
   crawlPolicyVersion?: string | null;
+  targetSchoolName?: string | null;
+  targetChapterName?: string | null;
 }
 
 export interface FraternityCrawlSourceQuality {

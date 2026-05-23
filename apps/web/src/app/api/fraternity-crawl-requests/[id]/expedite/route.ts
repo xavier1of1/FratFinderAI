@@ -31,7 +31,7 @@ export async function POST(_: NextRequest, context: { params: { id: string } }) 
       await updateFraternityCrawlRequest({
         id,
         status: "queued",
-        stage: current.stage === "awaiting_confirmation" ? "discovery" : current.stage,
+        stage: current.stage === "awaiting_confirmation" || current.stage === "promotion_recovery_needed" ? "discovery" : current.stage,
         scheduledFor: nowIso,
         priority: 100,
         lastError: null

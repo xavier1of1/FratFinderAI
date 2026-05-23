@@ -92,6 +92,73 @@ class RequestGraphRepository:
             )
         self._connection.commit()
 
+    def update_worker_phase(
+        self,
+        worker_id: str,
+        *,
+        phase: str,
+        lease_seconds: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Heartbeat a worker and merge lightweight phase diagnostics into metadata."""
+        normalized_phase = str(phase or "").strip().lower() or "unknown"
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE worker_processes
+                SET
+                    last_heartbeat_at = NOW(),
+                    lease_expires_at = CASE
+                      WHEN %s::int IS NULL THEN lease_expires_at
+                      ELSE NOW() + (%s::int * INTERVAL '1 second')
+                    END,
+                    status = 'active',
+                    metadata = COALESCE(metadata, '{}'::jsonb)
+                      || jsonb_build_object(
+                            'phase', %s::text,
+                            'phaseStartedAt',
+                                CASE
+                                  WHEN COALESCE(metadata ->> 'phase', '') = %s::text
+                                       AND NULLIF(metadata ->> 'phaseStartedAt', '') IS NOT NULL
+                                    THEN metadata ->> 'phaseStartedAt'
+                                  ELSE NOW()::text
+                                END,
+                            'lastHeartbeatAt', NOW()::text
+                         )
+                      || %s::jsonb
+                WHERE worker_id = %s
+                """,
+                (
+                    lease_seconds,
+                    lease_seconds,
+                    normalized_phase,
+                    normalized_phase,
+                    Jsonb(metadata or {}),
+                    worker_id,
+                ),
+            )
+        self._connection.commit()
+
+    def expire_stale_worker_processes(self, workload_lane: str | None = None) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE worker_processes
+                SET
+                    status = 'stopped',
+                    lease_expires_at = NULL,
+                    last_heartbeat_at = NOW()
+                WHERE status = 'active'
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at <= NOW()
+                  AND (%s::text IS NULL OR workload_lane = %s::text)
+                """,
+                (workload_lane, workload_lane),
+            )
+            expired = cursor.rowcount
+        self._connection.commit()
+        return int(expired or 0)
+
     def stop_worker_process(self, worker_id: str, status: str = "stopped") -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(

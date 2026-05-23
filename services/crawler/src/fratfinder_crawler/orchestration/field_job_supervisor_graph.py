@@ -77,10 +77,19 @@ class FieldJobSupervisorGraphRuntime:
             "enrichment_observations_logged",
             "mid_batch_provider_rechecks",
             "mid_batch_provider_reorders",
+            "degraded_authoritative_claimed",
+            "verify_school_cache_hit",
+            "verify_school_status_decision_hit",
+            "verify_school_activity_cache_hit",
+            "verify_school_school_policy_hit",
+            "verify_school_evidence_missing",
+            "verify_school_official_url_reused",
+            "verify_school_provider_search_attempted",
         ):
             aggregate[key] = int(result.get(key, 0) or 0)
         for key in ("preflight_probe_queries", "chapter_search_queries"):
             aggregate[key] = list(result.get(key) or [])
+        aggregate["provider_window_state"] = dict(result.get("provider_window_state") or {})
         return aggregate
 
     def _build_graph(self):
@@ -169,6 +178,14 @@ class FieldJobSupervisorGraphRuntime:
         enrichment_observations_logged = 0
         mid_batch_provider_rechecks = 0
         mid_batch_provider_reorders = 0
+        degraded_authoritative_claimed = 0
+        verify_school_cache_hit = 0
+        verify_school_status_decision_hit = 0
+        verify_school_activity_cache_hit = 0
+        verify_school_school_policy_hit = 0
+        verify_school_evidence_missing = 0
+        verify_school_official_url_reused = 0
+        verify_school_provider_search_attempted = 0
         preflight_probe_queries: list[str] = []
         chapter_search_queries: list[str] = []
         provider_window_state: dict[str, Any] = {}
@@ -186,6 +203,14 @@ class FieldJobSupervisorGraphRuntime:
             enrichment_observations_logged += int(result.get("enrichment_observations_logged", 0) or 0)
             mid_batch_provider_rechecks += int(result.get("mid_batch_provider_rechecks", 0) or 0)
             mid_batch_provider_reorders += int(result.get("mid_batch_provider_reorders", 0) or 0)
+            degraded_authoritative_claimed += int(result.get("degraded_authoritative_claimed", 0) or 0)
+            verify_school_cache_hit += int(result.get("verify_school_cache_hit", 0) or 0)
+            verify_school_status_decision_hit += int(result.get("verify_school_status_decision_hit", 0) or 0)
+            verify_school_activity_cache_hit += int(result.get("verify_school_activity_cache_hit", 0) or 0)
+            verify_school_school_policy_hit += int(result.get("verify_school_school_policy_hit", 0) or 0)
+            verify_school_evidence_missing += int(result.get("verify_school_evidence_missing", 0) or 0)
+            verify_school_official_url_reused += int(result.get("verify_school_official_url_reused", 0) or 0)
+            verify_school_provider_search_attempted += int(result.get("verify_school_provider_search_attempted", 0) or 0)
             for query in result.get("preflight_probe_queries") or []:
                 if query not in preflight_probe_queries:
                     preflight_probe_queries.append(str(query))
@@ -215,6 +240,14 @@ class FieldJobSupervisorGraphRuntime:
             enrichment_observations_logged=enrichment_observations_logged,
             mid_batch_provider_rechecks=mid_batch_provider_rechecks,
             mid_batch_provider_reorders=mid_batch_provider_reorders,
+            degraded_authoritative_claimed=degraded_authoritative_claimed,
+            verify_school_cache_hit=verify_school_cache_hit,
+            verify_school_status_decision_hit=verify_school_status_decision_hit,
+            verify_school_activity_cache_hit=verify_school_activity_cache_hit,
+            verify_school_school_policy_hit=verify_school_school_policy_hit,
+            verify_school_evidence_missing=verify_school_evidence_missing,
+            verify_school_official_url_reused=verify_school_official_url_reused,
+            verify_school_provider_search_attempted=verify_school_provider_search_attempted,
             provider_window_state=provider_window_state,
         )
         return {
@@ -231,6 +264,14 @@ class FieldJobSupervisorGraphRuntime:
             "enrichment_observations_logged": enrichment_observations_logged,
             "mid_batch_provider_rechecks": mid_batch_provider_rechecks,
             "mid_batch_provider_reorders": mid_batch_provider_reorders,
+            "degraded_authoritative_claimed": degraded_authoritative_claimed,
+            "verify_school_cache_hit": verify_school_cache_hit,
+            "verify_school_status_decision_hit": verify_school_status_decision_hit,
+            "verify_school_activity_cache_hit": verify_school_activity_cache_hit,
+            "verify_school_school_policy_hit": verify_school_school_policy_hit,
+            "verify_school_evidence_missing": verify_school_evidence_missing,
+            "verify_school_official_url_reused": verify_school_official_url_reused,
+            "verify_school_provider_search_attempted": verify_school_provider_search_attempted,
             "preflight_probe_queries": preflight_probe_queries,
             "chapter_search_queries": chapter_search_queries,
             "provider_window_state": provider_window_state,
@@ -253,6 +294,14 @@ class FieldJobSupervisorGraphRuntime:
             "enrichment_observations_logged",
             "mid_batch_provider_rechecks",
             "mid_batch_provider_reorders",
+            "degraded_authoritative_claimed",
+            "verify_school_cache_hit",
+            "verify_school_status_decision_hit",
+            "verify_school_activity_cache_hit",
+            "verify_school_school_policy_hit",
+            "verify_school_evidence_missing",
+            "verify_school_official_url_reused",
+            "verify_school_provider_search_attempted",
         ):
             result[key] = int(state.get(key, 0) or 0)
         result["preflight_probe_queries"] = list(state.get("preflight_probe_queries") or [])

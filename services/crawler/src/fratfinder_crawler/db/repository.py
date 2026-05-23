@@ -89,6 +89,86 @@ def _normalize_field_job_queue_state(value: Any) -> str:
     return "actionable"
 
 
+_FIELD_JOB_BLOCKING_REASONS = {
+    "provider_degraded",
+    "transient_network",
+    "provider_low_signal",
+    "dependency_wait",
+    "website_required",
+    "status_dependency_unmet",
+    "status_no_decision",
+    "status_unknown",
+    "status_review_required",
+    "status_unresolved",
+    "status_evidence_refresh_required",
+    "school_evidence_missing",
+    "status_identity_repair_required",
+    "queued_for_entity_repair",
+    "identity_semantically_incomplete",
+    "repair_exhausted",
+    "identity_semantically_invalid",
+    "invalid_non_chapter",
+}
+
+_FIELD_JOB_PROVIDER_BLOCKING_REASONS = {
+    "provider_degraded",
+    "transient_network",
+    "provider_low_signal",
+}
+
+_FIELD_JOB_DEPENDENCY_BLOCKING_REASONS = {
+    "dependency_wait",
+    "website_required",
+    "status_dependency_unmet",
+    "status_no_decision",
+    "status_unknown",
+    "status_review_required",
+    "status_unresolved",
+    "status_evidence_refresh_required",
+    "school_evidence_missing",
+}
+
+_FIELD_JOB_REPAIR_BLOCKING_REASONS = {
+    "queued_for_entity_repair",
+    "identity_semantically_incomplete",
+    "status_identity_repair_required",
+    "repair_exhausted",
+}
+
+_FIELD_JOB_INVALID_BLOCKING_REASONS = {
+    "identity_semantically_invalid",
+    "invalid_non_chapter",
+}
+
+
+def _queue_state_from_blocked_reason(reason: Any) -> str | None:
+    normalized = str(reason or "").strip()
+    if normalized in _FIELD_JOB_PROVIDER_BLOCKING_REASONS:
+        return "blocked_provider"
+    if normalized in _FIELD_JOB_DEPENDENCY_BLOCKING_REASONS:
+        return "blocked_dependency"
+    if normalized in _FIELD_JOB_REPAIR_BLOCKING_REASONS:
+        return "blocked_repairable"
+    if normalized in _FIELD_JOB_INVALID_BLOCKING_REASONS:
+        return "blocked_invalid"
+    return None
+
+
+def _strip_postgres_nuls(value: Any) -> Any:
+    """PostgreSQL text/jsonb cannot store NUL bytes; strip them at the repository boundary."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {str(_strip_postgres_nuls(key)): _strip_postgres_nuls(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_strip_postgres_nuls(item) for item in value]
+    if isinstance(value, tuple):
+        return [_strip_postgres_nuls(item) for item in value]
+    if isinstance(value, set):
+        return [_strip_postgres_nuls(item) for item in value]
+    return value
+
+
 def _normalize_field_job_validity_class(value: Any) -> str | None:
     normalized = str(value or "").strip()
     if normalized in {"canonical_valid", "repairable_candidate", "provisional_candidate", "invalid_non_chapter"}:
@@ -122,6 +202,10 @@ def _extract_field_job_typed_state(
         "blocked_reason": str(blocked_reason).strip() or None if blocked_reason is not None else None,
         "terminal_outcome": completed_payload.get("status") if isinstance(completed_payload, dict) else None,
     }
+    if typed["queue_state"] is None and typed["blocked_reason"] is not None:
+        typed["queue_state"] = _queue_state_from_blocked_reason(typed["blocked_reason"])
+    if typed["queue_state"] == "actionable":
+        typed["blocked_reason"] = None
     return typed
 
 
@@ -266,7 +350,7 @@ def _build_contact_provenance_patch(
             "updatedAt": datetime.utcnow().isoformat(),
         }
 
-    return patch
+    return _strip_postgres_nuls(patch)
 
 
 class CrawlerRepository:
@@ -882,6 +966,12 @@ class CrawlerRepository:
         reason_code: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SchoolPolicyRecord:
+        school_name = _strip_postgres_nuls(school_name)
+        greek_life_status = _strip_postgres_nuls(greek_life_status)
+        evidence_url = _strip_postgres_nuls(evidence_url)
+        evidence_source_type = _strip_postgres_nuls(evidence_source_type)
+        reason_code = _strip_postgres_nuls(reason_code)
+        metadata = _strip_postgres_nuls(metadata or {})
         school_slug = _normalize_school_slug(school_name)
         if school_slug is None:
             raise ValueError("school_name is required for school policy upsert")
@@ -932,7 +1022,7 @@ class CrawlerRepository:
                     evidence_url,
                     evidence_source_type,
                     reason_code,
-                    Jsonb(metadata or {}),
+                    Jsonb(metadata),
                 ),
             )
             row = cursor.fetchone()
@@ -1116,6 +1206,13 @@ class CrawlerRepository:
         reason_code: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ChapterActivityRecord:
+        fraternity_slug = _strip_postgres_nuls(fraternity_slug)
+        school_name = _strip_postgres_nuls(school_name)
+        chapter_activity_status = _strip_postgres_nuls(chapter_activity_status)
+        evidence_url = _strip_postgres_nuls(evidence_url)
+        evidence_source_type = _strip_postgres_nuls(evidence_source_type)
+        reason_code = _strip_postgres_nuls(reason_code)
+        metadata = _strip_postgres_nuls(metadata or {})
         school_slug = _normalize_school_slug(school_name)
         if school_slug is None:
             raise ValueError("school_name is required for chapter activity upsert")
@@ -1169,7 +1266,7 @@ class CrawlerRepository:
                     evidence_url,
                     evidence_source_type,
                     reason_code,
-                    Jsonb(metadata or {}),
+                    Jsonb(metadata),
                 ),
             )
             row = cursor.fetchone()
@@ -1190,6 +1287,7 @@ class CrawlerRepository:
         )
 
     def upsert_campus_status_source(self, source: CampusStatusSource) -> str:
+        source_metadata = _strip_postgres_nuls(dict(source.metadata or {}))
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -1227,9 +1325,9 @@ class CrawlerRepository:
                 RETURNING id
                 """,
                 (
-                    source.school_name,
-                    source.source_url,
-                    source.source_host,
+                    _strip_postgres_nuls(source.school_name),
+                    _strip_postgres_nuls(source.source_url),
+                    _strip_postgres_nuls(source.source_host),
                     str(source.source_type),
                     source.authority_tier,
                     float(source.currentness_score),
@@ -1237,10 +1335,10 @@ class CrawlerRepository:
                     float(source.parse_completeness_score),
                     bool(source.is_official_school_source),
                     source.last_fetched_at,
-                    source.content_hash,
-                    source.title[:5000],
-                    (source.text or "")[:16000],
-                    Jsonb(dict(source.metadata or {})),
+                    _strip_postgres_nuls(source.content_hash),
+                    _strip_postgres_nuls(source.title[:5000]),
+                    _strip_postgres_nuls((source.text or "")[:16000]),
+                    Jsonb(source_metadata),
                 ),
             )
             row = cursor.fetchone()
@@ -1252,6 +1350,7 @@ class CrawlerRepository:
             cursor.execute("DELETE FROM campus_status_zones WHERE campus_status_source_id = %s", (campus_status_source_id,))
             inserted = 0
             for zone in zones:
+                zone_metadata = _strip_postgres_nuls(dict(zone.metadata or {}))
                 cursor.execute(
                     """
                     INSERT INTO campus_status_zones (
@@ -1270,13 +1369,13 @@ class CrawlerRepository:
                     (
                         campus_status_source_id,
                         str(zone.zone_type),
-                        zone.heading,
-                        zone.dom_path,
-                        zone.text[:20000],
-                        Jsonb(list(zone.links)),
+                        _strip_postgres_nuls(zone.heading),
+                        _strip_postgres_nuls(zone.dom_path),
+                        _strip_postgres_nuls(zone.text[:20000]),
+                        Jsonb(_strip_postgres_nuls(list(zone.links))),
                         float(zone.confidence),
                         zone.parser_version,
-                        Jsonb(dict(zone.metadata or {})),
+                        Jsonb(zone_metadata),
                     ),
                 )
                 inserted += 1
@@ -1284,6 +1383,7 @@ class CrawlerRepository:
         return inserted
 
     def insert_chapter_status_evidence(self, evidence: ChapterStatusEvidence) -> str:
+        evidence_metadata = _strip_postgres_nuls(dict(evidence.metadata or {}))
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -1307,18 +1407,18 @@ class CrawlerRepository:
                 """,
                 (
                     evidence.chapter_id,
-                    evidence.fraternity_name,
-                    evidence.school_name,
-                    evidence.source_url,
+                    _strip_postgres_nuls(evidence.fraternity_name),
+                    _strip_postgres_nuls(evidence.school_name),
+                    _strip_postgres_nuls(evidence.source_url),
                     evidence.authority_tier,
-                    evidence.evidence_type,
-                    evidence.status_signal,
-                    evidence.matched_text,
-                    evidence.matched_alias,
-                    evidence.zone_type,
+                    _strip_postgres_nuls(evidence.evidence_type),
+                    _strip_postgres_nuls(evidence.status_signal),
+                    _strip_postgres_nuls(evidence.matched_text),
+                    _strip_postgres_nuls(evidence.matched_alias),
+                    _strip_postgres_nuls(evidence.zone_type),
                     float(evidence.match_confidence),
                     float(evidence.evidence_confidence),
-                    Jsonb(dict(evidence.metadata or {})),
+                    Jsonb(evidence_metadata),
                 ),
             )
             row = cursor.fetchone()
@@ -1326,6 +1426,7 @@ class CrawlerRepository:
         return str(row["id"])
 
     def insert_chapter_status_decision(self, *, chapter_id: str, decision: ChapterStatusDecision) -> ChapterStatusDecision:
+        decision_trace = _strip_postgres_nuls(dict(decision.decision_trace or {}))
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -1350,10 +1451,10 @@ class CrawlerRepository:
                     str(decision.school_recognition_status),
                     str(decision.national_status),
                     float(decision.confidence),
-                    decision.reason_code,
-                    Jsonb(list(decision.conflict_flags)),
+                    _strip_postgres_nuls(decision.reason_code),
+                    Jsonb(_strip_postgres_nuls(list(decision.conflict_flags))),
                     list(decision.evidence_ids),
-                    Jsonb(dict(decision.decision_trace or {})),
+                    Jsonb(decision_trace),
                     bool(decision.review_required),
                 ),
             )
@@ -1733,7 +1834,7 @@ class CrawlerRepository:
 
         with self._connection.cursor() as cursor:
             for record in records:
-                payload = asdict(record)
+                payload = _strip_postgres_nuls(asdict(record))
                 self._contracts.validate_provenance(
                     {
                         "sourceSlug": payload["source_slug"],
@@ -1762,24 +1863,29 @@ class CrawlerRepository:
                         "chapter_id": chapter_id,
                         "source_id": source_id,
                         "crawl_run_id": crawl_run_id,
-                        "field_name": record.field_name,
-                        "field_value": record.field_value,
-                        "source_url": record.source_url,
-                        "source_snippet": record.source_snippet,
-                        "confidence": record.confidence,
+                        "field_name": payload["field_name"],
+                        "field_value": payload["field_value"],
+                        "source_url": payload["source_url"],
+                        "source_snippet": payload["source_snippet"],
+                        "confidence": payload["confidence"],
                     },
                 )
         self._connection.commit()
 
     def create_review_item(self, source_id: str | None, crawl_run_id: int | None, candidate: ReviewItemCandidate, chapter_id: str | None = None) -> None:
+        candidate_payload = _strip_postgres_nuls(candidate.payload if isinstance(candidate.payload, dict) else {})
+        candidate_reason = _strip_postgres_nuls(candidate.reason)
+        candidate_item_type = _strip_postgres_nuls(candidate.item_type)
+        candidate_source_slug = _strip_postgres_nuls(candidate.source_slug)
+        candidate_chapter_slug = _strip_postgres_nuls(candidate.chapter_slug)
         review_payload = {
-            "itemType": candidate.item_type,
-            "reason": candidate.reason,
-            "sourceSlug": candidate.source_slug,
-            "chapterSlug": candidate.chapter_slug,
-            "payload": candidate.payload,
+            "itemType": candidate_item_type,
+            "reason": candidate_reason,
+            "sourceSlug": candidate_source_slug,
+            "chapterSlug": candidate_chapter_slug,
+            "payload": candidate_payload,
         }
-        extraction_notes = candidate.payload.get("extractionNotes") if isinstance(candidate.payload, dict) else None
+        extraction_notes = candidate_payload.get("extractionNotes") if isinstance(candidate_payload, dict) else None
         if isinstance(extraction_notes, str) and extraction_notes.strip():
             review_payload["extractionNotes"] = extraction_notes
 
@@ -1795,14 +1901,15 @@ class CrawlerRepository:
                     source_id,
                     crawl_run_id,
                     chapter_id,
-                    candidate.item_type,
-                    candidate.reason,
-                    Jsonb(candidate.payload),
+                    candidate_item_type,
+                    candidate_reason,
+                    Jsonb(candidate_payload),
                 ),
             )
         self._connection.commit()
 
     def insert_chapter_evidence(self, record: ChapterEvidenceRecord) -> None:
+        record_payload = _strip_postgres_nuls(asdict(record))
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -1828,23 +1935,23 @@ class CrawlerRepository:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    record.chapter_id,
-                    record.chapter_slug,
-                    record.fraternity_slug,
-                    record.source_slug,
-                    record.request_id,
-                    record.crawl_run_id,
-                    record.field_name,
-                    record.candidate_value,
-                    record.confidence,
-                    record.trust_tier,
-                    record.evidence_status,
-                    record.source_url,
-                    record.source_snippet,
-                    record.provider,
-                    record.query,
-                    record.related_website_url,
-                    Jsonb(record.metadata),
+                    record_payload["chapter_id"],
+                    record_payload["chapter_slug"],
+                    record_payload["fraternity_slug"],
+                    record_payload["source_slug"],
+                    record_payload["request_id"],
+                    record_payload["crawl_run_id"],
+                    record_payload["field_name"],
+                    record_payload["candidate_value"],
+                    record_payload["confidence"],
+                    record_payload["trust_tier"],
+                    record_payload["evidence_status"],
+                    record_payload["source_url"],
+                    record_payload["source_snippet"],
+                    record_payload["provider"],
+                    record_payload["query"],
+                    record_payload["related_website_url"],
+                    Jsonb(record_payload["metadata"]),
                 ),
             )
         self._connection.commit()
@@ -2356,7 +2463,9 @@ class CrawlerRepository:
         field_state_updates: dict[str, str] | None = None,
         provenance_records: list[ProvenanceRecord] | None = None,
     ) -> None:
-        field_state_updates = field_state_updates or {}
+        chapter_updates = _strip_postgres_nuls(chapter_updates or {})
+        completed_payload = _strip_postgres_nuls(completed_payload or {})
+        field_state_updates = _strip_postgres_nuls(field_state_updates or {})
         provenance_records = provenance_records or []
         decision_evidence = _build_decision_evidence(completed_payload)
         contact_field_writes = any(
@@ -2437,7 +2546,7 @@ class CrawlerRepository:
             related_website_url = completed_payload.get("related_website_url")
 
             for record in provenance_records:
-                payload = asdict(record)
+                payload = _strip_postgres_nuls(asdict(record))
                 self._contracts.validate_provenance(
                     {
                         "sourceSlug": payload["source_slug"],
@@ -2468,15 +2577,16 @@ class CrawlerRepository:
                         "chapter_id": chapter_id,
                         "source_id": source_id,
                         "crawl_run_id": crawl_run_id,
-                        "field_name": record.field_name,
-                        "field_value": record.field_value,
-                        "source_url": record.source_url,
-                        "source_snippet": record.source_snippet,
-                        "confidence": record.confidence,
+                        "field_name": payload["field_name"],
+                        "field_value": payload["field_value"],
+                        "source_url": payload["source_url"],
+                        "source_snippet": payload["source_snippet"],
+                        "confidence": payload["confidence"],
                     },
                 )
                 evidence_status = "accepted" if completed_status == "updated" else "review" if completed_status == "review_required" else "observed"
-                trust_tier = "strong_official" if record.confidence >= 0.95 else "high" if record.confidence >= 0.85 else "medium" if record.confidence >= 0.7 else "low"
+                confidence = float(payload.get("confidence") or 0.0)
+                trust_tier = "strong_official" if confidence >= 0.95 else "high" if confidence >= 0.85 else "medium" if confidence >= 0.7 else "low"
                 cursor.execute(
                     """
                     INSERT INTO chapter_evidence (
@@ -2505,21 +2615,21 @@ class CrawlerRepository:
                         "fraternity_slug": fraternity_slug,
                         "source_slug": source_slug,
                         "crawl_run_id": crawl_run_id,
-                        "field_name": record.field_name,
-                        "candidate_value": record.field_value,
-                        "confidence": record.confidence,
+                        "field_name": payload["field_name"],
+                        "candidate_value": payload["field_value"],
+                        "confidence": payload["confidence"],
                         "trust_tier": trust_tier,
                         "evidence_status": evidence_status,
-                        "source_url": record.source_url,
-                        "source_snippet": record.source_snippet,
+                        "source_url": payload["source_url"],
+                        "source_snippet": payload["source_snippet"],
                         "provider": provider,
                         "query": query,
-                        "related_website_url": related_website_url if record.field_name != "website_url" else None,
+                        "related_website_url": related_website_url if payload["field_name"] != "website_url" else None,
                         "metadata": Jsonb(
                             {
                                 "runtime": "inline_v3",
                                 "completedStatus": completed_status,
-                                "fieldState": field_state_updates.get(record.field_name),
+                                "fieldState": field_state_updates.get(payload["field_name"]),
                                 "decisionStage": decision_evidence.decision_stage,
                                 "pageScope": decision_evidence.page_scope,
                                 "contactSpecificity": decision_evidence.contact_specificity,
@@ -2873,6 +2983,35 @@ class CrawlerRepository:
         source_filter = ""
         field_name_filter = ""
         email_dependency_filter = ""
+        verify_school_claim_filter = """
+                      AND (
+                          fj.field_name <> 'verify_school_match'
+                          OR NULLIF(BTRIM(COALESCE(fj.payload ->> 'candidateSchoolName', '')), '') IS NOT NULL
+                          OR EXISTS (
+                              SELECT 1
+                              FROM chapter_status_decisions csd
+                              WHERE csd.chapter_id = fj.chapter_id
+                                AND csd.final_status IN ('active', 'inactive', 'review')
+                                AND COALESCE(csd.school_recognition_status, 'unknown') <> 'unknown'
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM fraternity_school_activity_cache fsac
+                              JOIN fraternities f2 ON f2.id = c.fraternity_id
+                              WHERE fsac.fraternity_slug = f2.slug
+                                AND fsac.school_slug = regexp_replace(regexp_replace(lower(COALESCE(c.university_name, '')), '[^a-z0-9]+', '-', 'g'), '(^-|-$)', '', 'g')
+                                AND fsac.evidence_source_type = 'official_school'
+                                AND fsac.chapter_activity_status IN ('confirmed_active', 'confirmed_inactive')
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM school_greek_life_registry sgr
+                              WHERE sgr.school_slug = regexp_replace(regexp_replace(lower(COALESCE(c.university_name, '')), '[^a-z0-9]+', '-', 'g'), '(^-|-$)', '', 'g')
+                                AND sgr.evidence_source_type = 'official_school'
+                                AND sgr.greek_life_status IN ('allowed', 'banned')
+                          )
+                      )
+        """
         degraded_claim_filter = ""
         field_priority_case = """
                         CASE fj.field_name
@@ -3014,20 +3153,35 @@ class CrawlerRepository:
                     JOIN chapters c ON c.id = fj.chapter_id
                     WHERE fj.status = 'queued'
                       AND COALESCE(fj.queue_state, 'actionable') = 'actionable'
+                      AND COALESCE(NULLIF(BTRIM(fj.blocked_reason), ''), '') NOT IN (
+                          'provider_degraded',
+                          'transient_network',
+                          'provider_low_signal',
+                          'dependency_wait',
+                          'website_required',
+                          'status_dependency_unmet',
+                          'status_no_decision',
+                          'status_unknown',
+                          'status_review_required',
+                          'status_unresolved',
+                          'status_evidence_refresh_required',
+                          'school_evidence_missing'
+                      )
                       AND fj.scheduled_at <= NOW()
                       AND fj.attempts < fj.max_attempts
 {source_filter}
 {field_name_filter}
  {email_dependency_filter}
+ {verify_school_claim_filter}
  {degraded_claim_filter}
                     ORDER BY
+                        {field_priority_case} ASC,
                         fj.priority DESC,
                         CASE
                             WHEN fj.queue_state = 'deferred' THEN 1
                             ELSE 0
                         END ASC,
                         fj.scheduled_at ASC,
-                        {field_priority_case} ASC,
                         fj.id ASC
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
@@ -3139,7 +3293,7 @@ class CrawlerRepository:
                 terminal_outcome=row["terminal_outcome"],
             )
 
-    def get_field_job_worker_process_stats(self, workload_lane: str = "contact_resolution") -> dict[str, int]:
+    def get_field_job_worker_process_stats(self, workload_lane: str = "contact_resolution") -> dict[str, Any]:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -3151,6 +3305,7 @@ class CrawlerRepository:
                   )::int AS active_workers,
                   COUNT(*) FILTER (
                     WHERE workload_lane = %s
+                      AND status = 'active'
                       AND lease_expires_at IS NOT NULL
                       AND lease_expires_at <= NOW()
                   )::int AS stale_workers
@@ -3159,9 +3314,40 @@ class CrawlerRepository:
                 (workload_lane, workload_lane),
             )
             row = cursor.fetchone() or {}
+            cursor.execute(
+                """
+                SELECT
+                    worker_id,
+                    runtime_owner,
+                    COALESCE(metadata ->> 'phase', 'unknown') AS phase,
+                    metadata ->> 'phaseStartedAt' AS phase_started_at,
+                    metadata ->> 'lastHeartbeatAt' AS phase_last_heartbeat_at,
+                    last_heartbeat_at::text AS last_heartbeat_at,
+                    lease_expires_at::text AS lease_expires_at,
+                    EXTRACT(EPOCH FROM (NOW() - last_heartbeat_at))::int AS heartbeat_age_seconds,
+                    CASE
+                      WHEN NULLIF(metadata ->> 'phaseStartedAt', '') IS NULL THEN NULL
+                      ELSE EXTRACT(EPOCH FROM (NOW() - (metadata ->> 'phaseStartedAt')::timestamptz))::int
+                    END AS phase_age_seconds
+                FROM worker_processes
+                WHERE workload_lane = %s
+                  AND status = 'active'
+                  AND (lease_expires_at IS NULL OR lease_expires_at > NOW())
+                ORDER BY last_heartbeat_at DESC, worker_id ASC
+                LIMIT 20
+                """,
+                (workload_lane,),
+            )
+            phase_rows = [dict(item) for item in cursor.fetchall()]
+        phase_counts: dict[str, int] = {}
+        for item in phase_rows:
+            phase = str(item.get("phase") or "unknown")
+            phase_counts[phase] = phase_counts.get(phase, 0) + 1
         return {
             "active_workers": int(row.get("active_workers") or 0),
             "stale_workers": int(row.get("stale_workers") or 0),
+            "active_worker_phases": phase_rows,
+            "phase_counts": phase_counts,
         }
 
     def get_field_job_queue_counts(self) -> dict[str, int]:
@@ -3245,7 +3431,14 @@ class CrawlerRepository:
                             NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
                             NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
                             NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
-                            NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
+                            NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), ''),
+                            CASE COALESCE(fj.queue_state, 'actionable')
+                                WHEN 'blocked_provider' THEN 'provider_degraded'
+                                WHEN 'blocked_dependency' THEN 'dependency_wait'
+                                WHEN 'blocked_repairable' THEN 'queued_for_entity_repair'
+                                WHEN 'blocked_invalid' THEN 'identity_semantically_invalid'
+                                ELSE NULL
+                            END
                         ),
                         queue_state = CASE
                             WHEN COALESCE(fj.queue_state, 'actionable') IN ('actionable', 'deferred')
@@ -3254,8 +3447,15 @@ class CrawlerRepository:
                                      NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
                                      NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
                                      NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
-                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
-                                 ) IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'repair_exhausted')
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), ''),
+                                     CASE COALESCE(fj.queue_state, 'actionable')
+                                        WHEN 'blocked_provider' THEN 'provider_degraded'
+                                        WHEN 'blocked_dependency' THEN 'dependency_wait'
+                                        WHEN 'blocked_repairable' THEN 'queued_for_entity_repair'
+                                        WHEN 'blocked_invalid' THEN 'identity_semantically_invalid'
+                                        ELSE NULL
+                                     END
+                                 ) IN ('queued_for_entity_repair', 'identity_semantically_incomplete', 'status_identity_repair_required', 'repair_exhausted')
                                 THEN 'blocked_repairable'
                             WHEN COALESCE(fj.queue_state, 'actionable') IN ('actionable', 'deferred')
                                  AND COALESCE(
@@ -3263,7 +3463,14 @@ class CrawlerRepository:
                                      NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
                                      NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
                                      NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
-                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), ''),
+                                     CASE COALESCE(fj.queue_state, 'actionable')
+                                        WHEN 'blocked_provider' THEN 'provider_degraded'
+                                        WHEN 'blocked_dependency' THEN 'dependency_wait'
+                                        WHEN 'blocked_repairable' THEN 'queued_for_entity_repair'
+                                        WHEN 'blocked_invalid' THEN 'identity_semantically_invalid'
+                                        ELSE NULL
+                                     END
                                  ) IN ('provider_degraded', 'transient_network', 'provider_low_signal')
                                 THEN 'blocked_provider'
                             WHEN COALESCE(fj.queue_state, 'actionable') IN ('actionable', 'deferred')
@@ -3272,15 +3479,45 @@ class CrawlerRepository:
                                      NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
                                      NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
                                      NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
-                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')
-                                 ) IN ('dependency_wait', 'website_required')
+                                     NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), ''),
+                                     CASE COALESCE(fj.queue_state, 'actionable')
+                                        WHEN 'blocked_provider' THEN 'provider_degraded'
+                                        WHEN 'blocked_dependency' THEN 'dependency_wait'
+                                        WHEN 'blocked_repairable' THEN 'queued_for_entity_repair'
+                                        WHEN 'blocked_invalid' THEN 'identity_semantically_invalid'
+                                        ELSE NULL
+                                     END
+                                 ) IN (
+                                     'dependency_wait',
+                                     'website_required',
+                                     'status_dependency_unmet',
+                                     'status_no_decision',
+                                     'status_unknown',
+                                     'status_review_required',
+                                     'status_unresolved',
+                                     'status_evidence_refresh_required',
+                                     'school_evidence_missing'
+                                 )
                                 THEN 'blocked_dependency'
                             ELSE COALESCE(fj.queue_state, 'actionable')
                         END
                     WHERE fj.status = 'queued'
                     RETURNING
                         CASE
-                            WHEN COALESCE(NULLIF(BTRIM(blocked_reason), ''), NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''), NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''), NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''), NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), '')) IS NOT NULL
+                            WHEN COALESCE(
+                                NULLIF(BTRIM(blocked_reason), ''),
+                                NULLIF(BTRIM(fj.payload #>> '{contactResolution,blockedReason}'), ''),
+                                NULLIF(BTRIM(fj.payload #>> '{contactResolution,reasonCode}'), ''),
+                                NULLIF(BTRIM(fj.payload #>> '{queueTriage,reason}'), ''),
+                                NULLIF(BTRIM(fj.payload #>> '{queueTriage,repairReason}'), ''),
+                                CASE COALESCE(queue_state, 'actionable')
+                                    WHEN 'blocked_provider' THEN 'provider_degraded'
+                                    WHEN 'blocked_dependency' THEN 'dependency_wait'
+                                    WHEN 'blocked_repairable' THEN 'queued_for_entity_repair'
+                                    WHEN 'blocked_invalid' THEN 'identity_semantically_invalid'
+                                    ELSE NULL
+                                END
+                            ) IS NOT NULL
                             THEN 1 ELSE 0
                         END AS reason_present,
                         CASE
@@ -3417,6 +3654,128 @@ class CrawlerRepository:
             )
         return jobs
 
+    def list_field_jobs_for_school_evidence_refresh(
+        self,
+        *,
+        limit: int = 50,
+        reason_codes: list[str] | None = None,
+        fraternity_slug: str | None = None,
+        school_name: str | None = None,
+    ) -> list[FieldJob]:
+        selected_reasons = reason_codes or [
+            "school_evidence_missing",
+            "status_no_decision",
+            "status_unknown",
+            "status_evidence_refresh_required",
+            "status_dependency_unmet",
+        ]
+        params: dict[str, Any] = {
+            "limit": max(1, int(limit)),
+            "reason_codes": selected_reasons,
+            "fraternity_slug": str(fraternity_slug or "").strip() or None,
+            "school_name": str(school_name or "").strip() or None,
+        }
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    fj.id,
+                    fj.chapter_id,
+                    fj.crawl_run_id,
+                    c.slug AS chapter_slug,
+                    c.name AS chapter_name,
+                    f.slug AS fraternity_slug,
+                    s.id AS source_id,
+                    s.slug AS source_slug,
+                    fj.field_name,
+                    fj.payload,
+                    fj.attempts,
+                    fj.max_attempts,
+                    fj.priority,
+                    fj.queue_state,
+                    fj.validity_class,
+                    fj.repair_state,
+                    fj.blocked_reason,
+                    fj.terminal_outcome,
+                    c.website_url,
+                    c.instagram_url,
+                    c.contact_email,
+                    c.university_name,
+                    c.chapter_status,
+                    c.field_states,
+                    s.base_url AS source_base_url,
+                    s.list_path AS source_list_path
+                FROM field_jobs fj
+                JOIN chapters c ON c.id = fj.chapter_id
+                JOIN fraternities f ON f.id = c.fraternity_id
+                LEFT JOIN crawl_runs cr ON cr.id = fj.crawl_run_id
+                LEFT JOIN sources s ON s.id = cr.source_id
+                WHERE fj.status = 'queued'
+                  AND COALESCE(fj.queue_state, 'actionable') = 'blocked_dependency'
+                  AND COALESCE(NULLIF(BTRIM(fj.blocked_reason), ''), fj.payload #>> '{contactResolution,reasonCode}', 'unknown') = ANY(%(reason_codes)s::text[])
+                  AND (%(fraternity_slug)s::text IS NULL OR f.slug = %(fraternity_slug)s)
+                  AND (%(school_name)s::text IS NULL OR c.university_name ILIKE %(school_name)s)
+                ORDER BY
+                    CASE fj.field_name
+                        WHEN 'verify_school_match' THEN 0
+                        WHEN 'find_instagram' THEN 1
+                        WHEN 'verify_website' THEN 2
+                        WHEN 'find_website' THEN 3
+                        WHEN 'find_email' THEN 4
+                        ELSE 5
+                    END ASC,
+                    fj.priority DESC,
+                    fj.scheduled_at ASC,
+                    fj.id ASC
+                LIMIT %(limit)s
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+
+        jobs: list[FieldJob] = []
+        for row in rows:
+            payload = dict(row["payload"] or {})
+            source_base_url = row["source_base_url"]
+            source_list_path = row["source_list_path"]
+            if isinstance(source_list_path, str) and source_list_path.startswith("http"):
+                payload.setdefault("sourceListUrl", source_list_path)
+            elif isinstance(source_list_path, str) and source_list_path and source_base_url:
+                payload.setdefault("sourceListUrl", f"{source_base_url.rstrip('/')}/{source_list_path.lstrip('/')}")
+            elif source_base_url:
+                payload.setdefault("sourceListUrl", source_base_url)
+            jobs.append(
+                FieldJob(
+                    id=str(row["id"]),
+                    chapter_id=str(row["chapter_id"]),
+                    chapter_slug=row["chapter_slug"],
+                    chapter_name=row["chapter_name"],
+                    field_name=row["field_name"],
+                    payload=payload,
+                    attempts=int(row["attempts"]),
+                    max_attempts=int(row["max_attempts"]),
+                    priority=int(row["priority"]),
+                    claim_token="",
+                    source_base_url=source_base_url,
+                    website_url=row["website_url"],
+                    instagram_url=row["instagram_url"],
+                    contact_email=row["contact_email"],
+                    fraternity_slug=row["fraternity_slug"],
+                    source_id=str(row["source_id"]) if row["source_id"] is not None else None,
+                    source_slug=row["source_slug"],
+                    university_name=row["university_name"],
+                    crawl_run_id=int(row["crawl_run_id"]) if row["crawl_run_id"] is not None else None,
+                    chapter_status=row["chapter_status"] or "active",
+                    field_states=row["field_states"] or {},
+                    queue_state=row["queue_state"] or "blocked_dependency",
+                    validity_class=row["validity_class"],
+                    repair_state=row["repair_state"],
+                    blocked_reason=row["blocked_reason"],
+                    terminal_outcome=row["terminal_outcome"],
+                )
+            )
+        return jobs
+
     def patch_queued_field_job(
         self,
         field_job_id: str,
@@ -3428,11 +3787,14 @@ class CrawlerRepository:
         terminal_failure: bool | None = None,
         completed_payload: dict[str, Any] | None = None,
     ) -> bool:
+        payload_patch = _strip_postgres_nuls(payload_patch or {})
+        completed_payload = _strip_postgres_nuls(completed_payload) if completed_payload is not None else None
+        last_error = _strip_postgres_nuls(last_error) if last_error is not None else None
         assignments = ["payload = COALESCE(payload, '{}'::jsonb) || %(payload_patch)s"]
         typed_state = _extract_field_job_typed_state(payload_patch, completed_payload=completed_payload)
         params: dict[str, Any] = {
             "field_job_id": field_job_id,
-            "payload_patch": Jsonb(payload_patch or {}),
+            "payload_patch": Jsonb(payload_patch),
             "queue_state": typed_state["queue_state"],
             "validity_class": typed_state["validity_class"],
             "repair_state": typed_state["repair_state"],
@@ -3442,7 +3804,14 @@ class CrawlerRepository:
         assignments.append("queue_state = COALESCE(%(queue_state)s, queue_state, 'actionable')")
         assignments.append("validity_class = COALESCE(%(validity_class)s, validity_class)")
         assignments.append("repair_state = COALESCE(%(repair_state)s, repair_state)")
-        assignments.append("blocked_reason = COALESCE(%(blocked_reason)s, blocked_reason)")
+        assignments.append(
+            """
+            blocked_reason = CASE
+                WHEN %(queue_state)s = 'actionable' THEN NULL
+                ELSE COALESCE(%(blocked_reason)s, blocked_reason)
+            END
+            """
+        )
         if scheduled_delay_seconds is not None:
             assignments.append("scheduled_at = NOW() + (%(scheduled_delay_seconds)s * INTERVAL '1 second')")
             params["scheduled_delay_seconds"] = max(0, int(scheduled_delay_seconds))
@@ -3481,6 +3850,236 @@ class CrawlerRepository:
             updated = cursor.rowcount
         self._connection.commit()
         return updated > 0
+
+    def recover_failed_field_jobs(
+        self,
+        *,
+        limit: int = 100,
+        source_slug: str | None = None,
+        field_name: str | None = None,
+    ) -> dict[str, int]:
+        """Move safely recoverable failed jobs back into the typed queue.
+
+        This is intentionally conservative: only infrastructure/transient/provider
+        failures or already-typed blockers are recovered. True terminal no-candidate
+        outcomes remain terminal so recovery cannot manufacture unsafe writes.
+        """
+
+        bounded_limit = max(1, min(int(limit), 500))
+        params: dict[str, Any] = {
+            "limit": bounded_limit,
+            "source_slug": source_slug,
+            "field_name": field_name,
+        }
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH candidates AS (
+                    SELECT DISTINCT ON (fj.chapter_id, fj.field_name)
+                        fj.id,
+                        CASE
+                            WHEN COALESCE(fj.last_error, '') ILIKE '%%PostgreSQL text fields cannot contain NUL%%'
+                              OR COALESCE(fj.last_error, '') ILIKE '%%NUL (0x00)%%'
+                            THEN 'actionable'
+                            WHEN fj.field_name = 'verify_school_match'
+                              AND (
+                                  COALESCE(fj.blocked_reason, '') IN ('dependency_wait', 'school_evidence_missing', 'status_no_decision', 'status_unknown')
+                                  OR COALESCE(fj.last_error, '') ILIKE '%%dependency_wait%%'
+                                  OR COALESCE(fj.last_error, '') ILIKE '%%school_evidence_missing%%'
+                                  OR COALESCE(fj.payload->'contactResolution'->>'reasonCode', '') IN ('dependency_wait', 'school_evidence_missing', 'status_no_decision', 'status_unknown')
+                              )
+                            THEN 'blocked_dependency'
+                            WHEN COALESCE(fj.blocked_reason, '') IN (
+                                'status_no_decision',
+                                'status_unknown',
+                                'status_review_required',
+                                'status_unresolved',
+                                'status_evidence_refresh_required',
+                                'school_evidence_missing',
+                                'dependency_wait',
+                                'website_required'
+                            )
+                            THEN 'blocked_dependency'
+                            WHEN COALESCE(fj.blocked_reason, '') IN (
+                                'queued_for_entity_repair',
+                                'identity_semantically_incomplete',
+                                'status_identity_repair_required'
+                            )
+                            THEN 'blocked_repairable'
+                            WHEN COALESCE(fj.blocked_reason, '') IN (
+                                'provider_degraded',
+                                'transient_network',
+                                'provider_low_signal'
+                            )
+                              OR COALESCE(fj.last_error, '') ILIKE '%%provider or network unavailable%%'
+                              OR COALESCE(fj.last_error, '') ILIKE '%%Search provider%%'
+                              OR COALESCE(fj.last_error, '') ILIKE '%%transient_network%%'
+                              OR COALESCE(fj.last_error, '') ILIKE '%%timeout%%'
+                            THEN 'blocked_provider'
+                            ELSE NULL
+                        END AS recovered_queue_state,
+                        CASE
+                            WHEN COALESCE(fj.last_error, '') ILIKE '%%PostgreSQL text fields cannot contain NUL%%'
+                              OR COALESCE(fj.last_error, '') ILIKE '%%NUL (0x00)%%'
+                            THEN NULL
+                            WHEN fj.field_name = 'verify_school_match'
+                              AND (
+                                  COALESCE(fj.blocked_reason, '') IN ('dependency_wait', 'school_evidence_missing', 'status_no_decision', 'status_unknown')
+                                  OR COALESCE(fj.last_error, '') ILIKE '%%dependency_wait%%'
+                                  OR COALESCE(fj.last_error, '') ILIKE '%%school_evidence_missing%%'
+                                  OR COALESCE(fj.payload->'contactResolution'->>'reasonCode', '') IN ('dependency_wait', 'school_evidence_missing', 'status_no_decision', 'status_unknown')
+                              )
+                            THEN 'school_evidence_missing'
+                            WHEN COALESCE(fj.blocked_reason, '') IN (
+                                'status_no_decision',
+                                'status_unknown',
+                                'status_review_required',
+                                'status_unresolved',
+                                'status_evidence_refresh_required',
+                                'school_evidence_missing',
+                                'dependency_wait',
+                                'website_required',
+                                'queued_for_entity_repair',
+                                'identity_semantically_incomplete',
+                                'status_identity_repair_required',
+                                'provider_degraded',
+                                'transient_network',
+                                'provider_low_signal'
+                            )
+                            THEN fj.blocked_reason
+                            WHEN COALESCE(fj.last_error, '') ILIKE '%%provider or network unavailable%%'
+                              OR COALESCE(fj.last_error, '') ILIKE '%%Search provider%%'
+                              OR COALESCE(fj.last_error, '') ILIKE '%%timeout%%'
+                            THEN 'transient_network'
+                            WHEN COALESCE(fj.last_error, '') ILIKE '%%transient_network%%'
+                            THEN 'transient_network'
+                            ELSE NULL
+                        END AS recovered_blocked_reason
+                    FROM field_jobs fj
+                    WHERE fj.status = 'failed'
+                      AND COALESCE(fj.terminal_outcome, 'failed') = 'failed'
+                      AND (
+                          %(source_slug)s::text IS NULL
+                          OR EXISTS (
+                              SELECT 1
+                              FROM crawl_runs cr
+                              JOIN sources s ON s.id = cr.source_id
+                              WHERE cr.id = fj.crawl_run_id
+                                AND s.slug = %(source_slug)s
+                          )
+                      )
+                      AND (%(field_name)s::text IS NULL OR fj.field_name = %(field_name)s)
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM field_jobs active_fj
+                          WHERE active_fj.chapter_id = fj.chapter_id
+                            AND active_fj.field_name = fj.field_name
+                            AND active_fj.id <> fj.id
+                            AND active_fj.status IN ('queued', 'running')
+                      )
+                      AND (
+                          COALESCE(fj.last_error, '') ILIKE '%%PostgreSQL text fields cannot contain NUL%%'
+                          OR COALESCE(fj.last_error, '') ILIKE '%%NUL (0x00)%%'
+                          OR COALESCE(fj.last_error, '') ILIKE '%%provider or network unavailable%%'
+                          OR COALESCE(fj.last_error, '') ILIKE '%%Search provider%%'
+                          OR COALESCE(fj.last_error, '') ILIKE '%%transient_network%%'
+                          OR COALESCE(fj.last_error, '') ILIKE '%%timeout%%'
+                          OR COALESCE(fj.last_error, '') ILIKE '%%dependency_wait%%'
+                          OR COALESCE(fj.last_error, '') ILIKE '%%school_evidence_missing%%'
+                          OR COALESCE(fj.blocked_reason, '') IN (
+                              'status_no_decision',
+                              'status_unknown',
+                              'status_review_required',
+                              'status_unresolved',
+                              'status_evidence_refresh_required',
+                              'school_evidence_missing',
+                              'dependency_wait',
+                              'website_required',
+                              'queued_for_entity_repair',
+                              'identity_semantically_incomplete',
+                              'status_identity_repair_required',
+                              'provider_degraded',
+                              'transient_network',
+                              'provider_low_signal'
+                          )
+                          OR COALESCE(fj.payload->'contactResolution'->>'reasonCode', '') IN (
+                              'dependency_wait',
+                              'school_evidence_missing',
+                              'status_no_decision',
+                              'status_unknown',
+                              'provider_degraded',
+                              'transient_network',
+                              'provider_low_signal'
+                          )
+                      )
+                    ORDER BY fj.chapter_id, fj.field_name, COALESCE(fj.finished_at, fj.created_at) DESC
+                    LIMIT %(limit)s
+                ),
+                updated AS (
+                    UPDATE field_jobs fj
+                    SET
+                        status = 'queued',
+                        queue_state = c.recovered_queue_state,
+                        blocked_reason = c.recovered_blocked_reason,
+                        terminal_outcome = NULL,
+                        terminal_failure = FALSE,
+                        scheduled_at = CASE
+                            WHEN c.recovered_queue_state = 'blocked_provider' THEN NOW() + INTERVAL '15 minutes'
+                            ELSE NOW()
+                        END,
+                        started_at = NULL,
+                        finished_at = NULL,
+                        claimed_by = NULL,
+                        claim_token = NULL,
+                        attempts = CASE
+                            WHEN c.recovered_queue_state = 'actionable' THEN 0
+                            ELSE LEAST(fj.attempts, GREATEST(fj.max_attempts - 1, 0))
+                        END,
+                        last_error = CASE
+                            WHEN c.recovered_queue_state = 'actionable' THEN NULL
+                            ELSE COALESCE(
+                                'Recovered failed field job into ' || c.recovered_queue_state || ' / ' || COALESCE(c.recovered_blocked_reason, 'unblocked'),
+                                fj.last_error
+                            )
+                        END,
+                        payload = COALESCE(fj.payload, '{}'::jsonb)
+                            || jsonb_build_object(
+                                'failedJobRecovery',
+                                jsonb_build_object(
+                                    'recoveredAt', NOW(),
+                                    'queueState', c.recovered_queue_state,
+                                    'blockedReason', c.recovered_blocked_reason
+                                ),
+                                'contactResolution',
+                                CASE
+                                    WHEN c.recovered_queue_state = 'actionable' THEN jsonb_build_object('queueState', 'actionable')
+                                    ELSE jsonb_build_object('queueState', c.recovered_queue_state, 'reasonCode', c.recovered_blocked_reason)
+                                END
+                            )
+                    FROM candidates c
+                    WHERE fj.id = c.id
+                      AND c.recovered_queue_state IS NOT NULL
+                    RETURNING c.recovered_queue_state, c.recovered_blocked_reason
+                )
+                SELECT
+                    COUNT(*)::int AS recovered,
+                    COUNT(*) FILTER (WHERE recovered_queue_state = 'actionable')::int AS actionable,
+                    COUNT(*) FILTER (WHERE recovered_queue_state = 'blocked_provider')::int AS blocked_provider,
+                    COUNT(*) FILTER (WHERE recovered_queue_state = 'blocked_dependency')::int AS blocked_dependency,
+                    COUNT(*) FILTER (WHERE recovered_queue_state = 'blocked_repairable')::int AS blocked_repairable
+                FROM updated
+                """,
+                params,
+            )
+            row = cursor.fetchone() or {}
+        self._connection.commit()
+        return {
+            "recovered": int(row.get("recovered") or 0),
+            "actionable": int(row.get("actionable") or 0),
+            "blocked_provider": int(row.get("blocked_provider") or 0),
+            "blocked_dependency": int(row.get("blocked_dependency") or 0),
+            "blocked_repairable": int(row.get("blocked_repairable") or 0),
+        }
 
     def update_chapter_identity_repair(
         self,
@@ -3936,7 +4535,9 @@ class CrawlerRepository:
         field_state_updates: dict[str, str] | None = None,
         provenance_records: list[ProvenanceRecord] | None = None,
     ) -> None:
-        field_state_updates = field_state_updates or {}
+        chapter_updates = _strip_postgres_nuls(chapter_updates or {})
+        completed_payload = _strip_postgres_nuls(completed_payload or {})
+        field_state_updates = _strip_postgres_nuls(field_state_updates or {})
         provenance_records = provenance_records or []
         decision_evidence = _build_decision_evidence(completed_payload)
         contact_field_writes = any(
@@ -4028,7 +4629,7 @@ class CrawlerRepository:
             related_website_url = completed_payload.get("related_website_url")
 
             for record in provenance_records:
-                payload = asdict(record)
+                payload = _strip_postgres_nuls(asdict(record))
                 self._contracts.validate_provenance(
                     {
                         "sourceSlug": payload["source_slug"],
@@ -4059,15 +4660,16 @@ class CrawlerRepository:
                         "chapter_id": job.chapter_id,
                         "source_id": job.source_id,
                         "crawl_run_id": job.crawl_run_id,
-                        "field_name": record.field_name,
-                        "field_value": record.field_value,
-                        "source_url": record.source_url,
-                        "source_snippet": record.source_snippet,
-                        "confidence": record.confidence,
+                        "field_name": payload["field_name"],
+                        "field_value": payload["field_value"],
+                        "source_url": payload["source_url"],
+                        "source_snippet": payload["source_snippet"],
+                        "confidence": payload["confidence"],
                     },
                 )
                 evidence_status = "accepted" if completed_status == "updated" else "review" if completed_status == "review_required" else "observed"
-                trust_tier = "strong_official" if record.confidence >= 0.95 else "high" if record.confidence >= 0.85 else "medium" if record.confidence >= 0.7 else "low"
+                confidence = float(payload.get("confidence") or 0.0)
+                trust_tier = "strong_official" if confidence >= 0.95 else "high" if confidence >= 0.85 else "medium" if confidence >= 0.7 else "low"
                 cursor.execute(
                     """
                     INSERT INTO chapter_evidence (
@@ -4096,21 +4698,21 @@ class CrawlerRepository:
                         "fraternity_slug": job.fraternity_slug,
                         "source_slug": job.source_slug,
                         "crawl_run_id": job.crawl_run_id,
-                        "field_name": record.field_name,
-                        "candidate_value": record.field_value,
-                        "confidence": record.confidence,
+                        "field_name": payload["field_name"],
+                        "candidate_value": payload["field_value"],
+                        "confidence": payload["confidence"],
                         "trust_tier": trust_tier,
                         "evidence_status": evidence_status,
-                        "source_url": record.source_url,
-                        "source_snippet": record.source_snippet,
+                        "source_url": payload["source_url"],
+                        "source_snippet": payload["source_snippet"],
                         "provider": provider,
                         "query": query,
-                        "related_website_url": related_website_url if record.field_name != "website_url" else None,
+                        "related_website_url": related_website_url if payload["field_name"] != "website_url" else None,
                         "metadata": Jsonb(
                             {
                                 "fieldJobId": job.id,
                                 "completedStatus": completed_status,
-                                "fieldState": field_state_updates.get(record.field_name),
+                                "fieldState": field_state_updates.get(payload["field_name"]),
                                 "decisionStage": decision_evidence.decision_stage,
                                 "pageScope": decision_evidence.page_scope,
                                 "contactSpecificity": decision_evidence.contact_specificity,
@@ -4147,7 +4749,8 @@ class CrawlerRepository:
         preserve_attempt: bool = False,
         payload_patch: dict[str, Any] | None = None,
     ) -> None:
-        payload_patch = payload_patch or {}
+        error = _strip_postgres_nuls(error)
+        payload_patch = _strip_postgres_nuls(payload_patch or {})
         typed_state = _extract_field_job_typed_state(payload_patch)
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
@@ -4159,7 +4762,10 @@ class CrawlerRepository:
                     queue_state = COALESCE(%s, queue_state),
                     validity_class = COALESCE(%s, validity_class),
                     repair_state = COALESCE(%s, repair_state),
-                    blocked_reason = COALESCE(%s, blocked_reason),
+                    blocked_reason = CASE
+                        WHEN %s = 'actionable' THEN NULL
+                        ELSE COALESCE(%s, blocked_reason)
+                    END,
                     terminal_outcome = NULL,
                     scheduled_at = NOW() + (%s * INTERVAL '1 second'),
                     started_at = NULL,
@@ -4175,6 +4781,7 @@ class CrawlerRepository:
                     typed_state.get("queue_state"),
                     typed_state.get("validity_class"),
                     typed_state.get("repair_state"),
+                    typed_state.get("queue_state"),
                     typed_state.get("blocked_reason"),
                     delay_seconds,
                     error,
@@ -4185,6 +4792,7 @@ class CrawlerRepository:
             )
 
     def fail_field_job_terminal(self, job: FieldJob, error: str) -> None:
+        error = _strip_postgres_nuls(error)
         with self._connection.transaction(), self._connection.cursor() as cursor:
             self._verify_claim(cursor, job.id, job.claim_token)
             cursor.execute(

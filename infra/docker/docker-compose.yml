@@ -55,5 +55,53 @@ services:
         condition: service_healthy
     profiles: ["app"]
 
+  searxng-primary:
+    image: searxng/searxng:latest
+    container_name: fratfinder-searxng-primary
+    restart: unless-stopped
+    environment:
+      BASE_URL: ${CRAWLER_SEARCH_SEARXNG_PRIMARY_PUBLIC_URL:-http://localhost:8888/}
+      INSTANCE_NAME: ${SEARXNG_PRIMARY_INSTANCE_NAME:-FratFinderAI Search Primary}
+      SEARXNG_SECRET: ${SEARXNG_PRIMARY_SECRET:-change-me-local-primary}
+      GRANIAN_BLOCKING_THREADS: ${SEARXNG_PRIMARY_BLOCKING_THREADS:-4}
+    ports:
+      - "${SEARXNG_PRIMARY_PORT:-8888}:8080"
+    volumes:
+      - searxng-primary-config:/etc/searxng
+      - searxng-primary-cache:/var/cache/searxng
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- 'http://localhost:8080/search?q=fratfinder&format=json' | grep -q '\"results\"'"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+    profiles: ["search"]
+
+  searxng-rescue:
+    image: searxng/searxng:latest
+    container_name: fratfinder-searxng-rescue
+    restart: unless-stopped
+    environment:
+      BASE_URL: ${CRAWLER_SEARCH_SEARXNG_RESCUE_PUBLIC_URL:-http://localhost:8889/}
+      INSTANCE_NAME: ${SEARXNG_RESCUE_INSTANCE_NAME:-FratFinderAI Search Rescue}
+      SEARXNG_SECRET: ${SEARXNG_RESCUE_SECRET:-change-me-local-rescue}
+      GRANIAN_BLOCKING_THREADS: ${SEARXNG_RESCUE_BLOCKING_THREADS:-4}
+    ports:
+      - "${SEARXNG_RESCUE_PORT:-8889}:8080"
+    volumes:
+      - searxng-rescue-config:/etc/searxng
+      - searxng-rescue-cache:/var/cache/searxng
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- 'http://localhost:8080/search?q=fratfinder&format=json' | grep -q '\"results\"'"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+    profiles: ["search"]
+
 volumes:
   postgres-data:
+  searxng-primary-config:
+  searxng-primary-cache:
+  searxng-rescue-config:
+  searxng-rescue-cache:

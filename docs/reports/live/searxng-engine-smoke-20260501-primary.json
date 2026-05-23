@@ -1,0 +1,519 @@
+{
+  "capturedAt": "2026-05-01T16:11:44Z",
+  "provider": "searxng_json",
+  "endpoint": "http://localhost:8888",
+  "queryCountPerEngine": 3,
+  "engineCount": 7,
+  "recommendedAllowlist": [],
+  "engines": {
+    "mojeek": {
+      "engine": "mojeek",
+      "probeCount": 3,
+      "resultBearingRate": 0.6667,
+      "healthyRate": 0.6667,
+      "lowSignalTopUrlRate": 0.3333,
+      "healthReasons": {
+        "healthy": 2,
+        "challenge_or_anomaly": 1
+      },
+      "medianLatencyMs": 828,
+      "p95LatencyMs": 969,
+      "sampleTopUrls": [
+        "https://commons.wikimedia.org/wiki/Category:Delta_Chi",
+        "https://pharmacy.ufl.edu/2020/09/09/phi-delta-chi-ranks-gainesville-chapter-no-4-nationally/",
+        "https://en.wikipedia.org/wiki/List_of_Delta_Chi_chapters",
+        "https://fsl.vt.edu/",
+        "https://fsl.vt.edu/about.html"
+      ]
+    },
+    "bing": {
+      "engine": "bing",
+      "probeCount": 3,
+      "resultBearingRate": 0.6667,
+      "healthyRate": 0.6667,
+      "lowSignalTopUrlRate": 0.5,
+      "healthReasons": {
+        "healthy": 2,
+        "empty_results": 1
+      },
+      "medianLatencyMs": 188,
+      "p95LatencyMs": 531,
+      "sampleTopUrls": [
+        "https://www.duckhuntingchat.com/threads/delta-waterfowl-chapters-and-events-in-nc.63955/",
+        "https://www.duckhuntingchat.com/threads/delta-waterfowls-new-logo.232691/",
+        "https://www.duckhuntingchat.com/threads/ducks-unlimited-vs-delta-waterfowl.192642/",
+        "https://www.virginia.gov/",
+        "https://www.commonwealth.virginia.gov/about-virginia/history-and-facts-on-virginia/"
+      ]
+    },
+    "duckduckgo": {
+      "engine": "duckduckgo",
+      "probeCount": 3,
+      "resultBearingRate": 0.0,
+      "healthyRate": 0.0,
+      "lowSignalTopUrlRate": 0.0,
+      "healthReasons": {
+        "challenge_or_anomaly": 3
+      },
+      "medianLatencyMs": 171,
+      "p95LatencyMs": 312,
+      "sampleTopUrls": []
+    },
+    "brave": {
+      "engine": "brave",
+      "probeCount": 3,
+      "resultBearingRate": 0.0,
+      "healthyRate": 0.0,
+      "lowSignalTopUrlRate": 0.0,
+      "healthReasons": {
+        "rate_limited_429": 3
+      },
+      "medianLatencyMs": 31,
+      "p95LatencyMs": 360,
+      "sampleTopUrls": []
+    },
+    "google": {
+      "engine": "google",
+      "probeCount": 3,
+      "resultBearingRate": 0.0,
+      "healthyRate": 0.0,
+      "lowSignalTopUrlRate": 0.0,
+      "healthReasons": {
+        "empty_results": 3
+      },
+      "medianLatencyMs": 156,
+      "p95LatencyMs": 297,
+      "sampleTopUrls": []
+    },
+    "qwant": {
+      "engine": "qwant",
+      "probeCount": 3,
+      "resultBearingRate": 0.0,
+      "healthyRate": 0.0,
+      "lowSignalTopUrlRate": 0.0,
+      "healthReasons": {
+        "challenge_or_anomaly": 3
+      },
+      "medianLatencyMs": 16,
+      "p95LatencyMs": 609,
+      "sampleTopUrls": []
+    },
+    "wikipedia": {
+      "engine": "wikipedia",
+      "probeCount": 3,
+      "resultBearingRate": 0.0,
+      "healthyRate": 0.0,
+      "lowSignalTopUrlRate": 0.0,
+      "healthReasons": {
+        "empty_results": 3
+      },
+      "medianLatencyMs": 688,
+      "p95LatencyMs": 1547,
+      "sampleTopUrls": []
+    }
+  },
+  "probes": [
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "delta chi chapter directory",
+      "engines": "mojeek",
+      "httpStatus": 200,
+      "latencyMs": 969,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": true,
+      "resultCount": 10,
+      "healthReason": "healthy",
+      "unresponsiveEngines": [],
+      "topUrls": [
+        "https://commons.wikimedia.org/wiki/Category:Delta_Chi",
+        "https://pharmacy.ufl.edu/2020/09/09/phi-delta-chi-ranks-gainesville-chapter-no-4-nationally/",
+        "https://en.wikipedia.org/wiki/List_of_Delta_Chi_chapters"
+      ],
+      "detail": null,
+      "engine": "mojeek"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "virginia tech fraternity sorority life",
+      "engines": "mojeek",
+      "httpStatus": 200,
+      "latencyMs": 828,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": true,
+      "resultCount": 10,
+      "healthReason": "healthy",
+      "unresponsiveEngines": [],
+      "topUrls": [
+        "https://fsl.vt.edu/",
+        "https://fsl.vt.edu/about.html",
+        "https://fsl.vt.edu/currentmembers/prospectivemembers.html"
+      ],
+      "detail": null,
+      "engine": "mojeek"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "site:vt.edu Delta Chi",
+      "engines": "mojeek",
+      "httpStatus": 200,
+      "latencyMs": 219,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "challenge_or_anomaly",
+      "unresponsiveEngines": [
+        [
+          "mojeek",
+          "access denied"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "mojeek"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "delta chi chapter directory",
+      "engines": "bing",
+      "httpStatus": 200,
+      "latencyMs": 531,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": true,
+      "resultCount": 10,
+      "healthReason": "healthy",
+      "unresponsiveEngines": [],
+      "topUrls": [
+        "https://www.duckhuntingchat.com/threads/delta-waterfowl-chapters-and-events-in-nc.63955/",
+        "https://www.duckhuntingchat.com/threads/delta-waterfowls-new-logo.232691/",
+        "https://www.duckhuntingchat.com/threads/ducks-unlimited-vs-delta-waterfowl.192642/"
+      ],
+      "detail": null,
+      "engine": "bing"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "virginia tech fraternity sorority life",
+      "engines": "bing",
+      "httpStatus": 200,
+      "latencyMs": 188,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": true,
+      "resultCount": 10,
+      "healthReason": "healthy",
+      "unresponsiveEngines": [],
+      "topUrls": [
+        "https://www.virginia.gov/",
+        "https://www.commonwealth.virginia.gov/about-virginia/history-and-facts-on-virginia/",
+        "https://www.commonwealth.virginia.gov/about-virginia/"
+      ],
+      "detail": null,
+      "engine": "bing"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "site:vt.edu Delta Chi",
+      "engines": "bing",
+      "httpStatus": 200,
+      "latencyMs": 172,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "empty_results",
+      "unresponsiveEngines": [],
+      "topUrls": [],
+      "detail": null,
+      "engine": "bing"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "delta chi chapter directory",
+      "engines": "duckduckgo",
+      "httpStatus": 200,
+      "latencyMs": 312,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "challenge_or_anomaly",
+      "unresponsiveEngines": [
+        [
+          "duckduckgo",
+          "CAPTCHA"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "duckduckgo"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "virginia tech fraternity sorority life",
+      "engines": "duckduckgo",
+      "httpStatus": 200,
+      "latencyMs": 157,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "challenge_or_anomaly",
+      "unresponsiveEngines": [
+        [
+          "duckduckgo",
+          "CAPTCHA"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "duckduckgo"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "site:vt.edu Delta Chi",
+      "engines": "duckduckgo",
+      "httpStatus": 200,
+      "latencyMs": 171,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "challenge_or_anomaly",
+      "unresponsiveEngines": [
+        [
+          "duckduckgo",
+          "CAPTCHA"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "duckduckgo"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "delta chi chapter directory",
+      "engines": "brave",
+      "httpStatus": 200,
+      "latencyMs": 360,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "rate_limited_429",
+      "unresponsiveEngines": [
+        [
+          "brave",
+          "too many requests"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "brave"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "virginia tech fraternity sorority life",
+      "engines": "brave",
+      "httpStatus": 200,
+      "latencyMs": 31,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "rate_limited_429",
+      "unresponsiveEngines": [
+        [
+          "brave",
+          "Suspended: too many requests"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "brave"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "site:vt.edu Delta Chi",
+      "engines": "brave",
+      "httpStatus": 200,
+      "latencyMs": 16,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "rate_limited_429",
+      "unresponsiveEngines": [
+        [
+          "brave",
+          "Suspended: too many requests"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "brave"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "delta chi chapter directory",
+      "engines": "google",
+      "httpStatus": 200,
+      "latencyMs": 297,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "empty_results",
+      "unresponsiveEngines": [],
+      "topUrls": [],
+      "detail": null,
+      "engine": "google"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "virginia tech fraternity sorority life",
+      "engines": "google",
+      "httpStatus": 200,
+      "latencyMs": 156,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "empty_results",
+      "unresponsiveEngines": [],
+      "topUrls": [],
+      "detail": null,
+      "engine": "google"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "site:vt.edu Delta Chi",
+      "engines": "google",
+      "httpStatus": 200,
+      "latencyMs": 125,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "empty_results",
+      "unresponsiveEngines": [],
+      "topUrls": [],
+      "detail": null,
+      "engine": "google"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "delta chi chapter directory",
+      "engines": "qwant",
+      "httpStatus": 200,
+      "latencyMs": 609,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "challenge_or_anomaly",
+      "unresponsiveEngines": [
+        [
+          "qwant",
+          "access denied"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "qwant"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "virginia tech fraternity sorority life",
+      "engines": "qwant",
+      "httpStatus": 200,
+      "latencyMs": 16,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "challenge_or_anomaly",
+      "unresponsiveEngines": [
+        [
+          "qwant",
+          "Suspended: access denied"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "qwant"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "site:vt.edu Delta Chi",
+      "engines": "qwant",
+      "httpStatus": 200,
+      "latencyMs": 15,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "challenge_or_anomaly",
+      "unresponsiveEngines": [
+        [
+          "qwant",
+          "Suspended: access denied"
+        ]
+      ],
+      "topUrls": [],
+      "detail": null,
+      "engine": "qwant"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "delta chi chapter directory",
+      "engines": "wikipedia",
+      "httpStatus": 200,
+      "latencyMs": 1547,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "empty_results",
+      "unresponsiveEngines": [],
+      "topUrls": [],
+      "detail": null,
+      "engine": "wikipedia"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "virginia tech fraternity sorority life",
+      "engines": "wikipedia",
+      "httpStatus": 200,
+      "latencyMs": 688,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "empty_results",
+      "unresponsiveEngines": [],
+      "topUrls": [],
+      "detail": null,
+      "engine": "wikipedia"
+    },
+    {
+      "baseUrl": "http://localhost:8888",
+      "query": "site:vt.edu Delta Chi",
+      "engines": "wikipedia",
+      "httpStatus": 200,
+      "latencyMs": 266,
+      "reachable": true,
+      "jsonParseable": true,
+      "resultBearing": false,
+      "resultCount": 0,
+      "healthReason": "empty_results",
+      "unresponsiveEngines": [],
+      "topUrls": [],
+      "detail": null,
+      "engine": "wikipedia"
+    }
+  ]
+}

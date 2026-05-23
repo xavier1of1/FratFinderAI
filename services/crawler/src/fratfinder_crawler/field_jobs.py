@@ -22,6 +22,7 @@ from fratfinder_crawler.field_job_support import (
     job_has_canonical_active_status,
     job_has_existing_instagram_support,
     job_supporting_page_ready,
+    school_identity_requires_repair_before_match,
 )
 from fratfinder_crawler.logging_utils import log_event
 from fratfinder_crawler.models import (
@@ -63,6 +64,10 @@ from fratfinder_crawler.precision_tools import (
     tool_site_scope_classifier,
 )
 from fratfinder_crawler.search import SearchClient, SearchResult, SearchUnavailableError
+from fratfinder_crawler.school_verification import (
+    CachedSchoolVerificationResult,
+    resolve_cached_school_verification,
+)
 from fratfinder_crawler.social import (
     InstagramCandidateBank,
     InstagramSourceType,
@@ -605,6 +610,10 @@ class FieldJobEngine:
         self._authoritative_bundle_cache: dict[str, AuthoritativeBundle] = {}
         self._latest_provenance_context_cache: dict[str, dict[str, Any]] = {}
         self._verify_school_cache_hit_count = 0
+        self._verify_school_status_decision_hit_count = 0
+        self._verify_school_activity_cache_hit_count = 0
+        self._verify_school_school_policy_hit_count = 0
+        self._verify_school_evidence_missing_count = 0
         self._verify_school_official_url_reused_count = 0
         self._verify_school_provider_search_attempted_count = 0
         search_settings = getattr(search_client, "_settings", None)
@@ -676,6 +685,10 @@ class FieldJobEngine:
             "enrichment_observations_logged": 0,
             "degraded_authoritative_claimed": 0,
             "verify_school_cache_hit": 0,
+            "verify_school_status_decision_hit": 0,
+            "verify_school_activity_cache_hit": 0,
+            "verify_school_school_policy_hit": 0,
+            "verify_school_evidence_missing": 0,
             "verify_school_official_url_reused": 0,
             "verify_school_provider_search_attempted": 0,
         }
@@ -771,7 +784,17 @@ class FieldJobEngine:
                 summary["requeued"] = int(summary["requeued"]) + 1
                 if exc.reason_code == "provider_degraded":
                     summary["provider_degraded_deferred"] = int(summary["provider_degraded_deferred"]) + 1
-                if exc.reason_code in {"dependency_wait", "website_required", "status_dependency_unmet"}:
+                if exc.reason_code in {
+                    "dependency_wait",
+                    "website_required",
+                    "status_dependency_unmet",
+                    "status_no_decision",
+                    "status_unknown",
+                    "status_review_required",
+                    "status_unresolved",
+                    "status_evidence_refresh_required",
+                    "school_evidence_missing",
+                }:
                     summary["dependency_wait_deferred"] = int(summary["dependency_wait_deferred"]) + 1
                 self._append_chapter_search_queries(summary, self._chapter_search_queries)
                 self._record_enrichment_observation(
@@ -818,6 +841,10 @@ class FieldJobEngine:
 
         self._last_batch_metrics = dict(summary)
         self._last_batch_metrics["verify_school_cache_hit"] = self._verify_school_cache_hit_count
+        self._last_batch_metrics["verify_school_status_decision_hit"] = self._verify_school_status_decision_hit_count
+        self._last_batch_metrics["verify_school_activity_cache_hit"] = self._verify_school_activity_cache_hit_count
+        self._last_batch_metrics["verify_school_school_policy_hit"] = self._verify_school_school_policy_hit_count
+        self._last_batch_metrics["verify_school_evidence_missing"] = self._verify_school_evidence_missing_count
         self._last_batch_metrics["verify_school_official_url_reused"] = self._verify_school_official_url_reused_count
         self._last_batch_metrics["verify_school_provider_search_attempted"] = self._verify_school_provider_search_attempted_count
         return {
@@ -901,7 +928,24 @@ class FieldJobEngine:
         unexpected_error: Exception | None = None,
     ) -> str:
         if retry_error is not None:
-            if retry_error.reason_code in {"provider_degraded", "transient_network", "dependency_wait", "website_required", "provider_low_signal", "status_dependency_unmet"}:
+            if retry_error.reason_code in {
+                "provider_degraded",
+                "transient_network",
+                "dependency_wait",
+                "website_required",
+                "provider_low_signal",
+                "status_dependency_unmet",
+                "status_no_decision",
+                "status_unknown",
+                "status_review_required",
+                "status_unresolved",
+                "status_evidence_refresh_required",
+                "school_evidence_missing",
+                "status_identity_repair_required",
+                "queued_for_entity_repair",
+                "identity_semantically_incomplete",
+                "repair_exhausted",
+            }:
                 return "defer"
             if retry_error.low_signal:
                 return "stop_no_signal"
@@ -2451,6 +2495,8 @@ class FieldJobEngine:
                 return None
 
         status_decision = self._get_or_resolve_status_decision(job)
+        unresolved_reason_code = "status_no_decision"
+        unresolved_message = "Status verification evidence is missing before contact enrichment"
         if status_decision is not None:
             decision = self._activity_decision_from_status_decision(
                 status_decision,
@@ -2465,11 +2511,15 @@ class FieldJobEngine:
                 return None
             if status_decision.final_status == ChapterStatusFinal.REVIEW:
                 self._trace("status_engine_validation", status="review", school=self._school_name_for_job(job))
+                unresolved_reason_code = "status_review_required"
+                unresolved_message = "Status verification requires review before contact enrichment"
             else:
                 self._trace("status_engine_validation", status="unknown", school=self._school_name_for_job(job))
+                unresolved_reason_code = "status_unknown"
+                unresolved_message = "Status verification is unresolved before contact enrichment"
 
         if job.field_name != FIELD_JOB_VERIFY_SCHOOL:
-            if not self._repository.has_pending_field_job(job.chapter_id, FIELD_JOB_VERIFY_SCHOOL):
+            if status_decision is None and not self._repository.has_pending_field_job(job.chapter_id, FIELD_JOB_VERIFY_SCHOOL):
                 try:
                     if job.crawl_run_id is not None and job.source_slug:
                         self._repository.create_field_jobs(
@@ -2482,10 +2532,10 @@ class FieldJobEngine:
                 except Exception:
                     pass
             raise RetryableJobError(
-                "Status verification must complete before contact enrichment",
+                unresolved_message,
                 backoff_seconds=self._dependency_wait_seconds,
                 preserve_attempt=True,
-                reason_code="status_dependency_unmet",
+                reason_code=unresolved_reason_code,
             )
         return None
 
@@ -2944,106 +2994,137 @@ class FieldJobEngine:
             raise RetryableJobError(f"Website verification returned client error status {status_code}", reason_code="provider_low_signal")
         raise RetryableJobError(f"Website verification returned server error status {status_code}", reason_code="transient_network")
 
+    def _school_identity_requires_repair_before_match(self, job: FieldJob) -> bool:
+        return school_identity_requires_repair_before_match(job)
+
+    def _record_cached_school_verification_metric(self, result: CachedSchoolVerificationResult) -> None:
+        source = str((result.metadata or {}).get("decisionSource") or "").strip()
+        if result.outcome != "evidence_missing" and source != "candidate_school_name":
+            self._verify_school_cache_hit_count += 1
+        if source == "chapter_status_decision":
+            self._verify_school_status_decision_hit_count += 1
+        elif source == "fraternity_school_activity_cache":
+            self._verify_school_activity_cache_hit_count += 1
+        elif source == "school_greek_life_registry":
+            self._verify_school_school_policy_hit_count += 1
+        elif result.outcome == "evidence_missing":
+            self._verify_school_evidence_missing_count += 1
+        if result.evidence_url:
+            self._verify_school_official_url_reused_count += 1
+
+    def _activity_decision_from_cached_school_result(self, result: CachedSchoolVerificationResult) -> ActivityValidationDecision:
+        metadata = dict(result.metadata or {})
+        if result.status_decision_id:
+            metadata["statusDecisionId"] = result.status_decision_id
+        if result.conflict_flags:
+            metadata["conflictFlags"] = list(result.conflict_flags)
+        return ActivityValidationDecision(
+            school_policy_status=str(metadata.get("schoolPolicyStatus") or "unknown"),
+            chapter_activity_status=str(metadata.get("chapterActivityStatus") or "unknown"),
+            final_status=str(metadata.get("finalStatus") or "unknown"),
+            school_recognition_status=str(metadata.get("schoolRecognitionStatus") or "unknown"),
+            evidence_url=result.evidence_url,
+            evidence_source_type=result.evidence_source_type,
+            reason_code=result.reason_code,
+            source_snippet=result.source_snippet,
+            confidence=result.confidence,
+            status_decision_id=result.status_decision_id,
+            review_required=result.review_required,
+            metadata=metadata,
+        )
+
     def _verify_school_match(self, job: FieldJob) -> FieldJobResult:
-        chapter_school_name = _canonical_school_name(job.university_name)
-        candidate_school_name = _canonical_school_name(job.payload.get("candidateSchoolName"))
-        chapter_school = _slugify(chapter_school_name)
-        candidate_school = _slugify(candidate_school_name)
-        if chapter_school and candidate_school and chapter_school == candidate_school:
+        if self._school_identity_requires_repair_before_match(job):
+            raise RetryableJobError(
+                "School identity requires repair before school match verification",
+                backoff_seconds=max(self._dependency_wait_seconds, self._base_backoff_seconds),
+                preserve_attempt=True,
+                reason_code="identity_semantically_incomplete",
+            )
+
+        result = resolve_cached_school_verification(job=job, repository=self._repository)
+        self._record_cached_school_verification_metric(result)
+        decision = self._activity_decision_from_cached_school_result(result)
+
+        if result.outcome == "verified":
+            decision_stage = str((result.metadata or {}).get("decisionSource") or "cached_school_verification")
+            self._trace("cached_school_verification", status="verified", stage=decision_stage, school=self._school_name_for_job(job))
             return FieldJobResult(
                 chapter_updates={},
-                completed_payload={"status": "verified", "university_name": chapter_school_name or job.university_name or ""},
+                completed_payload={
+                    "status": "verified",
+                    "university_name": result.stored_school_name or job.university_name or "",
+                    "reasonCode": result.reason_code,
+                    "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                        decision,
+                        decision_stage=decision_stage,
+                    ),
+                    "decision_trace": self._build_decision_trace_summary(),
+                },
                 field_state_updates={"university_name": "found"},
             )
-        if chapter_school and candidate_school and chapter_school != candidate_school:
+
+        if result.outcome == "review_required":
+            self._trace("cached_school_verification", status="review_required", reason=result.reason_code, school=self._school_name_for_job(job))
             return FieldJobResult(
                 chapter_updates={},
                 completed_payload={
                     "status": "mismatch_reviewed",
-                    "stored_university_name": chapter_school_name or job.university_name or "",
-                    "candidate_school_name": candidate_school_name or str(job.payload.get("candidateSchoolName") or ""),
+                    "stored_university_name": result.stored_school_name or job.university_name or "",
+                    "candidate_school_name": result.candidate_school_name or str(job.payload.get("candidateSchoolName") or ""),
+                    "reasonCode": result.reason_code,
+                    "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                        decision,
+                        decision_stage=str((result.metadata or {}).get("decisionSource") or "cached_school_verification"),
+                    ),
+                    "decision_trace": self._build_decision_trace_summary(),
                 },
                 review_item=ReviewItemCandidate(
                     item_type="school_match_mismatch",
-                    reason="Candidate school name does not match the stored university name",
+                    reason=(
+                        "Candidate school name does not match the stored university name"
+                        if result.reason_code == "candidate_school_mismatch"
+                        else "Cached school verification evidence requires review"
+                    ),
                     source_slug=job.payload.get("sourceSlug") if isinstance(job.payload.get("sourceSlug"), str) else None,
                     chapter_slug=job.chapter_slug,
                     payload={
-                        "storedUniversityName": chapter_school_name or job.university_name,
-                        "candidateSchoolName": candidate_school_name or job.payload.get("candidateSchoolName"),
+                        "storedUniversityName": result.stored_school_name or job.university_name,
+                        "candidateSchoolName": result.candidate_school_name or job.payload.get("candidateSchoolName"),
+                        "statusDecisionId": result.status_decision_id,
+                        "reasonCode": result.reason_code,
+                        "conflictFlags": list(result.conflict_flags),
                     },
                 ),
             )
-        if chapter_school and not candidate_school:
-            status_decision = self._get_or_resolve_status_decision(job)
-            if status_decision is not None:
-                decision = self._activity_decision_from_status_decision(
-                    status_decision,
-                    evidence_url=str(status_decision.decision_trace.get("winning_evidence_id") or "") or None,
-                    source_snippet=str(status_decision.decision_trace.get("final_status_basis") or "") or None,
-                )
-                if status_decision.final_status == ChapterStatusFinal.INACTIVE:
-                    self._trace("status_engine_validation", status="inactive", school=self._school_name_for_job(job))
-                    return self._mark_chapter_inactive(job, target_field="university_name", decision=decision)
-                if status_decision.final_status == ChapterStatusFinal.ACTIVE:
-                    self._trace("status_engine_validation", status="active", school=self._school_name_for_job(job))
-                    return FieldJobResult(
-                        chapter_updates={},
-                        completed_payload={
-                            "status": "verified",
-                            "university_name": job.university_name or "",
-                            "reasonCode": status_decision.reason_code,
-                            "resolutionEvidence": self._resolution_evidence_for_activity_decision(
-                                decision,
-                                decision_stage="chapter_status_engine",
-                            ),
-                            "decision_trace": self._build_decision_trace_summary(),
-                        },
-                        field_state_updates={"university_name": "found"},
-                    )
-                if status_decision.final_status == ChapterStatusFinal.REVIEW:
-                    return FieldJobResult(
-                        chapter_updates={},
-                        completed_payload={
-                            "status": "review_required",
-                            "reasonCode": status_decision.reason_code,
-                            "resolutionEvidence": self._resolution_evidence_for_activity_decision(
-                                decision,
-                                decision_stage="chapter_status_engine",
-                            ),
-                            "decision_trace": self._build_decision_trace_summary(),
-                        },
-                        review_item=ReviewItemCandidate(
-                            item_type="school_match_mismatch",
-                            reason="Status engine could not produce a safe active/inactive school verification decision",
-                            source_slug=job.payload.get("sourceSlug") if isinstance(job.payload.get("sourceSlug"), str) else None,
-                            chapter_slug=job.chapter_slug,
-                            payload={
-                                "statusDecisionId": status_decision.id,
-                                "reasonCode": status_decision.reason_code,
-                                "conflictFlags": list(status_decision.conflict_flags),
-                            },
-                        ),
-                    )
 
-            school_policy = self._get_or_resolve_school_policy(job)
-            if school_policy.school_policy_status == "allowed":
-                self._trace("campus_policy_validation", status="allowed", school=self._school_name_for_job(job))
-                return FieldJobResult(
-                    chapter_updates={},
-                    completed_payload={
-                        "status": "verified",
-                        "university_name": job.university_name or "",
-                        "reasonCode": school_policy.reason_code or "school_policy_allowed",
-                        "resolutionEvidence": self._resolution_evidence_for_activity_decision(
-                            school_policy,
-                            decision_stage="campus_policy_validation",
-                        ),
-                        "decision_trace": self._build_decision_trace_summary(),
-                    },
-                    field_state_updates={"university_name": "found"},
-                )
-        raise self._unresolved_validation_retry(job, "Insufficient school data to verify school match")
+        if result.outcome == "inactive":
+            self._trace("cached_school_verification", status="inactive", reason=result.reason_code, school=self._school_name_for_job(job))
+            return self._mark_chapter_inactive(job, target_field="university_name", decision=decision)
+
+        if result.outcome == "school_identity_only":
+            self._trace("cached_school_verification", status="school_identity_verified_activity_unknown", school=self._school_name_for_job(job))
+            return FieldJobResult(
+                chapter_updates={},
+                completed_payload={
+                    "status": "school_identity_verified_activity_unknown",
+                    "university_name": result.stored_school_name or job.university_name or "",
+                    "reasonCode": result.reason_code,
+                    "resolutionEvidence": self._resolution_evidence_for_activity_decision(
+                        decision,
+                        decision_stage="school_policy_cache",
+                    ),
+                    "decision_trace": self._build_decision_trace_summary(),
+                },
+                field_state_updates={},
+            )
+
+        raise RetryableJobError(
+            "School verification requires cached official school or chapter evidence",
+            backoff_seconds=max(self._dependency_wait_seconds, self._base_backoff_seconds),
+            preserve_attempt=True,
+            reason_code="school_evidence_missing",
+        )
 
     def _unresolved_validation_retry(self, job: FieldJob, message: str) -> RetryableJobError:
         if self._search_skipped_due_to_degraded_mode:
@@ -3072,7 +3153,12 @@ class FieldJobEngine:
                 preserve_attempt=True,
                 reason_code="provider_low_signal",
             )
-        return RetryableJobError(message, reason_code="dependency_wait")
+        return RetryableJobError(
+            message,
+            backoff_seconds=max(self._dependency_wait_seconds, self._base_backoff_seconds),
+            preserve_attempt=True,
+            reason_code="dependency_wait",
+        )
 
     def _find_email_candidate(self, job: FieldJob) -> CandidateMatch | None:
         matches: list[CandidateMatch] = []
@@ -4781,8 +4867,22 @@ class FieldJobEngine:
         patch: dict[str, object] = {}
         if exc.reason_code in {"transient_network", "provider_low_signal", "provider_degraded"}:
             queue_state = "blocked_provider"
-        elif exc.reason_code in {"dependency_wait", "website_required", "status_dependency_unmet"}:
+        elif exc.reason_code in {
+            "dependency_wait",
+            "website_required",
+            "status_dependency_unmet",
+            "status_no_decision",
+            "status_unknown",
+            "status_review_required",
+            "status_unresolved",
+            "status_evidence_refresh_required",
+            "school_evidence_missing",
+        }:
             queue_state = "blocked_dependency"
+        elif exc.reason_code in {"queued_for_entity_repair", "identity_semantically_incomplete", "status_identity_repair_required", "repair_exhausted"}:
+            queue_state = "blocked_repairable"
+        elif exc.reason_code in {"identity_semantically_invalid", "invalid_non_chapter"}:
+            queue_state = "blocked_invalid"
         else:
             queue_state = "actionable"
         patch["contactResolution"] = {
@@ -7113,7 +7213,6 @@ def _is_low_signal_university_name(value: str | None) -> bool:
     if any(marker in lowered for marker in ("university", "college", "institute", "school")):
         return False
     return True
-
 
 
 class RetryableJobError(Exception):

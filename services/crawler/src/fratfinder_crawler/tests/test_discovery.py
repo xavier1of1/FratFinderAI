@@ -25,17 +25,21 @@ class StubDiscoveryRepository:
     def __init__(
         self,
         verified_source: VerifiedSourceRecord | None = None,
+        verified_sources: list[VerifiedSourceRecord] | None = None,
         existing_sources: list[ExistingSourceCandidate] | None = None,
     ):
         self._verified_source = verified_source
+        self._verified_sources = verified_sources or ([verified_source] if verified_source is not None else [])
         self._existing_sources = existing_sources or []
 
     def get_verified_source_by_slug(self, fraternity_slug: str) -> VerifiedSourceRecord | None:
-        if self._verified_source is None:
-            return None
-        if self._verified_source.fraternity_slug != fraternity_slug:
-            return None
-        return self._verified_source
+        for source in self._verified_sources:
+            if source.fraternity_slug == fraternity_slug:
+                return source
+        return None
+
+    def list_verified_sources(self, limit: int = 250) -> list[VerifiedSourceRecord]:
+        return self._verified_sources[:limit]
 
     def get_existing_source_candidates(self, fraternity_slug: str) -> list[ExistingSourceCandidate]:
         return [candidate for candidate in self._existing_sources if fraternity_slug in candidate.source_slug]
@@ -307,6 +311,36 @@ def test_discover_source_uses_verified_registry_before_search():
     assert result.source_provenance == "verified_registry"
     assert result.confidence_tier == "high"
     assert client.queries == []
+
+
+def test_discover_source_does_not_alias_by_shared_acronym_only():
+    repository = StubDiscoveryRepository(
+        verified_sources=[
+            VerifiedSourceRecord(
+                fraternity_slug="delta-sigma-phi",
+                fraternity_name="Delta Sigma Phi",
+                national_url="https://deltasig.org/groups?type=collegiate_chapters",
+                origin="nic_bootstrap",
+                confidence=0.95,
+                http_status=200,
+                checked_at="2026-03-31T00:00:00+00:00",
+                is_active=True,
+                metadata={},
+            )
+        ]
+    )
+    client = CapturingStubSearchClient({})
+
+    result = discover_source("Delta Sigma Pi", client, repository=repository)
+
+    assert result.fraternity_slug == "delta-sigma-pi"
+    assert result.fraternity_name == "Delta Sigma Pi"
+    assert result.selected_url is None
+    assert not any(
+        step.get("reason") == "repository_alias_match"
+        and step.get("canonical_slug") == "delta-sigma-phi"
+        for step in result.resolution_trace
+    )
 
 
 def test_discover_source_falls_back_to_existing_source_when_registry_unhealthy():

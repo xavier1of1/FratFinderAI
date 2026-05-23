@@ -92,7 +92,7 @@ def test_find_email_defers_when_status_unknown_and_no_status_decision_exists():
     engine = FieldJobEngine(repository=repository, logger=logging.getLogger("status-gate"), worker_id="worker-1", search_degraded_mode=True)
     with pytest.raises(RetryableJobError) as exc:
         engine._resolve_activity_gate(_job("find_email"), target_field="contact_email")
-    assert exc.value.reason_code == "status_dependency_unmet"
+    assert exc.value.reason_code == "status_no_decision"
     assert repository.created_field_jobs == [["verify_school_match"]]
 
 
@@ -101,7 +101,7 @@ def test_find_website_defers_when_status_unknown_and_status_required():
     engine = FieldJobEngine(repository=repository, logger=logging.getLogger("status-gate"), worker_id="worker-1", search_degraded_mode=True)
     with pytest.raises(RetryableJobError) as exc:
         engine._resolve_activity_gate(_job("find_website"), target_field="website_url")
-    assert exc.value.reason_code == "status_dependency_unmet"
+    assert exc.value.reason_code == "status_no_decision"
 
 
 def test_find_instagram_defers_when_status_unknown_and_status_required():
@@ -109,7 +109,53 @@ def test_find_instagram_defers_when_status_unknown_and_status_required():
     engine = FieldJobEngine(repository=repository, logger=logging.getLogger("status-gate"), worker_id="worker-1", search_degraded_mode=True)
     with pytest.raises(RetryableJobError) as exc:
         engine._resolve_activity_gate(_job("find_instagram"), target_field="instagram_url")
-    assert exc.value.reason_code == "status_dependency_unmet"
+    assert exc.value.reason_code == "status_no_decision"
+
+
+def test_contact_job_with_unknown_status_decision_blocks_without_creating_duplicate_verify_job():
+    repository = _FakeRepository(
+        ChapterStatusDecision(
+            id="decision-unknown",
+            chapter_id="chapter-1",
+            final_status="unknown",
+            school_recognition_status="unknown",
+            national_status="unknown",
+            reason_code="no_conclusive_school_status_evidence",
+            confidence=0.3,
+            evidence_ids=[],
+            decision_trace={},
+        )
+    )
+    engine = FieldJobEngine(repository=repository, logger=logging.getLogger("status-gate"), worker_id="worker-1", search_degraded_mode=True)
+
+    with pytest.raises(RetryableJobError) as exc:
+        engine._resolve_activity_gate(_job("find_email"), target_field="contact_email")
+
+    assert exc.value.reason_code == "status_unknown"
+    assert repository.created_field_jobs == []
+
+
+def test_contact_job_with_review_status_decision_blocks_without_creating_duplicate_verify_job():
+    repository = _FakeRepository(
+        ChapterStatusDecision(
+            id="decision-review",
+            chapter_id="chapter-1",
+            final_status="review",
+            school_recognition_status="unknown",
+            national_status="inactive",
+            reason_code="national_all_status_directory_inactive_school_unknown",
+            confidence=0.7,
+            evidence_ids=["evidence-1"],
+            decision_trace={},
+        )
+    )
+    engine = FieldJobEngine(repository=repository, logger=logging.getLogger("status-gate"), worker_id="worker-1", search_degraded_mode=True)
+
+    with pytest.raises(RetryableJobError) as exc:
+        engine._resolve_activity_gate(_job("find_website"), target_field="website_url")
+
+    assert exc.value.reason_code == "status_review_required"
+    assert repository.created_field_jobs == []
 
 
 def test_find_instagram_continues_when_supporting_page_is_already_local_and_authoritative():

@@ -1,0 +1,1090 @@
+{
+  "captured_at": "2026-05-01T16:53:43.524866+00:00",
+  "queue_by_state": [
+    {
+      "queue_state": "actionable",
+      "status": "done",
+      "jobs": 380815
+    },
+    {
+      "queue_state": "actionable",
+      "status": "failed",
+      "jobs": 8730
+    },
+    {
+      "queue_state": "blocked_dependency",
+      "status": "queued",
+      "jobs": 3263
+    },
+    {
+      "queue_state": "blocked_repairable",
+      "status": "queued",
+      "jobs": 2131
+    },
+    {
+      "queue_state": "actionable",
+      "status": "queued",
+      "jobs": 911
+    },
+    {
+      "queue_state": "blocked_provider",
+      "status": "done",
+      "jobs": 533
+    },
+    {
+      "queue_state": "deferred",
+      "status": "done",
+      "jobs": 417
+    },
+    {
+      "queue_state": "blocked_dependency",
+      "status": "done",
+      "jobs": 311
+    },
+    {
+      "queue_state": "blocked_repairable",
+      "status": "done",
+      "jobs": 137
+    },
+    {
+      "queue_state": "blocked_provider",
+      "status": "queued",
+      "jobs": 98
+    },
+    {
+      "queue_state": "deferred",
+      "status": "failed",
+      "jobs": 3
+    }
+  ],
+  "queued_by_field_state": [
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "status_unknown",
+      "jobs": 991,
+      "oldest_created_at": "2026-03-23 00:08:18.606794+00:00",
+      "earliest_scheduled_at": "2026-04-29 02:34:09.180586+00:00",
+      "latest_updated_at": "2026-05-01 16:53:37.132144+00:00"
+    },
+    {
+      "field_name": "find_website",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "status_unknown",
+      "jobs": 922,
+      "oldest_created_at": "2026-03-23 00:08:18.685807+00:00",
+      "earliest_scheduled_at": "2026-04-29 01:44:43.536620+00:00",
+      "latest_updated_at": "2026-05-01 16:53:37.107168+00:00"
+    },
+    {
+      "field_name": "verify_school_match",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "identity_semantically_incomplete",
+      "jobs": 654,
+      "oldest_created_at": "2026-04-14 01:27:14.572326+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:41:37.575521+00:00",
+      "latest_updated_at": "2026-05-01 16:53:38.605384+00:00"
+    },
+    {
+      "field_name": "verify_school_match",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "school_evidence_missing",
+      "jobs": 547,
+      "oldest_created_at": "2026-04-14 01:12:48.103876+00:00",
+      "earliest_scheduled_at": "2026-04-30 22:28:24.579488+00:00",
+      "latest_updated_at": "2026-05-01 16:53:38.442375+00:00"
+    },
+    {
+      "field_name": "verify_website",
+      "queue_state": "actionable",
+      "blocked_reason": "",
+      "jobs": 451,
+      "oldest_created_at": "2026-04-01 09:36:12.189569+00:00",
+      "earliest_scheduled_at": "2026-05-01 01:11:16.146837+00:00",
+      "latest_updated_at": "2026-05-01 16:53:19.161783+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "identity_semantically_incomplete",
+      "jobs": 373,
+      "oldest_created_at": "2026-03-31 17:43:14.861098+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:46:08.244865+00:00",
+      "latest_updated_at": "2026-05-01 16:53:38.679993+00:00"
+    },
+    {
+      "field_name": "find_website",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "identity_semantically_incomplete",
+      "jobs": 329,
+      "oldest_created_at": "2026-04-01 03:54:38.303117+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:46:08.249281+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.812422+00:00"
+    },
+    {
+      "field_name": "find_instagram",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "identity_semantically_incomplete",
+      "jobs": 265,
+      "oldest_created_at": "2026-03-31 18:11:52.699606+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:46:38.785763+00:00",
+      "latest_updated_at": "2026-05-01 16:53:38.683056+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "queued_for_entity_repair",
+      "jobs": 218,
+      "oldest_created_at": "2026-03-23 00:08:19.433562+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:46:08.279179+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.217290+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "status_review_required",
+      "jobs": 212,
+      "oldest_created_at": "2026-03-31 18:11:52.715381+00:00",
+      "earliest_scheduled_at": "2026-04-28 01:24:42.110252+00:00",
+      "latest_updated_at": "2026-05-01 16:53:32.882456+00:00"
+    },
+    {
+      "field_name": "verify_school_match",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "dependency_wait",
+      "jobs": 175,
+      "oldest_created_at": "2026-04-14 00:07:03.620282+00:00",
+      "earliest_scheduled_at": "2026-04-22 17:55:59.049824+00:00",
+      "latest_updated_at": "2026-05-01 16:53:31.895255+00:00"
+    },
+    {
+      "field_name": "find_website",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "status_review_required",
+      "jobs": 163,
+      "oldest_created_at": "2026-04-01 14:00:03.884016+00:00",
+      "earliest_scheduled_at": "2026-04-25 00:45:26.400164+00:00",
+      "latest_updated_at": "2026-05-01 16:53:37.922997+00:00"
+    },
+    {
+      "field_name": "find_instagram",
+      "queue_state": "actionable",
+      "blocked_reason": "",
+      "jobs": 156,
+      "oldest_created_at": "2026-03-23 00:08:18.648328+00:00",
+      "earliest_scheduled_at": "2026-05-01 01:11:14.702026+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.806927+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "actionable",
+      "blocked_reason": "",
+      "jobs": 143,
+      "oldest_created_at": "2026-03-23 00:08:18.739267+00:00",
+      "earliest_scheduled_at": "2026-05-01 01:11:14.995748+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.804172+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "dependency_wait",
+      "jobs": 123,
+      "oldest_created_at": "2026-03-23 00:08:19.142164+00:00",
+      "earliest_scheduled_at": "2026-04-22 21:19:13.904708+00:00",
+      "latest_updated_at": "2026-05-01 16:53:30.106653+00:00"
+    },
+    {
+      "field_name": "verify_website",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "queued_for_entity_repair",
+      "jobs": 94,
+      "oldest_created_at": "2026-04-01 03:54:37.873796+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:46:08.253752+00:00",
+      "latest_updated_at": "2026-05-01 16:53:19.161783+00:00"
+    },
+    {
+      "field_name": "find_instagram",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "queued_for_entity_repair",
+      "jobs": 92,
+      "oldest_created_at": "2026-03-31 18:11:52.949552+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:53:29.077557+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.103760+00:00"
+    },
+    {
+      "field_name": "verify_school_match",
+      "queue_state": "actionable",
+      "blocked_reason": "",
+      "jobs": 88,
+      "oldest_created_at": "2026-05-01 16:53:24.251205+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:53:24.251205+00:00",
+      "latest_updated_at": "2026-05-01 16:53:27.665046+00:00"
+    },
+    {
+      "field_name": "find_website",
+      "queue_state": "actionable",
+      "blocked_reason": "",
+      "jobs": 73,
+      "oldest_created_at": "2026-04-01 03:57:49.278012+00:00",
+      "earliest_scheduled_at": "2026-05-01 01:11:15.426812+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.796237+00:00"
+    },
+    {
+      "field_name": "find_website",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "queued_for_entity_repair",
+      "jobs": 71,
+      "oldest_created_at": "2026-04-01 03:54:38.271419+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:46:08.317525+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.212077+00:00"
+    },
+    {
+      "field_name": "find_website",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "status_no_decision",
+      "jobs": 68,
+      "oldest_created_at": "2026-03-23 00:08:19.153520+00:00",
+      "earliest_scheduled_at": "2026-04-30 22:46:46.381517+00:00",
+      "latest_updated_at": "2026-05-01 16:53:36.132664+00:00"
+    },
+    {
+      "field_name": "find_instagram",
+      "queue_state": "blocked_provider",
+      "blocked_reason": "transient_network",
+      "jobs": 46,
+      "oldest_created_at": "2026-03-31 22:37:40.289792+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:56:26.692274+00:00",
+      "latest_updated_at": "2026-05-01 16:53:19.161783+00:00"
+    },
+    {
+      "field_name": "find_website",
+      "queue_state": "blocked_provider",
+      "blocked_reason": "transient_network",
+      "jobs": 37,
+      "oldest_created_at": "2026-03-23 00:08:19.533409+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:56:26.940499+00:00",
+      "latest_updated_at": "2026-05-01 16:53:19.161783+00:00"
+    },
+    {
+      "field_name": "verify_website",
+      "queue_state": "blocked_repairable",
+      "blocked_reason": "identity_semantically_incomplete",
+      "jobs": 35,
+      "oldest_created_at": "2026-04-01 09:36:12.635296+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:46:38.729864+00:00",
+      "latest_updated_at": "2026-05-01 16:53:38.675611+00:00"
+    },
+    {
+      "field_name": "verify_website",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "dependency_wait",
+      "jobs": 29,
+      "oldest_created_at": "2026-04-01 13:29:44.382607+00:00",
+      "earliest_scheduled_at": "2026-04-09 23:39:38.788773+00:00",
+      "latest_updated_at": "2026-05-01 16:53:30.037776+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "status_no_decision",
+      "jobs": 24,
+      "oldest_created_at": "2026-04-01 09:23:40.813355+00:00",
+      "earliest_scheduled_at": "2026-04-30 22:46:46.746317+00:00",
+      "latest_updated_at": "2026-05-01 16:53:36.136800+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_provider",
+      "blocked_reason": "transient_network",
+      "jobs": 12,
+      "oldest_created_at": "2026-04-01 09:23:40.880756+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:56:26.930506+00:00",
+      "latest_updated_at": "2026-05-01 16:53:19.161783+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_dependency",
+      "blocked_reason": "website_required",
+      "jobs": 9,
+      "oldest_created_at": "2026-03-23 00:08:20.377680+00:00",
+      "earliest_scheduled_at": "2026-04-22 21:44:15.553873+00:00",
+      "latest_updated_at": "2026-05-01 16:53:30.187006+00:00"
+    },
+    {
+      "field_name": "find_email",
+      "queue_state": "blocked_provider",
+      "blocked_reason": "terminal_no_candidate",
+      "jobs": 2,
+      "oldest_created_at": "2026-04-25 00:22:04.854166+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:53:29.815110+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.820440+00:00"
+    },
+    {
+      "field_name": "find_instagram",
+      "queue_state": "blocked_provider",
+      "blocked_reason": "terminal_no_candidate",
+      "jobs": 1,
+      "oldest_created_at": "2026-04-21 23:40:57.060959+00:00",
+      "earliest_scheduled_at": "2026-05-01 16:53:29.817713+00:00",
+      "latest_updated_at": "2026-05-01 16:53:29.817713+00:00"
+    }
+  ],
+  "actionable_by_field": [
+    {
+      "field_name": "verify_website",
+      "jobs": 451,
+      "earliest_scheduled_at": "2026-05-01 01:11:16.146837+00:00",
+      "max_priority": 0,
+      "min_priority": 0
+    },
+    {
+      "field_name": "find_instagram",
+      "jobs": 156,
+      "earliest_scheduled_at": "2026-05-01 01:11:14.702026+00:00",
+      "max_priority": 975,
+      "min_priority": 0
+    },
+    {
+      "field_name": "find_email",
+      "jobs": 143,
+      "earliest_scheduled_at": "2026-05-01 01:11:14.995748+00:00",
+      "max_priority": 975,
+      "min_priority": 0
+    },
+    {
+      "field_name": "verify_school_match",
+      "jobs": 88,
+      "earliest_scheduled_at": "2026-05-01 16:53:24.251205+00:00",
+      "max_priority": 0,
+      "min_priority": 0
+    },
+    {
+      "field_name": "find_website",
+      "jobs": 73,
+      "earliest_scheduled_at": "2026-05-01 01:11:15.426812+00:00",
+      "max_priority": 975,
+      "min_priority": 0
+    }
+  ],
+  "recent_finished_jobs_6h": [
+    {
+      "field_name": "verify_school_match",
+      "status": "done",
+      "terminal_outcome": "school_identity_verified_activity_unknown",
+      "reason_code": "official_school_current_recognition",
+      "jobs": 5291
+    },
+    {
+      "field_name": "verify_school_match",
+      "status": "done",
+      "terminal_outcome": "school_identity_verified_activity_unknown",
+      "reason_code": "official_greek_life_context",
+      "jobs": 1480
+    },
+    {
+      "field_name": "verify_school_match",
+      "status": "done",
+      "terminal_outcome": "school_identity_verified_activity_unknown",
+      "reason_code": "current_official_greek_life_context",
+      "jobs": 1184
+    },
+    {
+      "field_name": "verify_school_match",
+      "status": "done",
+      "terminal_outcome": "school_identity_verified_activity_unknown",
+      "reason_code": "fraternity_present_on_official_school_list",
+      "jobs": 740
+    },
+    {
+      "field_name": "verify_school_match",
+      "status": "done",
+      "terminal_outcome": "verified",
+      "reason_code": "fraternity_present_on_official_school_list",
+      "jobs": 148
+    },
+    {
+      "field_name": "verify_school_match",
+      "status": "done",
+      "terminal_outcome": "verified",
+      "reason_code": "official_school_current_recognition",
+      "jobs": 37
+    }
+  ],
+  "recent_graph_decisions_6h": [
+    {
+      "field_name": "verify_school_match",
+      "decision_status": "school_identity_verified_activity_unknown",
+      "candidate_kind": "",
+      "write_allowed": false,
+      "requires_review": false,
+      "decisions": 8695,
+      "avg_confidence": 0.0
+    },
+    {
+      "field_name": "verify_school_match",
+      "decision_status": "verified",
+      "candidate_kind": "",
+      "write_allowed": true,
+      "requires_review": false,
+      "decisions": 185,
+      "avg_confidence": 0.0
+    }
+  ],
+  "provider_attempts_24h": [
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "field_job",
+      "status": "success",
+      "failure_type": "",
+      "attempts": 456,
+      "result_bearing": 456,
+      "avg_latency_ms": 1788.3,
+      "latest_at": "2026-04-30 22:50:58.046981+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8889",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "provider_unavailable",
+      "attempts": 430,
+      "result_bearing": 0,
+      "avg_latency_ms": 1114.9,
+      "latest_at": "2026-05-01 16:52:48.341485+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "preflight",
+      "status": "cache_hit",
+      "failure_type": "",
+      "attempts": 417,
+      "result_bearing": 417,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-05-01 01:48:12.868037+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "provider_unavailable",
+      "attempts": 406,
+      "result_bearing": 0,
+      "avg_latency_ms": 546.9,
+      "latest_at": "2026-05-01 16:52:48.341485+00:00"
+    },
+    {
+      "provider": "bing_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "challenge_or_anomaly",
+      "attempts": 389,
+      "result_bearing": 0,
+      "avg_latency_ms": 350.6,
+      "latest_at": "2026-05-01 16:16:22.507561+00:00"
+    },
+    {
+      "provider": "duckduckgo_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "timeout",
+      "attempts": 302,
+      "result_bearing": 0,
+      "avg_latency_ms": 5050.8,
+      "latest_at": "2026-05-01 16:16:22.507561+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "field_job",
+      "status": "cache_hit",
+      "failure_type": "",
+      "attempts": 170,
+      "result_bearing": 170,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 22:50:54.098698+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "field_job",
+      "status": "unavailable",
+      "failure_type": "engine_unresponsive",
+      "attempts": 93,
+      "result_bearing": 0,
+      "avg_latency_ms": 1971.4,
+      "latest_at": "2026-04-30 22:50:46.460315+00:00"
+    },
+    {
+      "provider": "duckduckgo_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "challenge_or_anomaly",
+      "attempts": 88,
+      "result_bearing": 0,
+      "avg_latency_ms": 228.7,
+      "latest_at": "2026-05-01 16:13:10.939778+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "preflight",
+      "status": "success",
+      "failure_type": "",
+      "attempts": 87,
+      "result_bearing": 87,
+      "avg_latency_ms": 797.9,
+      "latest_at": "2026-05-01 16:12:15.123004+00:00"
+    },
+    {
+      "provider": "bing_html",
+      "endpoint": "",
+      "context_type": "field_job",
+      "status": "unavailable",
+      "failure_type": "challenge_or_anomaly",
+      "attempts": 66,
+      "result_bearing": 0,
+      "avg_latency_ms": 765.9,
+      "latest_at": "2026-04-30 22:50:42.172158+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "challenge_or_anomaly",
+      "attempts": 66,
+      "result_bearing": 0,
+      "avg_latency_ms": 45.0,
+      "latest_at": "2026-05-01 16:51:47.261247+00:00"
+    },
+    {
+      "provider": "duckduckgo_html",
+      "endpoint": "",
+      "context_type": "field_job",
+      "status": "request_error",
+      "failure_type": "timeout",
+      "attempts": 64,
+      "result_bearing": 0,
+      "avg_latency_ms": 5285.9,
+      "latest_at": "2026-04-30 22:50:42.172158+00:00"
+    },
+    {
+      "provider": "duckduckgo_html",
+      "endpoint": "",
+      "context_type": "field_job",
+      "status": "unavailable",
+      "failure_type": "circuit_open",
+      "attempts": 56,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 22:50:56.740370+00:00"
+    },
+    {
+      "provider": "bing_html",
+      "endpoint": "",
+      "context_type": "field_job",
+      "status": "unavailable",
+      "failure_type": "circuit_open",
+      "attempts": 54,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 22:50:56.740370+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8889",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "connection_refused",
+      "attempts": 43,
+      "result_bearing": 0,
+      "avg_latency_ms": 4778.3,
+      "latest_at": "2026-05-01 00:02:25.776305+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8889",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "challenge_or_anomaly",
+      "attempts": 29,
+      "result_bearing": 0,
+      "avg_latency_ms": 1036.6,
+      "latest_at": "2026-05-01 16:51:47.261247+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "engine_unresponsive",
+      "attempts": 29,
+      "result_bearing": 0,
+      "avg_latency_ms": 74.3,
+      "latest_at": "2026-04-30 22:58:23.953131+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "",
+      "context_type": "field_job",
+      "status": "low_signal",
+      "failure_type": "low_signal_fallback",
+      "attempts": 27,
+      "result_bearing": 27,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 22:50:56.740370+00:00"
+    },
+    {
+      "provider": "tavily_api",
+      "endpoint": "",
+      "context_type": "crawl",
+      "status": "unavailable",
+      "failure_type": "circuit_open",
+      "attempts": 16,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-05-01 16:13:24.363420+00:00"
+    },
+    {
+      "provider": "serper_api",
+      "endpoint": "",
+      "context_type": "crawl",
+      "status": "unavailable",
+      "failure_type": "circuit_open",
+      "attempts": 16,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-05-01 16:13:24.494326+00:00"
+    },
+    {
+      "provider": "bing_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "success",
+      "failure_type": "",
+      "attempts": 12,
+      "result_bearing": 12,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 21:31:16.399510+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "low_signal",
+      "failure_type": "low_signal_fallback",
+      "attempts": 11,
+      "result_bearing": 11,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-05-01 16:12:15.123004+00:00"
+    },
+    {
+      "provider": "serper_api",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "",
+      "attempts": 8,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 21:31:16.302565+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "",
+      "attempts": 8,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 21:31:16.302565+00:00"
+    },
+    {
+      "provider": "duckduckgo_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "",
+      "attempts": 8,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 21:31:16.302565+00:00"
+    },
+    {
+      "provider": "brave_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "",
+      "attempts": 8,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 21:31:16.302565+00:00"
+    },
+    {
+      "provider": "tavily_api",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "",
+      "attempts": 8,
+      "result_bearing": 0,
+      "avg_latency_ms": 0.0,
+      "latest_at": "2026-04-30 21:31:16.302565+00:00"
+    },
+    {
+      "provider": "serper_api",
+      "endpoint": "",
+      "context_type": "crawl",
+      "status": "request_error",
+      "failure_type": "quota_exceeded",
+      "attempts": 4,
+      "result_bearing": 0,
+      "avg_latency_ms": 234.3,
+      "latest_at": "2026-05-01 16:13:16.408329+00:00"
+    },
+    {
+      "provider": "tavily_api",
+      "endpoint": "",
+      "context_type": "crawl",
+      "status": "request_error",
+      "failure_type": "quota_exceeded",
+      "attempts": 4,
+      "result_bearing": 0,
+      "avg_latency_ms": 199.3,
+      "latest_at": "2026-05-01 16:13:16.273235+00:00"
+    },
+    {
+      "provider": "duckduckgo_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "success",
+      "failure_type": "",
+      "attempts": 2,
+      "result_bearing": 2,
+      "avg_latency_ms": 765.5,
+      "latest_at": "2026-05-01 16:06:07.529110+00:00"
+    },
+    {
+      "provider": "searxng_json",
+      "endpoint": "http://localhost:8888",
+      "context_type": "preflight",
+      "status": "unavailable",
+      "failure_type": "parse_empty",
+      "attempts": 1,
+      "result_bearing": 0,
+      "avg_latency_ms": 1656.0,
+      "latest_at": "2026-04-30 21:32:17.824937+00:00"
+    },
+    {
+      "provider": "duckduckgo_html",
+      "endpoint": "",
+      "context_type": "preflight",
+      "status": "request_error",
+      "failure_type": "request_error_only",
+      "attempts": 1,
+      "result_bearing": 0,
+      "avg_latency_ms": 3515.0,
+      "latest_at": "2026-04-30 23:41:21.641480+00:00"
+    }
+  ],
+  "chapter_status_decisions_24h": [
+    {
+      "final_status": "unknown",
+      "school_recognition_status": "unknown",
+      "reason_code": "no_conclusive_school_status_evidence",
+      "review_required": false,
+      "decisions": 5,
+      "avg_confidence": 0.3
+    },
+    {
+      "final_status": "review",
+      "school_recognition_status": "unknown",
+      "reason_code": "national_all_status_directory_inactive_school_unknown",
+      "review_required": true,
+      "decisions": 3,
+      "avg_confidence": 0.82
+    },
+    {
+      "final_status": "active",
+      "school_recognition_status": "recognized",
+      "reason_code": "fraternity_present_on_official_school_list",
+      "review_required": false,
+      "decisions": 1,
+      "avg_confidence": 0.93
+    },
+    {
+      "final_status": "active",
+      "school_recognition_status": "recognized",
+      "reason_code": "official_school_current_recognition",
+      "review_required": false,
+      "decisions": 1,
+      "avg_confidence": 0.97
+    },
+    {
+      "final_status": "inactive",
+      "school_recognition_status": "unrecognized",
+      "reason_code": "fraternity_absent_from_official_school_list",
+      "review_required": false,
+      "decisions": 1,
+      "avg_confidence": 0.9
+    }
+  ],
+  "canonical_metrics": [
+    {
+      "total_chapters": 3410,
+      "active_chapters": 3083,
+      "inactive_chapters": 327,
+      "website_rows": 918,
+      "instagram_rows": 1715,
+      "email_rows": 309,
+      "complete_contact_rows": 158,
+      "possible_nationals_generic_mentions": 79
+    }
+  ],
+  "recent_chapter_updates_24h": [
+    {
+      "chapter_status": "active",
+      "updated": 154,
+      "with_website": 6,
+      "with_instagram": 86,
+      "with_email": 3
+    },
+    {
+      "chapter_status": "inactive",
+      "updated": 25,
+      "with_website": 0,
+      "with_instagram": 0,
+      "with_email": 0
+    }
+  ],
+  "worker_phases": [
+    {
+      "worker_id": "local-request-worker",
+      "workload_lane": "request",
+      "runtime_owner": "python_request_worker",
+      "status": "active",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-05-01 16:53:43.149785+00:00",
+      "lease_expires_at": "2026-05-01 16:56:43.149785+00:00"
+    },
+    {
+      "worker_id": "local-crawler-worker",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_worker_langgraph_primary",
+      "status": "active",
+      "phase": "preflight",
+      "phase_started_at": "2026-05-01 16:53:42.055239+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 120, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-05-01 16:53:42.055239+00:00",
+      "lease_expires_at": "2026-05-01 16:56:42.055239+00:00"
+    },
+    {
+      "worker_id": "local-crawler-worker-3",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-05-01 16:53:41.321576+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 30, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-05-01 16:53:41.327041+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "local-crawler-worker-1",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-05-01 16:53:41.277822+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 30, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-05-01 16:53:41.283323+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "local-crawler-worker-2",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-05-01 16:53:41.260071+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 30, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-05-01 16:53:41.265936+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "local-crawler-worker-4",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-05-01 16:53:41.254383+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 30, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-05-01 16:53:41.259497+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "phase-test-worker",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "test",
+      "status": "stopped",
+      "phase": "polling",
+      "phase_started_at": "2026-04-29 01:23:40.095832+00",
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-30 22:51:03.234043+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "full-validation-worker-1",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-04-29 01:32:58.272654+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 6, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-04-29 01:32:58.281156+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "full-validation-worker-2",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-04-29 01:32:58.252478+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 6, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-04-29 01:32:58.259733+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "plan-completion-worker-2",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-04-29 01:30:30.342685+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 4, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-04-29 01:30:30.350438+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "plan-completion-worker-1",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-04-29 01:30:30.324007+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 4, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-04-29 01:30:30.332188+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "phase-validation-worker-1",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-04-29 01:24:29.662584+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 2, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-04-29 01:24:29.672511+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "phase-validation-worker-2",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": "aggregating",
+      "phase_started_at": "2026-04-29 01:24:29.660944+00",
+      "last_batch_summary": "{\"requeued\": 0, \"processed\": 2, \"failedTerminal\": 0, \"runtimeModeUsed\": \"langgraph_primary\", \"dependencyWaitDeferred\": 0, \"providerDegradedDeferred\": 0, \"verifySchoolEvidenceMissing\": 0, \"verifySchoolProviderSearchAttempted\": 0}",
+      "last_heartbeat_at": "2026-04-29 01:24:29.670026+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "local-request-worker-a ",
+      "workload_lane": "request",
+      "runtime_owner": "python_request_worker_a ",
+      "status": "stopped",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-28 01:34:27.119227+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "local-request-worker-b ",
+      "workload_lane": "request",
+      "runtime_owner": "python_request_worker_b ",
+      "status": "stopped",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-28 01:34:27.119227+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "ig-fj-final-20260424213442-3",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-28 01:34:27.084330+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "local-crawler-worker-live ",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_worker_langgraph_primary",
+      "status": "stopped",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-28 01:34:27.084330+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "ig-fj-20260424212320-1",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-28 01:34:27.084330+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "ig-fj-final-20260424213442-12",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_langgraph_primary",
+      "status": "stopped",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-28 01:34:27.084330+00:00",
+      "lease_expires_at": null
+    },
+    {
+      "worker_id": "ig-fj-20260424212320",
+      "workload_lane": "contact_resolution",
+      "runtime_owner": "python_field_job_worker_langgraph_primary",
+      "status": "stopped",
+      "phase": null,
+      "phase_started_at": null,
+      "last_batch_summary": null,
+      "last_heartbeat_at": "2026-04-28 01:34:27.084330+00:00",
+      "lease_expires_at": null
+    }
+  ]
+}
