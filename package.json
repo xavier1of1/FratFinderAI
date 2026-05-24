@@ -1,7 +1,7 @@
 {
   "name": "frat-finder-ai",
   "private": true,
-  "version": "3.0.3",
+  "version": "3.0.4",
   "packageManager": "pnpm@9.12.3",
   "scripts": {
     "dev:web": "pnpm --filter @fratfinder/web dev",
@@ -18,6 +18,11 @@
     "db:migrate": "powershell -ExecutionPolicy Bypass -File infra/docker/apply-migrations.ps1",
     "db:seed": "powershell -ExecutionPolicy Bypass -File infra/docker/apply-seed.ps1",
     "db:smoke": "docker exec -i fratfinder-postgres psql -U postgres -d fratfinder < infra/supabase/tests/schema_smoke.sql"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.27.7"
+    }
   }
 }
 

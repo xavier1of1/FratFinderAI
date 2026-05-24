@@ -1,6 +1,7 @@
 import { buildCampaignReport } from "@/lib/campaign-report";
 import { toApiErrorResponse } from "@/lib/api-envelope";
 import { getCampaignRun } from "@/lib/repositories/campaign-run-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
 function toCsv(report: ReturnType<typeof buildCampaignReport>): string {
   const lines: string[] = [];
@@ -31,7 +32,7 @@ function toCsv(report: ReturnType<typeof buildCampaignReport>): string {
   return lines.join("\n");
 }
 
-export async function GET(request: Request, context: { params: { id: string } }) {
+async function exportCampaignRunHandler(request: Request, context: { params: { id: string } }) {
   try {
     const run = await getCampaignRun(context.params.id);
     if (!run) {
@@ -63,3 +64,9 @@ export async function GET(request: Request, context: { params: { id: string } })
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess(
+  "dashboard_read",
+  (_request, context: { params: { id: string } }) => ({ targetType: "campaign_run", targetId: context.params.id }),
+  exportCampaignRunHandler
+);

@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from requests import Session
-from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
-
 from fratfinder_crawler.config import Settings
+from fratfinder_crawler.security.url_safety import safe_untrusted_get
 
 _DEFAULT_BROWSER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -38,33 +35,54 @@ def _origin_referer(url: str) -> str | None:
 class HttpClient:
     def __init__(self, settings: Settings):
         self._settings = settings
-        self._session = Session()
-        self._session.headers.update({
-            "User-Agent": _effective_user_agent(settings.crawler_http_user_agent),
-            **_BROWSER_HEADERS,
-        })
-        retry = Retry(
-            total=settings.crawler_max_retries,
-            backoff_factor=settings.crawler_retry_backoff_seconds,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET"],
-            raise_on_status=False,
+        self._session = _SafeBrowserSession(
+            {
+                **_BROWSER_HEADERS,
+                "User-Agent": _effective_user_agent(settings.crawler_http_user_agent),
+            },
+            max_body_bytes=settings.crawler_http_max_body_bytes,
+            max_redirects=settings.crawler_http_max_redirects,
+            allowed_content_types=[
+                item.strip()
+                for item in settings.crawler_http_allowed_content_types.split(",")
+                if item.strip()
+            ],
         )
-        adapter = HTTPAdapter(max_retries=retry)
-        self._session.mount("http://", adapter)
-        self._session.mount("https://", adapter)
 
     def get(self, url: str) -> str:
-        request_headers: dict[str, str] = {}
         referer = _origin_referer(url)
-        if referer:
-            request_headers["Referer"] = referer
-
+        request_headers = {"Referer": referer} if referer else {}
         response = self._session.get(
             url,
-            headers=request_headers or None,
+            headers=request_headers,
             timeout=self._settings.crawler_http_timeout_seconds,
             verify=self._settings.crawler_http_verify_ssl,
         )
         response.raise_for_status()
         return response.text
+
+
+class _SafeBrowserSession:
+    def __init__(
+        self,
+        headers: dict[str, str],
+        *,
+        max_body_bytes: int,
+        max_redirects: int,
+        allowed_content_types: list[str],
+    ):
+        self.headers = dict(headers)
+        self._max_body_bytes = max_body_bytes
+        self._max_redirects = max_redirects
+        self._allowed_content_types = list(allowed_content_types)
+
+    def get(self, url: str, *, headers=None, timeout=None, verify=None):
+        return safe_untrusted_get(
+            url,
+            headers={**self.headers, **(headers or {})},
+            timeout=timeout or 20.0,
+            verify=True if verify is None else bool(verify),
+            max_body_bytes=self._max_body_bytes,
+            max_redirects=self._max_redirects,
+            allowed_content_types=self._allowed_content_types,
+        )

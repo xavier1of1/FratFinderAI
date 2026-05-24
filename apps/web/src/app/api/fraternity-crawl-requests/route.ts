@@ -5,6 +5,7 @@ import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { discoverFraternitySource } from "@/lib/fraternity-discovery";
 import { evaluateSourceUrl } from "@/lib/source-selection";
 import { scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
+import { withOperatorAccess, withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 import {
   appendFraternityCrawlRequestEvent,
   createFraternityCrawlRequest,
@@ -36,7 +37,7 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export async function GET(request: NextRequest) {
+async function listFraternityCrawlRequestsHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "100");
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function createRequestHandler(request: Request) {
   try {
     const payload = payloadSchema.parse(await request.json());
     const discovery = await discoverFraternitySource(payload.fraternityName);
@@ -162,3 +163,7 @@ export async function POST(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "fraternity_crawl_request" }, listFraternityCrawlRequestsHandler);
+
+export const POST = withOperatorAccess(["operator", "admin"], "crawl_request_create", { targetType: "fraternity_crawl_request" }, createRequestHandler);

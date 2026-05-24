@@ -18,6 +18,7 @@ from fratfinder_crawler.config import Settings, resolved_env_file_path, settings
 from fratfinder_crawler.db.connection import get_connection
 from fratfinder_crawler.db import CrawlerRepository, RequestGraphRepository
 from fratfinder_crawler.discovery import discover_source
+from fratfinder_crawler.security.url_safety import safe_untrusted_get
 from fratfinder_crawler.field_job_support import (
     job_has_canonical_active_status,
     job_has_existing_instagram_support,
@@ -5441,12 +5442,16 @@ def _select_registry_url(payload: dict[str, object]) -> tuple[str | None, str]:
 
 def _probe_url(url: str, settings: Settings) -> tuple[int | None, str | None, str | None]:
     try:
-        response = requests.get(
+        response = safe_untrusted_get(
             url,
             timeout=settings.crawler_http_timeout_seconds,
-            verify=settings.crawler_http_verify_ssl,
-            headers={"User-Agent": settings.crawler_http_user_agent},
-            allow_redirects=True,
+            max_body_bytes=settings.crawler_http_max_body_bytes,
+            max_redirects=settings.crawler_http_max_redirects,
+            allowed_content_types=[
+                item.strip()
+                for item in settings.crawler_http_allowed_content_types.split(",")
+                if item.strip()
+            ],
         )
         return response.status_code, response.url, None
     except Exception as exc:

@@ -1,7 +1,8 @@
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { getFieldJobGraphRunDetail } from "@/lib/repositories/field-job-graph-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
-export async function GET(request: Request, context: { params: { id: string } }) {
+async function getFieldJobGraphRunHandler(request: Request, context: { params: { id: string } }) {
   try {
     const runId = Number(context.params.id);
     if (!Number.isFinite(runId) || runId <= 0) {
@@ -26,3 +27,9 @@ export async function GET(request: Request, context: { params: { id: string } })
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess(
+  "dashboard_read",
+  (_request, context: { params: { id: string } }) => ({ targetType: "field_job_graph_run", targetId: context.params.id }),
+  getFieldJobGraphRunHandler
+);

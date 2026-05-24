@@ -15,6 +15,7 @@ from fratfinder_crawler.config import Settings
 from fratfinder_crawler.db.connection import get_connection
 from fratfinder_crawler.db.repository import CrawlerRepository
 from fratfinder_crawler.field_jobs import FieldJobEngine
+from fratfinder_crawler.security.url_safety import safe_untrusted_get
 from fratfinder_crawler.models import (
     CONTACT_SPECIFICITY_CHAPTER,
     FIELD_JOB_FIND_INSTAGRAM,
@@ -183,7 +184,6 @@ def _followup_links(base_url: str, html: str) -> list[str]:
 
 
 def _website_candidates(
-    session: requests.Session,
     row: dict[str, Any],
     stats: BackfillStats,
 ) -> list[InstagramCandidate]:
@@ -191,10 +191,10 @@ def _website_candidates(
     if not website_url:
         return []
 
-    def fetch(url: str) -> tuple[requests.Response | None, BeautifulSoup | None]:
+    def fetch(url: str):
         stats.fetch_attempted += 1
         try:
-            response = session.get(url, timeout=10, allow_redirects=True)
+            response = safe_untrusted_get(url, timeout=10)
             if response.status_code >= 400 or not response.text:
                 stats.fetch_failed += 1
                 return None, None
@@ -741,13 +741,11 @@ def run_bulk_backfill(
             results.append(stats.as_dict())
 
         if "website" in modes:
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; FratFinderAI/1.0; +https://example.com)"})
             stats = BackfillStats(mode="website")
             website_rows = _fetch_website_rows(repository, limit)
             grouped_candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for row in website_rows:
-                candidates = _website_candidates(session, row, stats)
+                candidates = _website_candidates(row, stats)
                 payload_rows = []
                 for candidate in candidates:
                     payload_rows.append(

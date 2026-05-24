@@ -70,6 +70,12 @@ class Settings(BaseSettings):
         default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         alias="CRAWLER_HTTP_USER_AGENT"
     )
+    crawler_http_max_body_bytes: int = Field(default=2_000_000, alias="CRAWLER_HTTP_MAX_BODY_BYTES")
+    crawler_http_max_redirects: int = Field(default=3, alias="CRAWLER_HTTP_MAX_REDIRECTS")
+    crawler_http_allowed_content_types: str = Field(
+        default="text/html,application/xhtml+xml,application/json,text/plain,application/xml,text/xml,application/rss+xml,application/atom+xml",
+        alias="CRAWLER_HTTP_ALLOWED_CONTENT_TYPES",
+    )
     crawler_max_retries: int = Field(default=3, alias="CRAWLER_MAX_RETRIES")
     crawler_retry_backoff_seconds: float = Field(default=1.0, alias="CRAWLER_RETRY_BACKOFF_SECONDS")
     crawler_field_job_worker_id: str = Field(default="local-crawler-worker", alias="CRAWLER_FIELD_JOB_WORKER_ID")

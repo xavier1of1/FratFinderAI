@@ -7,11 +7,9 @@ from urllib.parse import urlparse
 import re
 import unicodedata
 
-import requests
-
-from fratfinder_crawler import __version__
 from fratfinder_crawler.models import ExistingSourceCandidate, VerifiedSourceRecord
 from fratfinder_crawler.precision_tools import tool_same_host_directory_ranker, tool_source_identity_guard
+from fratfinder_crawler.security.url_safety import safe_untrusted_get
 from fratfinder_crawler.search import SearchClient, SearchResult
 
 _BLOCKED_HOSTS = {
@@ -683,12 +681,9 @@ def _text_has_chapter_directory_signal(*values: str) -> bool:
 
 
 def _default_html_fetcher(url: str) -> str | None:
-    response = requests.get(
+    response = safe_untrusted_get(
         url,
         timeout=8,
-        headers={
-            "User-Agent": f"FratFinderAI/{__version__} (+https://github.com/openai)"
-        },
     )
     response.raise_for_status()
     content_type = (response.headers.get("content-type") or "").lower()

@@ -6,6 +6,7 @@ import { scheduleDueCampaignRuns } from "@/lib/campaign-runner";
 import { failStaleBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
 import { reconcileStaleCampaignRuns } from "@/lib/repositories/campaign-run-repository";
 import { failStaleCrawlRuns } from "@/lib/repositories/crawl-run-repository";
+import { withOperatorAccess } from "@/lib/security/operator-access";
 
 const maintenancePayloadSchema = z.object({
   actions: z
@@ -22,7 +23,7 @@ const maintenancePayloadSchema = z.object({
     .max(10),
 });
 
-export async function POST(request: Request) {
+async function runtimeMaintenanceHandler(request: Request) {
   try {
     const payload = maintenancePayloadSchema.parse(await request.json());
     const results: Record<string, unknown> = {};
@@ -53,6 +54,8 @@ export async function POST(request: Request) {
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(["admin"], "runtime_maintenance", { targetType: "runtime_maintenance" }, runtimeMaintenanceHandler);
 
 export async function GET() {
   return apiError({

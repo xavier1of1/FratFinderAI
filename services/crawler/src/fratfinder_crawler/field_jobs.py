@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
-from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 from fratfinder_crawler.adaptive.policy import AdaptivePolicy
@@ -68,6 +67,7 @@ from fratfinder_crawler.school_verification import (
     CachedSchoolVerificationResult,
     resolve_cached_school_verification,
 )
+from fratfinder_crawler.security.url_safety import safe_untrusted_get, safe_untrusted_head
 from fratfinder_crawler.social import (
     InstagramCandidateBank,
     InstagramSourceType,
@@ -625,50 +625,22 @@ class FieldJobEngine:
             "Accept-Language": "en-US,en;q=0.9",
         }
         self._http_verify_ssl = bool(getattr(search_settings, "crawler_http_verify_ssl", True))
-        self._http_session: requests.Session | None = None
-        if head_requester is None or get_requester is None:
-            self._http_session = requests.Session()
-            adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
-            self._http_session.mount("http://", adapter)
-            self._http_session.mount("https://", adapter)
         self._head_requester = head_requester or self._default_head_requester
         self._get_requester = get_requester or self._default_get_requester
         self._cache_empty_search_results = bool(getattr(search_settings, "crawler_search_cache_empty_results", False))
 
     def _default_head_requester(self, url: str, *, timeout: float = 10, allow_redirects: bool = True, **kwargs):
-        if self._http_session is None:
-            self._http_session = requests.Session()
-            adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
-            self._http_session.mount("http://", adapter)
-            self._http_session.mount("https://", adapter)
-        headers = dict(kwargs.pop("headers", {}) or {})
-        for key, value in self._http_headers.items():
-            headers.setdefault(key, value)
-        kwargs.setdefault("verify", self._http_verify_ssl)
-        return self._http_session.head(
+        return safe_untrusted_head(
             url,
             timeout=timeout,
-            allow_redirects=allow_redirects,
-            headers=headers,
-            **kwargs,
+            max_redirects=3 if allow_redirects else 0,
         )
 
     def _default_get_requester(self, url: str, *, timeout: float = 10, allow_redirects: bool = True, **kwargs):
-        if self._http_session is None:
-            self._http_session = requests.Session()
-            adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
-            self._http_session.mount("http://", adapter)
-            self._http_session.mount("https://", adapter)
-        headers = dict(kwargs.pop("headers", {}) or {})
-        for key, value in self._http_headers.items():
-            headers.setdefault(key, value)
-        kwargs.setdefault("verify", self._http_verify_ssl)
-        return self._http_session.get(
+        return safe_untrusted_get(
             url,
             timeout=timeout,
-            allow_redirects=allow_redirects,
-            headers=headers,
-            **kwargs,
+            max_redirects=3 if allow_redirects else 0,
         )
 
     def process(self, limit: int = 25) -> dict[str, int]:

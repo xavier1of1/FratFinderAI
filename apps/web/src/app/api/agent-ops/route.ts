@@ -9,10 +9,11 @@ import {
   listProvisionalChapters,
   listRequestGraphRuns
 } from "@/lib/repositories/agent-ops-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+async function getAgentOpsHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "50");
@@ -39,3 +40,5 @@ export async function GET(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "agent_ops" }, getAgentOpsHandler);

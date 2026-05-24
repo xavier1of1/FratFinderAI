@@ -1,9 +1,10 @@
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { getFieldJobLogFeed } from "@/lib/repositories/field-job-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, context: { params: { id: string } }) {
+async function getFieldJobLogsHandler(request: Request, context: { params: { id: string } }) {
   try {
     const jobId = context.params.id?.trim();
     if (!jobId) {
@@ -18,3 +19,9 @@ export async function GET(request: Request, context: { params: { id: string } })
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess(
+  "dashboard_read",
+  (_request, context: { params: { id: string } }) => ({ targetType: "field_job", targetId: context.params.id }),
+  getFieldJobLogsHandler
+);

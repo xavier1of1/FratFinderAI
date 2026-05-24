@@ -1,10 +1,11 @@
 import { buildBenchmarkGateReport, findLatestLegacyBaseline, renderBenchmarkGateMarkdown } from "@/lib/benchmark-gates";
 import { apiError, toApiErrorResponse } from "@/lib/api-envelope";
 import { getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, context: { params: { id: string } }) {
+async function exportBenchmarkHandler(request: Request, context: { params: { id: string } }) {
   try {
     const run = await getBenchmarkRun(context.params.id);
     if (!run) {
@@ -47,3 +48,9 @@ export async function GET(request: Request, context: { params: { id: string } })
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess(
+  "dashboard_read",
+  (_request, context: { params: { id: string } }) => ({ targetType: "benchmark_run", targetId: context.params.id }),
+  exportBenchmarkHandler
+);

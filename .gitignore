@@ -14,9 +14,11 @@ coverage/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-basetemp*/
 .mypy_cache/
 .venv/
 venv/
+tmp/
 
 # IDE / OS
 .vscode/
@@ -30,5 +32,8 @@ Thumbs.db
 # Local runtime artifacts
 artifacts/*
 !artifacts/README.md
+/sbom/
+/security/
+/.tmp/
 /.tmp*.log
 /.tmp*.html

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { getChapterListMetadata, listChapters } from "@/lib/repositories/chapter-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
 function parseBoolean(value: string | null): boolean {
   if (!value) {
@@ -11,7 +12,7 @@ function parseBoolean(value: string | null): boolean {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
-export async function GET(request: NextRequest) {
+async function listChaptersHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const q = searchParams.get("q") ?? "";
@@ -48,3 +49,5 @@ export async function GET(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "chapter" }, listChaptersHandler);

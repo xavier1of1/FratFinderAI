@@ -2,8 +2,9 @@ import { NextRequest } from "next/server";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { listFieldJobGraphRuns } from "@/lib/repositories/field-job-graph-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
-export async function GET(request: NextRequest) {
+async function listFieldJobGraphRunsHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "50");
@@ -23,3 +24,5 @@ export async function GET(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "field_job_graph_run" }, listFieldJobGraphRunsHandler);

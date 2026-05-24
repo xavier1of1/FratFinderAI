@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const operatorAuditQuery = vi.fn(async () => ({ rowCount: 1, rows: [{}] }));
 const reconcileStaleCampaignRuns = vi.fn(async () => 0);
 const scheduleDueCampaignRuns = vi.fn(async () => 0);
 const scheduleCampaignRun = vi.fn(async () => true);
@@ -268,16 +269,42 @@ vi.mock("@/lib/repositories/fraternity-crawl-request-repository", () => ({
   bumpQueuedFieldJobsForSource: vi.fn(),
 }));
 
+vi.mock("@/lib/db", () => ({
+  getDbPool: () => ({ query: operatorAuditQuery }),
+}));
+
+function operatorRequest(url: string, init: RequestInit): Request {
+  return new Request(url, {
+    ...init,
+    headers: {
+      Authorization: "Bearer operator-token-value",
+      ...(init.headers ?? {}),
+    },
+  });
+}
+
+function analystRequest(url: string): Request & { nextUrl: URL } {
+  const request = new Request(url, {
+    headers: { Authorization: "Bearer analyst-token-value" },
+  }) as Request & { nextUrl: URL };
+  Object.defineProperty(request, "nextUrl", { value: new URL(url) });
+  return request;
+}
+
 describe("read-only API routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("WEB_AUTH_DISABLED", "false");
+    vi.stubEnv("WEB_ADMIN_TOKEN", "admin-token-value");
+    vi.stubEnv("WEB_OPERATOR_TOKEN", "operator-token-value");
+    vi.stubEnv("WEB_ANALYST_TOKEN", "analyst-token-value");
+    vi.stubEnv("WEB_OPERATOR_SESSION_SECRET", "test-session-secret-long-enough");
   });
 
   it("campaign-runs GET does not mutate runtime state", async () => {
     const route = await import("./campaign-runs/route");
-    const response = await route.GET({
-      nextUrl: new URL("http://localhost/api/campaign-runs?limit=5"),
-    } as never);
+    const response = await route.GET(analystRequest("http://localhost/api/campaign-runs?limit=5") as never);
     expect(response.status).toBe(200);
     expect(reconcileStaleCampaignRuns).not.toHaveBeenCalled();
     expect(scheduleDueCampaignRuns).not.toHaveBeenCalled();
@@ -286,7 +313,7 @@ describe("read-only API routes", () => {
 
   it("campaign detail GET does not auto-schedule or reconcile", async () => {
     const route = await import("./campaign-runs/[id]/route");
-    const response = await route.GET(new Request("http://localhost/api/campaign-runs/campaign-1"), {
+    const response = await route.GET(analystRequest("http://localhost/api/campaign-runs/campaign-1"), {
       params: { id: "campaign-1" },
     });
     expect(response.status).toBe(200);
@@ -296,7 +323,7 @@ describe("read-only API routes", () => {
 
   it("campaign summary GET is observational only", async () => {
     const route = await import("./campaign-runs/summary/route");
-    const response = await route.GET();
+    const response = await route.GET(analystRequest("http://localhost/api/campaign-runs/summary") as never);
     expect(response.status).toBe(200);
     expect(getCampaignRunCounts).toHaveBeenCalled();
     expect(reconcileStaleCampaignRuns).not.toHaveBeenCalled();
@@ -305,16 +332,14 @@ describe("read-only API routes", () => {
 
   it("benchmarks GET does not fail stale runs", async () => {
     const route = await import("./benchmarks/route");
-    const response = await route.GET({
-      nextUrl: new URL("http://localhost/api/benchmarks?limit=10"),
-    } as never);
+    const response = await route.GET(analystRequest("http://localhost/api/benchmarks?limit=10") as never);
     expect(response.status).toBe(200);
     expect(failStaleBenchmarkRuns).not.toHaveBeenCalled();
   });
 
   it("benchmark summary GET is observational only", async () => {
     const route = await import("./benchmarks/summary/route");
-    const response = await route.GET();
+    const response = await route.GET(analystRequest("http://localhost/api/benchmarks/summary") as never);
     expect(response.status).toBe(200);
     expect(getBenchmarkRunCounts).toHaveBeenCalled();
     expect(failStaleBenchmarkRuns).not.toHaveBeenCalled();
@@ -322,7 +347,7 @@ describe("read-only API routes", () => {
 
   it("benchmark detail GET does not fail stale runs", async () => {
     const route = await import("./benchmarks/[id]/route");
-    const response = await route.GET(new Request("http://localhost/api/benchmarks/benchmark-1"), {
+    const response = await route.GET(analystRequest("http://localhost/api/benchmarks/benchmark-1"), {
       params: { id: "benchmark-1" },
     });
     expect(response.status).toBe(404);
@@ -331,7 +356,7 @@ describe("read-only API routes", () => {
 
   it("benchmark export GET does not fail stale runs", async () => {
     const route = await import("./benchmarks/[id]/export/route");
-    const response = await route.GET(new Request("http://localhost/api/benchmarks/benchmark-1/export?format=json"), {
+    const response = await route.GET(analystRequest("http://localhost/api/benchmarks/benchmark-1/export?format=json"), {
       params: { id: "benchmark-1" },
     });
     expect(response.status).toBe(404);
@@ -340,27 +365,21 @@ describe("read-only API routes", () => {
 
   it("runs GET does not reconcile stale crawl runs", async () => {
     const route = await import("./runs/route");
-    const response = await route.GET({
-      nextUrl: new URL("http://localhost/api/runs?limit=10"),
-    } as never);
+    const response = await route.GET(analystRequest("http://localhost/api/runs?limit=10") as never);
     expect(response.status).toBe(200);
     expect(failStaleCrawlRuns).not.toHaveBeenCalled();
   });
 
   it("agent-ops GET does not reconcile stale crawl runs", async () => {
     const route = await import("./agent-ops/route");
-    const response = await route.GET({
-      nextUrl: new URL("http://localhost/api/agent-ops?limit=10"),
-    } as never);
+    const response = await route.GET(analystRequest("http://localhost/api/agent-ops?limit=10") as never);
     expect(response.status).toBe(200);
     expect(failStaleCrawlRuns).not.toHaveBeenCalled();
   });
 
   it("field-jobs GET is observational only", async () => {
     const route = await import("./field-jobs/route");
-    const response = await route.GET({
-      nextUrl: new URL("http://localhost/api/field-jobs?limit=10"),
-    } as never);
+    const response = await route.GET(analystRequest("http://localhost/api/field-jobs?limit=10") as never);
     expect(response.status).toBe(200);
     expect(listFieldJobs).toHaveBeenCalled();
     expect(scheduleDueCampaignRuns).not.toHaveBeenCalled();
@@ -368,7 +387,7 @@ describe("read-only API routes", () => {
 
   it("field-job logs GET is observational only", async () => {
     const route = await import("./field-jobs/[id]/logs/route");
-    const response = await route.GET(new Request("http://localhost/api/field-jobs/job-1/logs?limit=20"), {
+    const response = await route.GET(analystRequest("http://localhost/api/field-jobs/job-1/logs?limit=20"), {
       params: { id: "job-1" },
     });
     expect(response.status).toBe(200);
@@ -385,11 +404,20 @@ describe("read-only API routes", () => {
     expect(scheduleBenchmarkDriftAlertScan).not.toHaveBeenCalled();
   });
 
+  it("health liveness and readiness are public", async () => {
+    const liveness = await import("./health/liveness/route");
+    const readiness = await import("./health/readiness/route");
+
+    const livenessResponse = await liveness.GET();
+    const readinessResponse = await readiness.GET();
+
+    expect(livenessResponse.status).toBe(200);
+    expect(readinessResponse.status).toBe(200);
+  });
+
   it("fraternity crawl requests GET does not reconcile or schedule", async () => {
     const route = await import("./fraternity-crawl-requests/route");
-    const response = await route.GET({
-      nextUrl: new URL("http://localhost/api/fraternity-crawl-requests?limit=10"),
-    } as never);
+    const response = await route.GET(analystRequest("http://localhost/api/fraternity-crawl-requests?limit=10") as never);
     expect(response.status).toBe(200);
     expect(reconcileStaleFraternityCrawlRequests).not.toHaveBeenCalled();
     expect(scheduleDueFraternityCrawlRequests).not.toHaveBeenCalled();
@@ -397,7 +425,7 @@ describe("read-only API routes", () => {
 
   it("fraternity crawl request detail GET does not reconcile or schedule", async () => {
     const route = await import("./fraternity-crawl-requests/[id]/route");
-    const response = await route.GET(new Request("http://localhost/api/fraternity-crawl-requests/request-1") as never, {
+    const response = await route.GET(analystRequest("http://localhost/api/fraternity-crawl-requests/request-1") as never, {
       params: { id: "request-1" },
     });
     expect(response.status).toBe(404);
@@ -408,7 +436,7 @@ describe("read-only API routes", () => {
 
   it("fraternity crawl request summary GET is observational only", async () => {
     const route = await import("./fraternity-crawl-requests/summary/route");
-    const response = await route.GET();
+    const response = await route.GET(analystRequest("http://localhost/api/fraternity-crawl-requests/summary") as never);
     expect(response.status).toBe(200);
     expect(getFraternityCrawlRequestCounts).toHaveBeenCalled();
     expect(reconcileStaleFraternityCrawlRequests).not.toHaveBeenCalled();
@@ -418,7 +446,7 @@ describe("read-only API routes", () => {
   it("benchmarks POST enqueues evaluation work instead of scheduling in-process", async () => {
     const route = await import("./benchmarks/route");
     const response = await route.POST(
-      new Request("http://localhost/api/benchmarks", {
+      operatorRequest("http://localhost/api/benchmarks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -438,7 +466,7 @@ describe("read-only API routes", () => {
   it("campaign-runs POST enqueues evaluation work instead of scheduling in-process", async () => {
     const route = await import("./campaign-runs/route");
     const response = await route.POST(
-      new Request("http://localhost/api/campaign-runs", {
+      operatorRequest("http://localhost/api/campaign-runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: "campaign" }),

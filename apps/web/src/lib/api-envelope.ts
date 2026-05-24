@@ -91,6 +91,6 @@ export function toApiErrorResponse(error: unknown) {
     status: 500,
     code: "internal_error",
     message: "Unexpected server error.",
-    details: error instanceof Error ? error.message : String(error)
+    details: process.env.NODE_ENV === "production" ? undefined : error instanceof Error ? error.message : String(error)
   });
 }

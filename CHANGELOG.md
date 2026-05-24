@@ -1,7 +1,28 @@
 ## [Unreleased]
 
+## [3.0.4] - 2026-05-23
+
 ### Changed
-- Incremented the platform version to `3.0.3` across the root workspace, web app, crawler service, contracts package, and active surfaced version labels.
+- Incremented the platform version to `3.0.4` across the root workspace, web app, crawler service, contracts package, generated crawler package metadata, and active surfaced version labels.
+- Hardened the SBOM/SCA release surface by upgrading Next.js to `14.2.25`, forcing `esbuild` to `0.27.7`, moving the web image to `node:22-alpine`, and moving the crawler image to `python:3.13-alpine`.
+- Updated the SBOM/SCA workflow and local generator so evidence is rendered before policy enforcement, Docker/image SBOMs are generated when builds succeed, and scan artifacts remain available even when policy fails.
+
+### Added
+- Added the Phase 1 SBOM/SCA evidence pipeline with Syft CycloneDX SBOM generation, Grype scan output, strict vulnerability-ignore validation, critical-vulnerability policy gates, CI artifact upload, and `docs/security/sbom.md`.
+- Added the Phase 2 SSRF-safe untrusted crawler fetch policy with DNS/IP validation, private/local/metadata range blocking, redirect revalidation, body/content-type limits, stable deny reason codes, call-site bypass coverage, and `docs/security/ssrf-url-safety.md`.
+- Added the Phase 3 operator RBAC and audit foundation with token/session roles, protected-route wrappers, mutating/read-only route coverage tests, `operator_audit_events`, and `docs/security/operator-access-control.md`.
+- Added `docs/security/security-sprint-validation.md` with local validation evidence, generated SBOM/SCA artifact details, scanner versions, vulnerability totals, and documented temporary critical-vulnerability exceptions.
+- Added `docs/security/phase-2-ssrf-validation-report.md` with requirement-by-requirement SSRF proof, call-site coverage evidence, and real validation command logs.
+- Added `docs/security/phase-3-operator-rbac-validation-report.md` with requirement-by-requirement RBAC/audit proof, permission-matrix evidence, and real validation command logs.
+- Added `docs/security/security-sprint-comprehensive-report.md` as the consolidated Phase 1, Phase 2, and Phase 3 security sprint report.
+
+### Fixed
+- Fixed SBOM/SCA local and CI generation gaps around missing Docker ignore coverage, PowerShell native-command exit handling, scan-path wildcard expansion, UTF-8 BOM JSON parsing, and empty app SBOM component discovery.
+- Fixed the SSRF-safe untrusted fetch path so crawler-discovered requests strip sensitive auth/cookie/API-key headers and avoid ambient process auth/proxy inheritance.
+- Fixed Phase 3 RBAC validation coverage so invalid bearer tokens, login/session/logout behavior, allowed/denied/error audit paths, production-safe protected-route errors, public health probes, and exported route wrappers are all regression-tested.
+
+### Validated
+- Validated the security sprint with `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd test:contracts`, `pnpm.cmd test:web`, crawler security/unit coverage, integration tests, and local Syft/Grype artifact generation.
 
 ### Added
 - Added worker phase metadata for field-job workers (`polling`, `preflight`, `triage`, `claiming`, `executing`, `aggregating`, `sleeping`) so queue health can distinguish idle/polling workers from dead workers.

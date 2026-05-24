@@ -3,8 +3,9 @@ import { NextRequest } from "next/server";
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { scheduleBenchmarkDriftAlertScan } from "@/lib/benchmark-alerts";
 import { listBenchmarkAlerts } from "@/lib/repositories/benchmark-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
-export async function GET(request: NextRequest) {
+async function getBenchmarkAlertsHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "100");
@@ -31,3 +32,5 @@ export async function GET(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "benchmark_alerts" }, getBenchmarkAlertsHandler);

@@ -1,7 +1,8 @@
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { listChapterMapSummary } from "@/lib/repositories/chapter-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
-export async function GET() {
+async function getChapterMapSummaryHandler() {
   try {
     const data = await listChapterMapSummary();
     return apiSuccess(data);
@@ -9,3 +10,5 @@ export async function GET() {
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "chapter_map_summary" }, getChapterMapSummaryHandler);

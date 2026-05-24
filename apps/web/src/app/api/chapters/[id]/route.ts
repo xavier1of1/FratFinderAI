@@ -1,8 +1,8 @@
-import { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { updateChapterRecord } from "@/lib/repositories/chapter-repository";
+import { withOperatorAccess } from "@/lib/security/operator-access";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -23,7 +23,7 @@ function normalizeNullable(value: string | null | undefined): string | null {
   return normalized.length ? normalized : null;
 }
 
-export async function PATCH(request: NextRequest, context: { params: { id: string } }) {
+async function patchChapterHandler(request: Request, context: { params: { id: string } }) {
   try {
     const payload = updateSchema.parse(await request.json());
     const updated = await updateChapterRecord({
@@ -47,3 +47,10 @@ export async function PATCH(request: NextRequest, context: { params: { id: strin
     return toApiErrorResponse(error);
   }
 }
+
+export const PATCH = withOperatorAccess(
+  ["operator", "admin"],
+  "chapter_update",
+  (_request, context: { params: { id: string } }) => ({ targetType: "chapter", targetId: context.params.id }),
+  patchChapterHandler
+);

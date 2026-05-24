@@ -4,6 +4,7 @@ import { z } from "zod";
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { scheduleDueFraternityCrawlRequests, scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
 import { evaluateSourceUrl } from "@/lib/source-selection";
+import { withOperatorAccess, withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 import {
   appendFraternityCrawlRequestEvent,
   getFraternityCrawlRequest,
@@ -40,7 +41,7 @@ function getDiscoveredSourceUrl(current: Awaited<ReturnType<typeof getFraternity
   return null;
 }
 
-export async function GET(_: NextRequest, context: { params: { id: string } }) {
+async function getFraternityCrawlRequestHandler(_: NextRequest, context: { params: { id: string } }) {
   try {
     const run = await getFraternityCrawlRequest(context.params.id);
     if (!run) {
@@ -53,7 +54,13 @@ export async function GET(_: NextRequest, context: { params: { id: string } }) {
   }
 }
 
-export async function PATCH(request: NextRequest, context: { params: { id: string } }) {
+export const GET = withReadOnlyOperatorAccess(
+  "dashboard_read",
+  (_request, context: { params: { id: string } }) => ({ targetType: "fraternity_crawl_request", targetId: context.params.id }),
+  getFraternityCrawlRequestHandler
+);
+
+async function patchRequestHandler(request: Request, context: { params: { id: string } }) {
   try {
     const id = context.params.id;
     const payload = patchSchema.parse(await request.json());
@@ -220,3 +227,10 @@ export async function PATCH(request: NextRequest, context: { params: { id: strin
     return toApiErrorResponse(error);
   }
 }
+
+export const PATCH = withOperatorAccess(
+  ["operator", "admin"],
+  "crawl_request_mutate",
+  (_request, context: { params: { id: string } }) => ({ targetType: "fraternity_crawl_request", targetId: context.params.id }),
+  patchRequestHandler
+);

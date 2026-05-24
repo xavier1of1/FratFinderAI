@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { scheduleFraternityCrawlRequest } from "@/lib/fraternity-crawl-request-runner";
+import { withOperatorAccess } from "@/lib/security/operator-access";
 import {
   appendFraternityCrawlRequestEvent,
   bumpQueuedFieldJobsForSource,
@@ -9,7 +10,7 @@ import {
   updateFraternityCrawlRequest
 } from "@/lib/repositories/fraternity-crawl-request-repository";
 
-export async function POST(_: NextRequest, context: { params: { id: string } }) {
+async function expediteRequestHandler(_: Request, context: { params: { id: string } }) {
   try {
     const id = context.params.id;
     const current = await getFraternityCrawlRequest(id);
@@ -54,3 +55,10 @@ export async function POST(_: NextRequest, context: { params: { id: string } }) 
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(
+  ["operator", "admin"],
+  "crawl_request_expedite",
+  (_request, context: { params: { id: string } }) => ({ targetType: "fraternity_crawl_request", targetId: context.params.id }),
+  expediteRequestHandler
+);

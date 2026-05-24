@@ -1,8 +1,9 @@
 import { apiError, apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { createEvaluationJob } from "@/lib/repositories/evaluation-job-repository";
 import { getCampaignRun, reconcileStaleCampaignRuns, updateCampaignRun } from "@/lib/repositories/campaign-run-repository";
+import { withOperatorAccess } from "@/lib/security/operator-access";
 
-export async function POST(_request: Request, context: { params: { id: string } }) {
+async function resumeCampaignRunHandler(_request: Request, context: { params: { id: string } }) {
   try {
     await reconcileStaleCampaignRuns();
     const campaign = await getCampaignRun(context.params.id);
@@ -39,3 +40,10 @@ export async function POST(_request: Request, context: { params: { id: string } 
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(
+  ["operator", "admin"],
+  "campaign_run_resume",
+  (_request, context: { params: { id: string } }) => ({ targetType: "campaign_run", targetId: context.params.id }),
+  resumeCampaignRunHandler
+);

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { createCrmCampaign, listCrmCampaigns } from "@/lib/repositories/crm-repository";
+import { withOperatorAccess, withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ const payloadSchema = z.object({
     .optional()
 });
 
-export async function GET(request: NextRequest) {
+async function listCrmCampaignsHandler(request: NextRequest) {
   try {
     const limit = Number(request.nextUrl.searchParams.get("limit") ?? "50");
     const campaigns = await listCrmCampaigns(Number.isNaN(limit) ? 50 : limit);
@@ -33,7 +34,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: Request) {
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "crm_campaign" }, listCrmCampaignsHandler);
+
+async function createCrmCampaignHandler(request: Request) {
   try {
     const payload = payloadSchema.parse(await request.json());
     const campaign = await createCrmCampaign({
@@ -49,3 +52,5 @@ export async function POST(request: Request) {
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(["operator", "admin"], "crm_campaign_create", { targetType: "crm_campaign" }, createCrmCampaignHandler);

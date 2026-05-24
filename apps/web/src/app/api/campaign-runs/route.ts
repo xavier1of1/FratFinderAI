@@ -4,6 +4,7 @@ import { z } from "zod";
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { createEvaluationJob } from "@/lib/repositories/evaluation-job-repository";
 import { createCampaignRun, listCampaignRuns, reconcileStaleCampaignRuns } from "@/lib/repositories/campaign-run-repository";
+import { withOperatorAccess, withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 import type { CampaignRun, CampaignRunConfig } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -80,7 +81,7 @@ function toCampaignListItem(campaign: CampaignRun): CampaignRun {
   };
 }
 
-export async function GET(request: NextRequest) {
+async function listCampaignRunsHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "50");
@@ -91,7 +92,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "campaign_run" }, listCampaignRunsHandler);
+
+async function createCampaignRunHandler(request: Request) {
   try {
     await reconcileStaleCampaignRuns();
     const payload = campaignPayloadSchema.parse(await request.json());
@@ -118,3 +121,5 @@ export async function POST(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(["operator", "admin"], "campaign_run_create", { targetType: "campaign_run" }, createCampaignRunHandler);

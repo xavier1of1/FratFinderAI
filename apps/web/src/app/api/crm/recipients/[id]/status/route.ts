@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { updateCrmRecipientStatus } from "@/lib/repositories/crm-repository";
+import { withOperatorAccess } from "@/lib/security/operator-access";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ const payloadSchema = z.object({
   lastError: z.string().trim().max(1000).nullable().optional().or(z.literal(""))
 });
 
-export async function POST(request: Request, context: { params: { id: string } }) {
+async function updateCrmRecipientStatusHandler(request: Request, context: { params: { id: string } }) {
   try {
     const payload = payloadSchema.parse(await request.json());
     const recipient = await updateCrmRecipientStatus({
@@ -26,3 +27,10 @@ export async function POST(request: Request, context: { params: { id: string } }
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(
+  ["operator", "admin"],
+  "crm_recipient_status_update",
+  (_request, context: { params: { id: string } }) => ({ targetType: "crm_recipient", targetId: context.params.id }),
+  updateCrmRecipientStatusHandler
+);

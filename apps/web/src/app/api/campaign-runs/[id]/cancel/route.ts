@@ -2,8 +2,9 @@ import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { cancelCampaignRun } from "@/lib/campaign-runner";
 import { cancelEvaluationJob, getEvaluationJobByRun } from "@/lib/repositories/evaluation-job-repository";
 import { getCampaignRun } from "@/lib/repositories/campaign-run-repository";
+import { withOperatorAccess } from "@/lib/security/operator-access";
 
-export async function POST(_request: Request, context: { params: { id: string } }) {
+async function cancelCampaignRunHandler(_request: Request, context: { params: { id: string } }) {
   try {
     const evaluationJob = await getEvaluationJobByRun({ campaignRunId: context.params.id });
     if (evaluationJob) {
@@ -22,3 +23,10 @@ export async function POST(_request: Request, context: { params: { id: string } 
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(
+  ["operator", "admin"],
+  "campaign_run_cancel",
+  (_request, context: { params: { id: string } }) => ({ targetType: "campaign_run", targetId: context.params.id }),
+  cancelCampaignRunHandler
+);

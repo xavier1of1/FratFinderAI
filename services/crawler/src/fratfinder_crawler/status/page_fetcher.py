@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-import requests
+from fratfinder_crawler.security.url_safety import UrlSafetyError, safe_untrusted_get
 
 from .campus_discovery import CampusSourceDocument
 
@@ -13,10 +13,13 @@ def fetch_page_document(
     requester: Callable[..., object] | None = None,
     timeout: float = 15,
 ) -> CampusSourceDocument | None:
-    get_request = requester or requests.get
     try:
-        response = get_request(url, timeout=timeout)
-    except Exception:
+        response = (
+            requester(url, timeout=timeout)
+            if requester is not None
+            else safe_untrusted_get(url, timeout=timeout)
+        )
+    except (Exception, UrlSafetyError):
         return None
     status_code = getattr(response, "status_code", None)
     if status_code is None or int(status_code) >= 400:

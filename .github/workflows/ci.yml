@@ -33,3 +33,93 @@ jobs:
       - run: python -m pytest services/crawler/src/fratfinder_crawler/tests --cov=fratfinder_crawler --cov-report=term-missing --cov-fail-under=70
       - run: python -m pytest tests/integration -m integration
       - run: python -m fratfinder_crawler.status.evaluate_goldset --goldset services/crawler/evaluation/chapter_status_goldset.jsonl --fail-on-threshold
+
+  security-sbom-sca:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pnpm install
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e "services/crawler[dev]"
+      - name: Install Syft and Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin"
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Validate vulnerability ignores
+        run: python scripts/security/security_sca.py validate-ignores --ignore-file .security/vulnerability-ignores.yml
+      - name: Build Docker images for SBOM
+        run: |
+          docker build -t fratfinder-web-sbom -f infra/docker/Dockerfile.web .
+          docker build -t fratfinder-crawler-sbom -f infra/docker/Dockerfile.crawler .
+      - name: Generate CycloneDX SBOMs
+        run: |
+          mkdir -p sbom security
+          rm -rf .tmp/security-sbom-context/apps-web
+          mkdir -p .tmp/security-sbom-context/apps-web/apps/web .tmp/security-sbom-context/apps-web/packages/contracts
+          cp package.json pnpm-lock.yaml pnpm-workspace.yaml .tmp/security-sbom-context/apps-web/
+          cp apps/web/package.json .tmp/security-sbom-context/apps-web/apps/web/package.json
+          cp packages/contracts/package.json .tmp/security-sbom-context/apps-web/packages/contracts/package.json
+          syft dir:.tmp/security-sbom-context/apps-web -o cyclonedx-json=sbom/apps-web.cdx.json
+          syft dir:services/crawler -o cyclonedx-json=sbom/crawler-python.cdx.json
+          syft fratfinder-web-sbom -o cyclonedx-json=sbom/docker-web.cdx.json
+          syft fratfinder-crawler-sbom -o cyclonedx-json=sbom/docker-crawler.cdx.json
+      - name: Scan SBOMs
+        run: |
+          grype sbom:sbom/apps-web.cdx.json -o json > security/grype-apps-web.json || true
+          grype sbom:sbom/crawler-python.cdx.json -o json > security/grype-crawler-python.json || true
+          grype sbom:sbom/docker-web.cdx.json -o json > security/grype-docker-web.json || true
+          grype sbom:sbom/docker-crawler.cdx.json -o json > security/grype-docker-crawler.json || true
+          python scripts/security/security_sca.py combine-scans --output security/vulnerability-scan.json security/grype-*.json
+      - name: Render SBOM evidence
+        run: |
+          SYFT_VERSION="$(syft version | head -n 1)"
+          GRYPE_VERSION="$(grype version | head -n 1)"
+          python scripts/security/security_sca.py render-evidence \
+            --ignore-file .security/vulnerability-ignores.yml \
+            --scan security/vulnerability-scan.json \
+            --sbom sbom/apps-web.cdx.json \
+            --sbom sbom/crawler-python.cdx.json \
+            --sbom sbom/docker-web.cdx.json \
+            --sbom sbom/docker-crawler.cdx.json \
+            --output security/sbom-evidence.md \
+            --commit-sha "${{ github.sha }}" \
+            --workflow-run-id "${{ github.run_id }}" \
+            --syft-version "$SYFT_VERSION" \
+            --scanner-version "$GRYPE_VERSION"
+      - name: Validate generated artifacts
+        run: |
+          jq -e '.bomFormat == "CycloneDX"' sbom/apps-web.cdx.json
+          jq -e '.bomFormat == "CycloneDX"' sbom/crawler-python.cdx.json
+          jq -e '(.components | length) > 0' sbom/apps-web.cdx.json
+          jq -e '(.components | length) > 0' sbom/crawler-python.cdx.json
+          test -s security/sbom-evidence.md
+          test -s security/vulnerability-scan.json
+          jq -e '.' security/vulnerability-scan.json
+      - name: Enforce vulnerability policy
+        run: |
+          FAIL_ON_HIGH_FLAG=""
+          if [ "${SECURITY_FAIL_ON_HIGH:-false}" = "true" ]; then
+            FAIL_ON_HIGH_FLAG="--fail-on-high"
+          fi
+          python scripts/security/security_sca.py evaluate --ignore-file .security/vulnerability-ignores.yml --scan security/vulnerability-scan.json $FAIL_ON_HIGH_FLAG
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-sbom-sca
+          path: |
+            sbom/apps-web.cdx.json
+            sbom/crawler-python.cdx.json
+            sbom/docker-web.cdx.json
+            sbom/docker-crawler.cdx.json
+            security/vulnerability-scan.json
+            security/sbom-evidence.md

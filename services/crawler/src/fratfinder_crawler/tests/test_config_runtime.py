@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -9,7 +10,16 @@ from fratfinder_crawler.config import get_settings, resolve_env_file_path
 from fratfinder_crawler.pipeline import CrawlService
 
 
-def test_get_settings_loads_env_file_independent_of_current_working_directory(monkeypatch, tmp_path: Path):
+def _workspace_tmp() -> Path:
+    root = Path.cwd() / "tmp" / "config-runtime-tests"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / uuid4().hex
+    path.mkdir()
+    return path
+
+
+def test_get_settings_loads_env_file_independent_of_current_working_directory(monkeypatch):
+    tmp_path = _workspace_tmp()
     env_file = tmp_path / ".env"
     env_file.write_text("DATABASE_URL=postgresql://example/test\n", encoding="utf-8")
     nested = tmp_path / "nested" / "cwd"

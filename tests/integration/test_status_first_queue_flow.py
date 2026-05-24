@@ -135,7 +135,7 @@ def test_status_first_queue_flow_defers_then_advances():
 
     first = engine.process(limit=1)
     assert first["requeued"] == 1
-    assert repository.requeues[0][2]["contactResolution"]["reasonCode"] == "status_dependency_unmet"
+    assert repository.requeues[0][2]["contactResolution"]["reasonCode"] == "status_no_decision"
 
     repository.latest_status_decision = ChapterStatusDecision(
         id="decision-1",

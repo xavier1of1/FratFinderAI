@@ -4,6 +4,7 @@ import { z } from "zod";
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { createEvaluationJob } from "@/lib/repositories/evaluation-job-repository";
 import { createBenchmarkRun, failStaleBenchmarkRuns, getBenchmarkRun, listBenchmarkRuns } from "@/lib/repositories/benchmark-repository";
+import { withOperatorAccess, withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 import type { BenchmarkFieldName, BenchmarkRunConfig } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ function formatDefaultBenchmarkName(fieldName: BenchmarkFieldName): string {
   return `${fieldName} benchmark ${timestamp}`;
 }
 
-export async function GET(request: NextRequest) {
+async function listBenchmarksHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const limit = Number(searchParams.get("limit") ?? "100");
@@ -63,7 +64,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "benchmark_run" }, listBenchmarksHandler);
+
+async function createBenchmarkHandler(request: Request) {
   try {
     await failStaleBenchmarkRuns();
     const body = await request.json();
@@ -111,3 +114,5 @@ export async function POST(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const POST = withOperatorAccess(["operator", "admin"], "benchmark_create", { targetType: "benchmark_run" }, createBenchmarkHandler);

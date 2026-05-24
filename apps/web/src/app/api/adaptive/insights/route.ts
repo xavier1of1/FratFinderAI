@@ -2,8 +2,9 @@ import { NextRequest } from "next/server";
 
 import { apiSuccess, toApiErrorResponse } from "@/lib/api-envelope";
 import { getAdaptiveInsights } from "@/lib/repositories/adaptive-repository";
+import { withReadOnlyOperatorAccess } from "@/lib/security/operator-access";
 
-export async function GET(request: NextRequest) {
+async function getAdaptiveInsightsHandler(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const sourceSlugsRaw = searchParams.get("sourceSlugs");
@@ -29,3 +30,5 @@ export async function GET(request: NextRequest) {
     return toApiErrorResponse(error);
   }
 }
+
+export const GET = withReadOnlyOperatorAccess("dashboard_read", { targetType: "adaptive_insights" }, getAdaptiveInsightsHandler);
