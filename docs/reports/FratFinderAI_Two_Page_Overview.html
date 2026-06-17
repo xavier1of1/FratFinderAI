@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>FratFinderAI - Two Page Technical Overview</title>
+  <style>
+    @page {
+      size: Letter;
+      margin: 0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #f2efe8;
+      color: #151515;
+      font-family: "Inter", "Segoe UI", Arial, sans-serif;
+      line-height: 1.32;
+    }
+
+    .page {
+      width: 8.5in;
+      height: 11in;
+      padding: 0.42in;
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 92% 8%, rgba(233, 138, 64, 0.22), transparent 24%),
+        radial-gradient(circle at 0% 100%, rgba(35, 92, 134, 0.18), transparent 22%),
+        linear-gradient(135deg, #fffdf7 0%, #f6f0e4 100%);
+      page-break-after: always;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+    }
+
+    .eyebrow {
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-size: 8.5pt;
+      font-weight: 800;
+      color: #ba5d24;
+    }
+
+    h1 {
+      margin: 0.08in 0 0.04in;
+      font-size: 34pt;
+      letter-spacing: -0.045em;
+      line-height: 0.95;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 15pt;
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      margin: 0 0 0.06in;
+      font-size: 10.4pt;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #27455f;
+    }
+
+    p {
+      margin: 0;
+      font-size: 9.7pt;
+    }
+
+    .deck {
+      max-width: 6.6in;
+      font-size: 12.4pt;
+      color: #333;
+    }
+
+    .topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.2in;
+      border-bottom: 2px solid #161616;
+      padding-bottom: 0.12in;
+    }
+
+    .version {
+      font-family: "Consolas", monospace;
+      font-size: 8.6pt;
+      background: #151515;
+      color: white;
+      padding: 0.07in 0.12in;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.12in;
+      margin-top: 0.22in;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.14in;
+      margin-top: 0.15in;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.78);
+      border: 1.5px solid rgba(21, 21, 21, 0.14);
+      border-radius: 16px;
+      padding: 0.14in;
+      box-shadow: 0 12px 24px rgba(28, 32, 36, 0.08);
+    }
+
+    .card strong {
+      color: #0f3154;
+    }
+
+    .metric {
+      display: flex;
+      flex-direction: column;
+      min-height: 0.82in;
+      justify-content: space-between;
+    }
+
+    .metric .number {
+      font-size: 20pt;
+      font-weight: 900;
+      letter-spacing: -0.035em;
+      color: #101010;
+    }
+
+    .metric .label {
+      font-size: 8.3pt;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #666;
+      font-weight: 800;
+    }
+
+    .section {
+      margin-top: 0.22in;
+    }
+
+    .flow {
+      margin-top: 0.12in;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.08in;
+      align-items: stretch;
+    }
+
+    .node {
+      border-radius: 14px;
+      padding: 0.11in 0.08in;
+      background: #152b3f;
+      color: #fff;
+      min-height: 0.72in;
+      position: relative;
+    }
+
+    .node:after {
+      content: "";
+      position: absolute;
+      right: -0.08in;
+      top: 50%;
+      width: 0.08in;
+      height: 2px;
+      background: #152b3f;
+    }
+
+    .node:last-child:after {
+      display: none;
+    }
+
+    .node .title {
+      font-weight: 850;
+      font-size: 9pt;
+    }
+
+    .node .sub {
+      margin-top: 0.04in;
+      font-size: 7.8pt;
+      opacity: 0.78;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 0.16in;
+      margin-top: 0.18in;
+      align-items: start;
+    }
+
+    .list {
+      display: grid;
+      gap: 0.07in;
+      margin-top: 0.08in;
+    }
+
+    .list div {
+      display: grid;
+      grid-template-columns: 0.17in 1fr;
+      gap: 0.07in;
+      font-size: 9.2pt;
+    }
+
+    .dot {
+      width: 0.11in;
+      height: 0.11in;
+      border-radius: 50%;
+      background: #e17931;
+      margin-top: 0.035in;
+    }
+
+    .diagram {
+      position: relative;
+      height: 2.15in;
+      background: #102235;
+      border-radius: 20px;
+      padding: 0.16in;
+      color: #fff;
+      overflow: hidden;
+    }
+
+    .diagram:before {
+      content: "";
+      position: absolute;
+      width: 2.2in;
+      height: 2.2in;
+      border-radius: 50%;
+      right: -0.45in;
+      top: -0.55in;
+      background: rgba(225, 121, 49, 0.28);
+    }
+
+    .stack {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 0.07in;
+    }
+
+    .stack div {
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 999px;
+      padding: 0.07in 0.12in;
+      background: rgba(255,255,255,0.08);
+      font-size: 8.5pt;
+      font-weight: 700;
+    }
+
+    .quote {
+      border-left: 5px solid #e17931;
+      padding-left: 0.14in;
+      font-size: 13pt;
+      line-height: 1.22;
+      font-weight: 780;
+      color: #121212;
+    }
+
+    .mini {
+      font-size: 8.4pt;
+      color: #555;
+    }
+
+    .footer {
+      position: absolute;
+      left: 0.42in;
+      right: 0.42in;
+      bottom: 0.28in;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid rgba(21,21,21,0.18);
+      padding-top: 0.08in;
+      font-size: 8.2pt;
+      color: #666;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.06in;
+      margin-top: 0.1in;
+    }
+
+    .pill {
+      border: 1px solid rgba(21,21,21,0.18);
+      border-radius: 999px;
+      padding: 0.055in 0.09in;
+      background: rgba(255,255,255,0.62);
+      font-size: 8.3pt;
+      font-weight: 760;
+    }
+
+    .safety-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.1in;
+      margin-top: 0.12in;
+    }
+
+    .safety {
+      min-height: 0.96in;
+      border-radius: 15px;
+      padding: 0.11in;
+      background: #fff;
+      border: 1.5px solid rgba(21,21,21,0.12);
+    }
+
+    .safety b {
+      display: block;
+      margin-bottom: 0.05in;
+      color: #0f3154;
+      font-size: 9.3pt;
+    }
+
+    .safety span {
+      font-size: 8.3pt;
+      color: #4b4b4b;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 0.07in;
+      margin-top: 0.12in;
+    }
+
+    .timeline .row {
+      display: grid;
+      grid-template-columns: 1.25in 1fr;
+      gap: 0.1in;
+      align-items: start;
+      border-bottom: 1px solid rgba(21,21,21,0.08);
+      padding-bottom: 0.06in;
+      font-size: 8.7pt;
+    }
+
+    .timeline .row b {
+      color: #ba5d24;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 7.6pt;
+    }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <div class="topline">
+      <div class="eyebrow">FratFinderAI technical brief</div>
+      <div class="version">v3.0.4 | 2026-06-09</div>
+    </div>
+
+    <h1>Evidence-first automation for messy fraternity chapter data.</h1>
+    <p class="deck">FratFinderAI crawls national fraternity directories, official school rosters, chapter websites, and social/contact sources, then verifies status and enriches records through queue-backed workflows with provenance and safety gates.</p>
+
+    <div class="grid-3">
+      <div class="card metric">
+        <div class="label">Database maturity</div>
+        <div class="number">37</div>
+        <p class="mini">versioned Postgres migrations through operator audit events</p>
+      </div>
+      <div class="card metric">
+        <div class="label">Operator surface</div>
+        <div class="number">44</div>
+        <p class="mini">Next.js API route files protected by RBAC coverage tests</p>
+      </div>
+      <div class="card metric">
+        <div class="label">Latest local gate</div>
+        <div class="number">589</div>
+        <p class="mini">crawler tests at 70.84% coverage, plus 47 web tests</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>How the system thinks</h2>
+      <div class="flow">
+        <div class="node"><div class="title">Discover</div><div class="sub">national, school, chapter, search evidence</div></div>
+        <div class="node"><div class="title">Extract</div><div class="sub">tables, cards, scripts, locators, detail pages</div></div>
+        <div class="node"><div class="title">Verify</div><div class="sub">school-first status and identity checks</div></div>
+        <div class="node"><div class="title">Enrich</div><div class="sub">website, Instagram, email via safe queues</div></div>
+        <div class="node"><div class="title">Explain</div><div class="sub">provenance, conflicts, review, audit events</div></div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="card">
+        <h3>Why this is not a scraper</h3>
+        <div class="quote">The hard part is deciding which source should be trusted, what it proves, and whether the system is allowed to write.</div>
+        <div class="list">
+          <div><span class="dot"></span><span><strong>School recognition wins status.</strong> National pages are useful but cannot override current official campus recognition.</span></div>
+          <div><span class="dot"></span><span><strong>Search is residual.</strong> Search providers gather evidence; they are not the source of truth.</span></div>
+          <div><span class="dot"></span><span><strong>Ambiguity is a product state.</strong> Weak evidence routes to review or blockers instead of unsafe canonical writes.</span></div>
+        </div>
+      </div>
+      <div class="diagram">
+        <h3 style="color:#f6d7bd; position:relative; z-index:1;">Core stack</h3>
+        <div class="stack">
+          <div>Next.js operator dashboard</div>
+          <div>Python + LangGraph orchestration</div>
+          <div>Postgres queues + provenance</div>
+          <div>Status engine + school evidence</div>
+          <div>SearXNG-first search reliability</div>
+          <div>SBOM, SSRF, RBAC, audit logs</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>FratFinderAI overview</span>
+      <span>Page 1 of 2</span>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="topline">
+      <div class="eyebrow">Reliability, safety, and proof</div>
+      <div class="version">recruiter / technical overview</div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>What changed recently</h2>
+        <div class="timeline">
+          <div class="row"><b>Status</b><span>Campus recognition engine, conclusive absence, national capability profiles, and conflict-aware decisions.</span></div>
+          <div class="row"><b>Queue</b><span>Worker phase telemetry, typed blockers, cache-first school verification, and evidence refresh paths.</span></div>
+          <div class="row"><b>Search</b><span>SearXNG endpoint failover, provider attempt history, degraded-mode protection, and smoke harnesses.</span></div>
+          <div class="row"><b>Security</b><span>SBOM/SCA, SSRF-safe fetches, operator RBAC, and audit logging.</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Validation snapshot</h2>
+        <div class="pill-row">
+          <div class="pill">589 crawler tests</div>
+          <div class="pill">47 web tests</div>
+          <div class="pill">5 contract tests</div>
+          <div class="pill">2 integration tests</div>
+          <div class="pill">Syft SBOMs</div>
+          <div class="pill">Grype SCA scan</div>
+          <div class="pill">CycloneDX artifacts</div>
+          <div class="pill">Route coverage</div>
+        </div>
+        <p style="margin-top:0.14in;">Security controls are documented in `docs/security/`, with detailed Phase 2 and Phase 3 validation reports plus a consolidated sprint report.</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Safety gates that make the automation credible</h2>
+      <div class="safety-grid">
+        <div class="safety"><b>Status-first contact writes</b><span>Inactive or unresolved chapters cannot receive newly discovered chapter contact fields by default.</span></div>
+        <div class="safety"><b>SSRF-safe untrusted fetches</b><span>Blocks local/private/metadata targets, revalidates redirects, caps body size, and strips auth context.</span></div>
+        <div class="safety"><b>Operator RBAC</b><span>Admin/operator/analyst roles gate mutating routes; privileged allowed, denied, and error outcomes are auditable.</span></div>
+        <div class="safety"><b>Provider-aware degraded mode</b><span>Provider outages do not become false no-candidate outcomes; authoritative work can continue safely.</span></div>
+        <div class="safety"><b>Provenance everywhere</b><span>Decisions and writes preserve source URLs, evidence type, confidence, reason codes, and review context.</span></div>
+        <div class="safety"><b>Review over pollution</b><span>Ambiguous school, fraternity, chapter, or contact identity routes to review/blockers instead of silent writes.</span></div>
+      </div>
+    </div>
+
+    <div class="split" style="margin-top:0.18in;">
+      <div class="card">
+        <h3>Best interview framing</h3>
+        <p>FratFinderAI is an end-to-end data automation platform that handles unreliable public web sources using evidence ranking, queue orchestration, conservative write gates, and security controls. It is designed to be operated, audited, debugged, and improved from real benchmark results.</p>
+      </div>
+      <div class="card">
+        <h3>Where to look in repo</h3>
+        <p class="mini">`docs/reports/PROJECT_REPORT.md` for the full project report. `docs/security/security-sprint-comprehensive-report.md` for DevSecOps proof. `CHANGELOG.md` for the implementation timeline.</p>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Generated from repo facts and local validation reports</span>
+      <span>Page 2 of 2</span>
+    </div>
+  </section>
+</body>
+</html>

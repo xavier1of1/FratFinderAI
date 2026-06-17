@@ -1,331 +1,369 @@
-# FratFinderAI — Comprehensive Project Report
+# FratFinderAI - Comprehensive Project Report
 
-> Generated: 2026-03-31 | Current version: 3.0.4
+> Generated: 2026-06-09 | Current version: 3.0.4
 
----
+## 1. Executive Summary
 
-## 1. What Is This Project?
+FratFinderAI is a production-style data automation platform for discovering, verifying, and enriching fraternity chapter records. It combines a Next.js operator console, a Python crawler/orchestration service, PostgreSQL-backed queues, strict provenance, search-provider reliability controls, and security evidence automation.
 
-**FratFinderAI** is a production-grade, source-aware chapter discovery and data enrichment platform for NIC (North-American Interfraternity Conference) fraternities. Its core mission: automatically find, extract, normalize, and continuously enrich contact data (website, email, Instagram) for every chapter of every major fraternity in the U.S. — starting from national fraternity websites and falling back to public web search.
+The core problem is harder than "scrape a directory." National fraternity directories, school recognition pages, chapter websites, social profiles, conduct pages, suspended-chapter lists, and CRM-ready contact records all disagree in subtle ways. FratFinderAI treats that as an evidence-ranking and workflow problem:
 
-The system is designed for an "operator" persona — someone managing the pipeline, triaging ambiguous data, and making high-stakes sourcing decisions — exposed through a rich Next.js dashboard. It is built with a strong emphasis on **data safety**, **provenance**, **idempotent writes**, and **explainable decisions**.
+- discover likely national and school sources
+- extract raw chapter candidates
+- normalize fraternity, school, chapter, and contact identity
+- verify chapter activity/status from official evidence
+- enrich website, Instagram, and email only when safety gates pass
+- preserve provenance and route ambiguity to review instead of silently writing bad data
 
----
+The system is built for an operator persona: someone who needs to launch crawls, monitor queues, inspect evidence, resolve ambiguous records, and trust that unsafe writes are blocked by design.
 
-## 2. Architecture Overview
+## 2. Current Project Snapshot
 
-The project is a **pnpm monorepo** with clear separation of concerns across four top-level workspaces:
+| Area | Current State |
+| --- | --- |
+| Version | `3.0.4` |
+| Web app | Next.js 14 App Router dashboard and API routes |
+| Crawler | Python service with LangGraph request/field-job orchestration |
+| Database | PostgreSQL with 37 versioned migrations through `0037_operator_audit_events.sql` |
+| Queue model | PostgreSQL `SKIP LOCKED` field-job queue with typed queue states and worker phase metadata |
+| Search | SearXNG-first provider chain with endpoint failover, health snapshots, attempt history, and managed-provider smoke harness |
+| Status model | Campus recognition/status engine with school-first authority, conclusive absence logic, conflict flags, and evidence bundles |
+| Security | SBOM/SCA evidence pipeline, SSRF-safe outbound fetch policy, operator RBAC, and audit logging |
+| Validation | Latest local security gate: 589 crawler tests, 47 web tests, 5 contract tests, 2 integration tests |
 
-```
-apps/web          →  Next.js 14 operator dashboard + REST API routes
-services/crawler  →  Python 3.11 ingestion engine (LangGraph-orchestrated)
-packages/contracts → Shared JSON Schema / TypeScript contracts
-infra/            →  Docker Compose, PostgreSQL 16 migrations, seeds, smoke tests
-```
+## 3. Repository Structure
 
-### Architectural Rules (non-negotiable)
-- No crawling/parsing/DB logic in React components
-- No raw HTML parsing inside LangGraph graph nodes — parsing is always inside adapter classes
-- No scattered raw SQL writes — all DB access is through repository modules
-- Secrets only via `.env` files, never hardcoded
+```text
+apps/web/
+  Next.js operator dashboard, API routes, RBAC wrappers, repositories
 
----
+services/crawler/
+  Python crawler, request graphs, field-job graph, status engine, search client,
+  SSRF-safe HTTP wrapper, queue workers, tests
 
-## 3. Data Pipeline Flow
+packages/contracts/
+  Shared TypeScript/schema contracts
 
-The end-to-end data flow has two major phases:
+infra/
+  Docker Compose, Postgres migrations, seed/smoke scripts
 
-### Phase 1 — National Site Crawl
-```
-CLI / Intake API
-    → CrawlService.run()
-        → CrawlerRepository.load_sources()
-        → For each source: CrawlOrchestrator.run_for_source()
-            → LangGraph Graph (CrawlGraphState)
-                [fetch_page]
-                    → [analyze_page_structure]
-                        → [classify_source_type]
-                            → [detect_embedded_data]
-                                → [detect_chapter_index_mode]
-                                    → [extract_chapter_stubs]
-                                        → [follow_chapter_detail_or_outbound]
-                                            → [extract_contacts_from_chapter_site]
-                                → [choose_extraction_strategy]
-                                    → [extract_records]
-                                        → [validate_records]
-                                            → [normalize_records]
-                                                → [persist_records]
-                                                    → [finalize_run]
+docs/
+  System reports, validation reports, security evidence, benchmark analysis
+
+scripts/security/
+  SBOM/SCA generation, vulnerability policy, evidence rendering
 ```
 
-### Phase 2 — Field Job Enrichment (Search-Backed)
+## 4. What The System Does
+
+### 4.1 National And School Source Discovery
+
+FratFinderAI starts from a fraternity name or known source and resolves candidate national directories, school pages, chapter pages, and supporting evidence. Source discovery is not treated as a simple search result ranking problem. The platform separates:
+
+- search relevance
+- source authority
+- page role
+- national-directory capability
+- school officialness
+- currentness
+- parse completeness
+- contact-specificity safety
+
+This prevents high-ranking but unsafe pages from becoming canonical crawl roots or contact evidence.
+
+### 4.2 Chapter Extraction
+
+The crawler handles several source shapes:
+
+- table and card directories
+- script/JSON embedded records
+- locator APIs and map-style directories
+- chapter detail pages
+- national directory outbound links
+- school FSL/RSO pages
+- supporting pages used only as evidence
+
+Adapters extract raw chapter candidates, then downstream promotion logic decides whether a candidate is strong enough to become a chapter row, a provisional review item, or a rejected artifact.
+
+### 4.3 Campus Recognition Status
+
+The project now uses a campus-recognition-first status model. Official school evidence outranks national pages for final active/inactive status because the product definition of "active" requires current school recognition.
+
+The status subsystem includes:
+
+- `CampusStatusIndex` style source/zones/evidence modeling
+- official-school source classification
+- status-zone parsing to prevent page-wide keyword leakage
+- no-Greek-life policy handling
+- conclusive absence rules for complete official rosters
+- national-directory capability profiles
+- conflict flags and explainable decision traces
+- review routing for ambiguous or contradictory evidence
+
+Important distinction: probation/probationary recognition does not automatically mean inactive. Interim suspension, suspended, closed, dismissed, expelled, unrecognized, and school fraternity bans are negative signals.
+
+### 4.4 Contact Enrichment
+
+Contact enrichment is status-first and provenance-first. Website, Instagram, and email fields are not written just because a search result exists.
+
+Safety gates include:
+
+- active/review-approved status dependency before contact writes
+- school/chapter identity verification
+- chapter-local evidence requirement for school pages
+- generic national/HQ contact rejection
+- generic school-office contact rejection
+- wrong-school and wrong-fraternity rejection
+- reused-host safeguards across multiple schools
+- evidence-first Instagram extraction before residual search
+
+If evidence is incomplete or unsafe, jobs are blocked, deferred, or routed to review instead of producing false positives.
+
+## 5. Architecture Flow
+
+```text
+Operator / API intake
+  -> Request supervisor
+  -> Source discovery and source-quality gates
+  -> National/source crawl graph
+  -> Raw chapter candidate extraction
+  -> School-conditioned promotion
+  -> Campus status verification
+  -> Queue-backed contact enrichment
+  -> Provenance-backed canonical writes or review items
+  -> Dashboard, audits, reports, and metrics
 ```
-CLI process-field-jobs
-    → FieldJobEngine (SKIP LOCKED queue claim)
-        → ThreadPoolExecutor (up to 10 workers)
-            → Per job: search provider (Brave API / Bing HTML / DuckDuckGo HTML)
-                → Candidate extraction & relevance scoring
-                    → High-confidence → direct chapter write
-                    → Low-confidence → review_items queue
-                    → No candidate → cooldown backoff + requeue
-```
 
----
+The platform deliberately keeps parsing, orchestration, database writes, and React UI concerns separated:
 
-## 4. Tech Stack — Deep Dive
+- React components do not own crawler/parsing/DB logic.
+- LangGraph nodes orchestrate; adapters parse.
+- Repository modules own database boundaries.
+- Security and provider controls are centralized.
+- Evidence is stored with decision traces rather than hidden in logs.
 
-### 4.1 Python Crawler (`services/crawler`)
+## 6. Web Operator Console
 
-| Technology | Role |
-|---|---|
-| **Python 3.11+** | Crawler runtime |
-| **LangGraph 0.2+** | Orchestration of the multi-step crawl pipeline as a stateful directed graph |
-| **Pydantic v2 + pydantic-settings** | Settings validation (40+ env vars), data model validation |
-| **psycopg v3** | PostgreSQL access with `SKIP LOCKED` for concurrent job claiming |
-| **BeautifulSoup 4** | HTML parsing within adapters |
-| **requests** | HTTP client with retry/backoff |
-| **OpenAI SDK** | Optional LLM classification and structured extraction (gpt-4o-mini) |
-| **jsonschema (Draft 2020-12)** | Validates LLM JSON outputs against strict schemas |
-| **pytest + pytest-mock** | Unit and fixture-backed adapter tests |
+The web app is a Next.js dashboard backed by repository modules and consistent API envelopes.
 
-#### LangGraph Usage
-LangGraph is used as the **orchestration backbone** of the crawl pipeline. Each step of the crawl is a named graph node:
+Key pages:
 
-- `fetch_page` → HTTP fetch with retry
-- `analyze_page_structure` → heuristic DOM analysis (table count, repeated blocks, page role)
-- `classify_source_type` → deterministic rules first; LLM fallback when heuristics are inconclusive (budget-gated to `crawler_llm_max_calls_per_run`)
-- `detect_embedded_data` → JSON-LD, `window.chapters`-style scripts, KML locator APIs
-- `detect_chapter_index_mode` → decides between `direct_chapter_list`, `internal_detail_pages`, `map_or_api_locator`, etc.
-- `extract_chapter_stubs` → multi-strategy stub extraction (table, repeated block, script JSON, locator API, anchor fallback)
-- `follow_chapter_detail_or_outbound` → bounded hop navigation (configurable `NAV_MAX_HOPS_PER_STUB`, `NAV_MAX_PAGES_PER_RUN`)
-- `extract_contacts_from_chapter_site` → chapter website scraping for email/Instagram signals
-- `choose_extraction_strategy`, `extract_records`, `validate_records`, `normalize_records`, `persist_records`, `finalize_run`
-
-The **`CrawlGraphState`** TypedDict carries all inter-node shared state: `source`, `run_id`, `html`, `page_analysis`, `classification`, `embedded_data`, `extraction_plan`, chapter stubs, contact hints, navigation stats, LLM call budget, and final metrics.
-
-Each node is wrapped in `_with_error_boundary()` so a single node failure sets `error` state and routes to run finalization without corrupting other records.
-
-#### Adapter System
-Three pluggable adapter families handle different source formats:
-- **`DirectoryV1Adapter`** — table/card-based chapter directory HTML
-- **`ScriptJsonAdapter`** — JSON-LD and inline `window.chapters`-style embedded data
-- **`LocatorApiAdapter`** — REST API-backed chapter locators (including KML/Google My Maps)
-
-Each adapter implements `parse_stubs()` returning `ChapterStub` objects. The `AdapterRegistry` maps strategy names to adapter instances.
-
-#### LLM Integration (bounded)
-- **Classifier** (`llm/classifier.py`): Uses OpenAI structured outputs with strict JSON Schema validation to classify page type and recommend extraction strategy
-- **Extractor** (`llm/extractor.py`): Structured chapter extraction when heuristic adapters yield no results
-- Both are guarded by `CRAWLER_LLM_ENABLED` flag and `crawler_llm_max_calls_per_run` budget; disabled by default in production to control costs
-- LLM output is validated against `Draft202012Validator` before use — invalid or low-confidence LLM output routes to `review_items`, never writes directly
-
-#### Search-Backed Enrichment
-A multi-provider search stack handles missing contact fields post-crawl:
-- **Providers**: Brave Search API (preferred when key present), Bing HTML, DuckDuckGo HTML (with Bing fallback on anomaly pages)
-- **`auto` mode**: selects the best available provider at runtime
-- **Circuit breaker**: opens after `CRAWLER_SEARCH_CIRCUIT_BREAKER_FAILURES` consecutive transport failures, cools down for `CRAWLER_SEARCH_CIRCUIT_BREAKER_COOLDOWN_SECONDS`
-- **Dependency enforcement**: email search waits for confident website discovery first (configurable)
-- **Relevance gates**: school, fraternity, and chapter name matching filters; Instagram-specific handle-shape queries (`fsusigmachi`); wrong-organization rejection (`Tri Sigma`, chemistry companies)
-- **Confidence tiers**: tier-1 (`.edu` campus pages, known fraternity domains) → auto-write; tier-2 aggregators → review; no candidate → cooldown requeue
-
-#### Data Safety Mechanisms
-- **`SKIP LOCKED`** on `field_jobs` table enables safe multi-worker parallel job claiming with zero double-processing
-- **Idempotent upserts** — chapters are upserted by `(fraternity_id, slug)` unique constraint
-- **Normalization safety gate** — placeholder/navigation slugs (`find-a-chapter`, `our-chapters`, `visit-page-*`) are intercepted and routed to `ambiguous_record` review
-- **Provenance records** — every field value is linked to its source URL, source snippet, and confidence score in `chapter_provenance`
-- **`field_states`** — per-field confidence state (`found`, `low_confidence`, `missing`) stored in JSONB column on `chapters`
-
----
-
-### 4.2 Next.js Web App (`apps/web`)
-
-| Technology | Role |
-|---|---|
-| **Next.js 14 (App Router)** | Server-rendered dashboard with server components and API routes |
-| **TypeScript 5** | Full type safety; contracts shared with `packages/contracts` |
-| **React 18** | Client component interactivity (chapter filters, benchmark dashboard) |
-| **`pg` (node-postgres)** | Direct PostgreSQL connection pool from Next.js API routes |
-| **Zod 3** | Input validation on API route handlers |
-| **Space Grotesk + IBM Plex Mono** | Typography (Google Fonts) |
-
-#### Dashboard Pages
 | Route | Purpose |
-|---|---|
-| `/` | System overview: chapter count, latest run, open reviews, queued jobs |
-| `/chapters` | Filterable table (500 rows) + U.S. state tile map for chapter coverage |
-| `/runs` | Crawl run history with strategy badges, confidence scores, LLM call counts |
-| `/review-items` | Triage queue for ambiguous/failed extractions |
-| `/benchmarks` | Multi-cycle field-job benchmark runner with throughput metrics |
-| `/fraternity-intake` | Staged intake workflow: submit name → auto-discover source → confirm → crawl → enrich |
+| --- | --- |
+| `/` | System overview and KPIs |
+| `/chapters` | Filterable chapter table and coverage view |
+| `/fraternity-intake` | New fraternity intake and source confirmation workflow |
+| `/review-items` | Human triage for ambiguous or unsafe records |
+| `/runs` | Crawl run history |
+| `/benchmarks` | Benchmark and evaluation runs |
+| `/agent-ops` | Queue/runtime operational visibility |
+| `/nationals` | National profile/source registry |
+| `/crm` | Outreach/campaign workflow |
 
-#### API Surface
-REST API routes under `/api/` backed by repository modules:
-- `GET /api/chapters` — filterable chapter list
-- `GET/POST /api/runs` — crawl run history and detail
-- `GET /api/review-items`, `PATCH /api/review-items/[id]` — triage workflow
-- `GET/POST /api/field-jobs` — job queue status
-- `GET/POST /api/benchmarks` — benchmark run management
-- `GET/POST /api/fraternity-crawl-requests` — intake lifecycle (create/confirm/cancel/reschedule/expedite)
-- `GET /api/health` — liveness/readiness probes
+There are 44 API route files under `apps/web/src/app/api`. Mutating routes are protected with operator RBAC, and read-only dashboard APIs are protected with read-only operator access unless explicitly public.
 
-#### Repository Pattern (Web)
-Six typed repository modules in `apps/web/src/lib/repositories/`:
-- `chapter-repository.ts`
-- `crawl-run-repository.ts`
-- `review-item-repository.ts`
-- `field-job-repository.ts`
-- `benchmark-repository.ts`
-- `fraternity-crawl-request-repository.ts`
+## 7. Python Crawler And Orchestration
 
-All use the shared `getDbPool()` singleton from `lib/db.ts` (connection pool capped at 10, lazy-loaded from `.env`).
+The crawler service is organized into focused subsystems:
 
-#### API Envelope
-All API responses follow a consistent `{ success: true, data: T }` / `{ success: false, error: { code, message, requestId } }` envelope pattern (`lib/api-envelope.ts`).
+| Module | Role |
+| --- | --- |
+| `orchestration/` | Request graphs, field-job graph, supervisor graph, state transitions |
+| `adapters/` | Source-format-specific extraction |
+| `status/` | Campus status engine and decision models |
+| `search/` | Provider catalog, SearXNG health, search client, provider attempts |
+| `social/` | Instagram extraction, identity scoring, candidate bank, sweeps |
+| `security/` | SSRF-safe URL fetching and SCA policy helpers |
+| `db/` | Repository and connection boundaries |
+| `normalization/` | Name/school/state normalization |
 
----
+LangGraph is used as an orchestration backbone for request and field-job flows, while parsing remains in adapters and helper modules. This keeps graph state transitions inspectable without burying source-specific scraping logic inside graph nodes.
 
-### 4.3 Shared Contracts (`packages/contracts`)
+## 8. Queue And Worker Model
 
-- JSON Schema files define canonical shapes for chapter records, provenance payloads, field-job payloads, and review-item payloads
-- TypeScript types exported for web consumption
-- Schema validation used by the Python crawler via `jsonschema`
-- Vitest test suite prevents schema/type drift between services
+FratFinderAI uses PostgreSQL-backed queues with explicit typed states rather than an external queue broker.
 
----
+Current queue states include:
 
-### 4.4 Database — PostgreSQL 16 (`infra/supabase/`)
-
-8 versioned migration files implement the full schema:
-
-| Migration | What it adds |
-|---|---|
-| `0001_init.sql` | Core schema: `fraternities`, `sources`, `crawl_runs`, `chapters`, `chapter_provenance`, `review_items`, `field_jobs` |
-| `0002_workflow_hardening.sql` | Additional constraints and audit fields |
-| `0003_adaptive_source_types.sql` | `script_embedded` and `locator_api` source types |
-| `0004_chapter_field_states.sql` | `field_states` JSONB column on `chapters` |
-| `0005_crawl_run_intelligence.sql` | `strategy_used`, `page_level_confidence`, `llm_calls_used` on `crawl_runs` |
-| `0006_benchmark_runs.sql` | `benchmark_runs` table for throughput benchmarking |
-| `0007_fraternity_crawl_requests.sql` | `fraternity_crawl_requests`, `fraternity_crawl_request_events`, `field_jobs.priority` |
-| `0008_verified_sources.sql` | `verified_sources` registry (health metadata, confidence, provenance, active flag) |
-
-Key design patterns:
-- All PKs are UUIDs via `gen_random_uuid()` (pgcrypto)
-- `BIGSERIAL` for `crawl_runs.id` (append-only log)
-- `set_updated_at()` trigger function applied across all mutable tables
-- `JSONB` columns for extensible metadata (`sources.metadata`, `chapters.field_states`, `chapter_provenance`, `crawl_runs.metadata`)
-- `SKIP LOCKED` pattern for concurrent field-job claiming
-- `CHECK` constraints on all status/type enum columns
-
----
-
-### 4.5 Infrastructure (`infra/docker/`)
-
-- **Docker Compose** with named profiles: `postgres` + `adminer` run always; `web` and `crawler` containers under `--profile app`
-- PostgreSQL mapped to port `5433` (avoids collision with host Postgres on 5432)
-- `Dockerfile.web` and `Dockerfile.crawler` for containerized deployment
-- `apply-migrations.ps1` and `apply-seed.ps1` PowerShell scripts for Windows dev environments
-
----
-
-## 5. Fraternity Intake Workflow (Key Feature)
-
-The **Fraternity Intake** system (`/fraternity-intake`) is the highest-level operator-facing feature. It represents the full lifecycle of onboarding a new fraternity from just a name:
-
-```
-1. Operator submits fraternity name (e.g., "Chi Psi")
-2. Discovery stage:
-   - Checks verified_sources registry first (registry-first resolution)
-   - Falls back to existing configured sources
-   - Falls back to search-backed discovery
-   - Returns: sourceUrl, confidence tier, provenance, fallback reason, resolution trace
-3. Awaiting confirmation:
-   - Operator reviews ranked candidates
-   - Can approve auto-discovered URL, select a candidate, or paste manual override
-4. Crawl run stage:
-   - Full crawl pipeline executes against confirmed URL
-   - Safety gate: zero-chapter result = terminal failure (no false success)
-5. Enrichment stage:
-   - Bounded field-job cycles for find_website, find_email, find_instagram
-   - Configurable workers, cycles, and pause between cycles
-6. Completed / Failed:
-   - Timeline events persisted end-to-end
-   - Progress snapshot queryable at any time
+```text
+actionable
+deferred
+blocked_provider
+blocked_dependency
+blocked_repairable
+blocked_invalid
 ```
 
-Discovery is **registry-first**: the `verified_sources` table (21+ rows bootstrapped from `research_nav_21.json`) provides pre-validated, high-confidence source URLs with sub-30ms lookup latency.
+Operational improvements added after live benchmarking:
 
----
+- worker phase metadata: polling, preflight, triage, claiming, executing, aggregating, sleeping
+- priority ordering that respects verification lanes before contact jobs
+- dependency blockers that do not churn as hot actionable work
+- status dependency reason families instead of one generic blocker
+- evidence refresh path for official school evidence
+- safer retry/recovery of failed jobs
 
-## 6. Verified Sources Registry
+The result is a queue model optimized for "make blocked work understandable" instead of "keep retrying until something writes."
 
-`verified_sources` is a separately managed registry of known-good national fraternity website URLs:
-- Bootstrapped via `bootstrap-nic-sources --input research_nav_21.json`
-- Each row stores: `fraternity_slug`, `national_url`, `origin`, `confidence`, `http_status`, `checked_at`, `is_active`, `metadata` (JSONB for mode hints, selectors, etc.)
-- Revalidated on demand via `revalidate-verified-source` and `revalidate-verified-sources` CLI commands
-- Health check probes each URL and updates `http_status` + `is_active`
-- When a registry seed is unhealthy (e.g., `410 Gone`), discovery falls back explicitly with `fallbackReason` recorded
+## 9. Search Provider Reliability
 
----
+Search is treated as a dependency manager, not the product. The current strategy preserves provider-chain orchestration while improving reliability and observability.
 
-## 7. Observability & Quality Controls
+Current search policy:
 
-| Feature | Implementation |
-|---|---|
-| Structured logging | `log_event()` utility emitting JSON-compatible key-value log entries |
-| Correlation IDs | `crawl_runs.correlation_id` UUID for end-to-end tracing |
-| Crawl run intelligence | `strategy_used`, `page_level_confidence`, `llm_calls_used`, `navigation_stats` persisted per run |
-| Provenance | Every field write linked to source URL + confidence in `chapter_provenance` |
-| Review queue | All ambiguous, low-confidence, or failed records land in `review_items` with `reason` and `extractionNotes` |
-| Field states | Per-field confidence state (`found`/`low_confidence`/`missing`) on every chapter record |
-| Benchmark runner | Multi-cycle throughput benchmarking with `jobs/min`, `avgCycleMs`, queue depth delta |
-| Health probes | `GET /api/health?probe=liveness` and `?probe=readiness` (also available via CLI) |
-| Schema smoke tests | `infra/supabase/tests/schema_smoke.sql` validates schema assumptions post-migration |
-| Integration tests | `tests/integration/test_local_demo_flow.py` end-to-end flow validation |
+- SearXNG is the primary controllable provider.
+- SearXNG supports ordered endpoint failover.
+- Bing HTML and DuckDuckGo HTML are fallback HTML providers.
+- Serper and Tavily are opt-in until smoke cohorts prove value.
+- Provider attempts are recorded with context, endpoint, latency, result counts, and failure classes.
+- Degraded mode continues authoritative-only work and avoids false no-candidate conclusions during provider outages.
 
----
+Important provider failure classes include:
 
-## 8. Key Engineering Decisions
+```text
+connection_refused
+dns_error
+timeout
+json_disabled
+engine_unresponsive
+rate_limited_429
+challenge_or_anomaly
+parse_empty
+low_signal_fallback
+provider_unavailable
+```
 
-1. **LangGraph for orchestration, not parsing** — graph nodes handle routing, retry, and state transitions; all HTML parsing stays in adapter classes. This keeps the graph readable and decoupled from source-specific logic.
+## 10. Security Controls
 
-2. **Registry-first discovery** — pre-validated `verified_sources` provides sub-30ms high-confidence lookups before any search is attempted, dramatically reducing discovery latency and false positives for known fraternities.
+The security sprint added three professional controls.
 
-3. **Confidence-tiered writes** — nothing is written directly below a confidence threshold. Medium/low confidence outcomes go to review, never silently mutate chapter records.
+### 10.1 SBOM And SCA Evidence
 
-4. **`SKIP LOCKED` concurrency** — field-job workers use PostgreSQL advisory-style `SKIP LOCKED` in their claiming query, enabling safe scale-out to multiple concurrent workers without a queueing middleware (no Redis, no Celery).
+The `security-sbom-sca` workflow and local scripts generate CycloneDX SBOMs for:
 
-5. **Search circuit breaker** — configurable failure-count circuit breaker prevents workers from spending full timeout windows on every query during provider outages; fails fast and cools down.
+- web dependencies
+- crawler dependencies
+- web Docker image
+- crawler Docker image
 
-6. **Placeholder/navigation record gate** — the normalizer intercepts known noisy chapter slugs (`find-a-chapter`, `our-chapters`, `visit-page-*`) before they can persist as fake chapter records.
+The scan policy fails on unignored critical vulnerabilities, warns on highs by default, rejects malformed/expired ignores, and produces Markdown evidence.
 
-7. **Monorepo with shared contracts** — `packages/contracts` is the single source of truth for inter-service schema definitions. The Python crawler and TypeScript web app both validate against the same JSON Schema files.
+### 10.2 SSRF-Safe Outbound Fetching
 
-8. **Greedy collect modes** — `GREEDY_COLLECT` has three modes (`none`, `passive`, `bfs`) controlling how aggressively the crawler follows same-domain links on nationals sites, giving operators cost vs. coverage control.
+Crawler-discovered URLs pass through `fratfinder_crawler.security.url_safety`.
 
----
+The wrapper:
 
-## 9. Real-World Benchmark Results (2026-03-31)
+- allows only HTTP/HTTPS
+- resolves DNS before requests
+- blocks local/private/link-local/multicast/reserved/metadata targets
+- revalidates redirect targets
+- caps body size and content type
+- strips sensitive auth/cookie/API-key headers
+- disables ambient process auth/proxy inheritance
 
-From the validation report on the new-fraternity cohort:
+Trusted configured providers, including local SearXNG, remain separate from untrusted crawler URL fetching.
 
-| Fraternity | Chapters | Website | Instagram | Email |
-|---|---|---|---|---|
-| Alpha Gamma Rho | 74 | 61 | 19 | 13 |
-| Alpha Delta Gamma | 31 | 31 | 31 | 31 |
-| Alpha Delta Phi | 40 | 0 | 1 | 0 |
-| Beta Upsilon Chi | 36 | 36 | 0 | 35 |
+### 10.3 Operator RBAC And Audit Logging
 
-- 4/5 test fraternities resolved directly from `verified_sources` registry in ~20–26ms
-- 1/5 (`chi-phi`) failed cleanly with `410 Gone` — no unsafe writes, explicit fallback reason recorded
-- Zero-chapter safety gate correctly halted false-success intake flows
+The operator API now has:
 
----
+- roles: admin, operator, analyst
+- environment-token login and bearer-token script access
+- HttpOnly SameSite session cookies
+- fail-closed production behavior
+- route coverage tests for mutating/read-only API routes
+- `operator_audit_events` table for allowed, denied, and error outcomes
+- production-safe protected-route error responses with request IDs
 
-## 10. Project Maturity
+## 11. Database And Evidence Model
 
-The project is at **version 0.10.0** with 10 release cycles. It has progressed through:
-- Phase 1: Deterministic ingestion spine (stages 0–8)
-- Phase 2: Adaptive crawler intelligence (LLM integration, search-backed enrichment, navigation, registry)
-- Current focus: source-specific extraction hints, intake observability metrics, multi-cycle throughput optimization
+The database has 37 migrations, from initial crawl tables through status engines, provider attempts, CRM, search health cache, promotion recovery, and operator audit events.
 
-All tests pass as of 2026-03-31 (`pytest` for crawler, `tsc --noEmit` for web).
+Key persistent concepts:
+
+- fraternities
+- sources and verified/national profiles
+- crawl requests and request events
+- crawl runs
+- chapters
+- chapter evidence and provenance
+- field jobs and graph runs
+- review items
+- status sources, zones, evidence, and decisions
+- search provider attempts and health cache
+- campaign/CRM tables
+- operator audit events
+
+The core design principle is that decisions should be explainable from durable evidence, not only from transient logs.
+
+## 12. Validation Evidence
+
+Latest security sprint validation:
+
+```text
+pnpm.cmd lint                                             PASS
+pnpm.cmd typecheck                                        PASS
+pnpm.cmd test:contracts                                   PASS, 5 tests
+pnpm.cmd test:web                                         PASS, 47 tests
+python -m pytest services/crawler/... --cov-fail-under=70 PASS, 589 tests, 70.84% coverage
+python -m pytest tests/integration -m integration          PASS, 2 tests
+```
+
+Security artifact generation:
+
+```text
+Syft 1.44.0
+Grype 0.112.0
+apps-web CycloneDX components: 145
+crawler-python CycloneDX components: 1
+docker-web CycloneDX components: 1164
+docker-crawler CycloneDX components: 788
+```
+
+Two temporary Python critical vulnerability exceptions remain documented and expire on `2026-06-30`.
+
+## 13. Engineering Decisions Worth Highlighting
+
+1. School recognition is final status authority.
+2. Search is residual evidence gathering, not a source of truth.
+3. Contact writes require status/provenance/specificity gates.
+4. Queue states are explicit, inspectable, and repairable.
+5. Provider failures are classified by failure class and endpoint.
+6. Security controls are automated, tested, and documented.
+7. The web app is an operator surface, not a crawler runtime.
+8. Ambiguity routes to review instead of canonical data pollution.
+
+## 14. Demo Talking Points
+
+For a technical recruiter or engineering interviewer, the strongest framing is:
+
+- This is an end-to-end data automation platform, not a toy scraper.
+- It handles messy real-world source disagreement through evidence ranking and conservative write gates.
+- It uses queue-backed orchestration and durable provenance to make automation auditable.
+- It has real DevSecOps controls: SBOM/SCA, SSRF protection, RBAC, and audit logs.
+- It was improved through benchmark-driven debugging, not only feature prompts.
+
+## 15. Known Limitations And Next Work
+
+- Hosted CI artifact proof is still needed for final SBOM/SCA release acceptance.
+- Some queue cohorts remain blocked until official status or school evidence is refreshed.
+- SearXNG primary/rescue endpoints need stable engine allowlists in long-running production environments.
+- Operator auth currently uses environment tokens, not OAuth/SAML/IAP.
+- Audit log UI/export/retention policy is future work.
+- More gold-set status cases are needed before making any public 99% accuracy claim.
+
+## 16. Best Supporting Documents
+
+| Document | Purpose |
+| --- | --- |
+| `docs/security/security-sprint-comprehensive-report.md` | Security and DevSecOps evidence |
+| `docs/security/phase-2-ssrf-validation-report.md` | SSRF implementation proof |
+| `docs/security/phase-3-operator-rbac-validation-report.md` | RBAC/audit implementation proof |
+| `docs/SystemReport/POST_VT_IMPLEMENTATION_AND_BENCHMARK_REPORT_2026-04-27.md` | Accuracy recovery and benchmark story |
+| `docs/SystemReport/SEARCH_PROVIDER_RELIABILITY_AUDIT_2026-04-20.md` | Search-provider reliability research |
+| `CHANGELOG.md` | Full implementation timeline |
+
+## 17. One-Sentence Summary
+
+FratFinderAI is a security-aware, evidence-first automation platform that crawls messy fraternity and school web ecosystems, verifies chapter status from authoritative sources, enriches contact data through safe queue-backed workflows, and preserves the provenance needed to trust every write.

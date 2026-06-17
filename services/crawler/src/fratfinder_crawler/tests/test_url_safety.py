@@ -174,6 +174,7 @@ def test_local_searxng_trusted_provider_path_is_allowed():
         DATABASE_URL="postgresql://postgres:postgres@localhost:5432/fratfinder",
         CRAWLER_SEARCH_PROVIDER="searxng_json",
         CRAWLER_SEARCH_SEARXNG_BASE_URL="http://localhost:8888",
+        CRAWLER_SEARCH_SEARXNG_BASE_URLS="",
         CRAWLER_SEARCH_PROVIDER_ORDER_FREE="searxng_json",
         CRAWLER_SEARCH_MIN_REQUEST_INTERVAL_MS=0,
         CRAWLER_SEARCH_SEARXNG_MIN_INTERVAL_MS=0,

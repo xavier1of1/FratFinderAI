@@ -1,11 +1,25 @@
 ## [Unreleased]
 
+### Added
+- Added `docs/reports/SENIOR_ENGINEER_DEMO_READINESS_2026-06-16.md`, a role-aligned demo readiness report with walkthrough scripts, runtime evidence, validation results, known caveats, and leave-behind artifacts for a senior-engineer/customer-strategist review.
+
+### Changed
+- Tuned the local demo search configuration to use the healthy SearXNG rescue endpoint on `http://localhost:8889` with the `bing` engine after local smoke testing showed the previous `startpage` pin was CAPTCHA/unresponsive.
+- Reconciled the local pnpm workspace so the running web app resolves Next.js `14.2.25`, matching the security sprint manifest and SBOM remediation evidence.
+
+### Fixed
+- Isolated the local SearXNG trusted-provider SSRF regression test from workstation `.env` endpoint overrides by explicitly clearing `CRAWLER_SEARCH_SEARXNG_BASE_URLS` in the test fixture.
+
+### Validated
+- Validated demo readiness with `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd test:contracts`, `pnpm.cmd test:web`, focused crawler/security tests, integration tests, the full crawler suite with 70.84% coverage, route smoke tests across the operator UI, SearXNG health checks, and a live 30-job field-job worker batch with zero requeues or terminal failures.
+
 ## [3.0.4] - 2026-05-23
 
 ### Changed
 - Incremented the platform version to `3.0.4` across the root workspace, web app, crawler service, contracts package, generated crawler package metadata, and active surfaced version labels.
 - Hardened the SBOM/SCA release surface by upgrading Next.js to `14.2.25`, forcing `esbuild` to `0.27.7`, moving the web image to `node:22-alpine`, and moving the crawler image to `python:3.13-alpine`.
 - Updated the SBOM/SCA workflow and local generator so evidence is rendered before policy enforcement, Docker/image SBOMs are generated when builds succeed, and scan artifacts remain available even when policy fails.
+- Rebuilt `docs/reports/PROJECT_REPORT.md` as a current recruiter-facing project report covering the modern status engine, queue model, SearXNG-first search reliability, security sprint, validation evidence, and current architecture.
 
 ### Added
 - Added the Phase 1 SBOM/SCA evidence pipeline with Syft CycloneDX SBOM generation, Grype scan output, strict vulnerability-ignore validation, critical-vulnerability policy gates, CI artifact upload, and `docs/security/sbom.md`.
@@ -15,6 +29,7 @@
 - Added `docs/security/phase-2-ssrf-validation-report.md` with requirement-by-requirement SSRF proof, call-site coverage evidence, and real validation command logs.
 - Added `docs/security/phase-3-operator-rbac-validation-report.md` with requirement-by-requirement RBAC/audit proof, permission-matrix evidence, and real validation command logs.
 - Added `docs/security/security-sprint-comprehensive-report.md` as the consolidated Phase 1, Phase 2, and Phase 3 security sprint report.
+- Added `docs/reports/FratFinderAI_Two_Page_Overview.html` and `docs/reports/FratFinderAI_Two_Page_Overview.pdf` as a concise two-page technical overview for recruiters and technically inclined reviewers.
 
 ### Fixed
 - Fixed SBOM/SCA local and CI generation gaps around missing Docker ignore coverage, PowerShell native-command exit handling, scan-path wildcard expansion, UTF-8 BOM JSON parsing, and empty app SBOM component discovery.
