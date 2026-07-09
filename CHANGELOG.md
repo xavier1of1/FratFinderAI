@@ -1,14 +1,22 @@
 ## [Unreleased]
 
 ### Added
+- Added a public-release documentation structure with `docs/GETTING_STARTED.md`, `docs/architecture/README.md`, and `docs/release/PUBLIC_RELEASE_CHECKLIST.md`.
 - Added `docs/reports/SENIOR_ENGINEER_DEMO_READINESS_2026-06-16.md`, a role-aligned demo readiness report with walkthrough scripts, runtime evidence, validation results, known caveats, and leave-behind artifacts for a senior-engineer/customer-strategist review.
 
 ### Changed
+- Rewrote the root `README.md` and `docs/README.md` for public onboarding, focusing on setup, architecture, validation, security controls, and contribution-readiness caveats.
+- Moved the current queue, platform, LangGraph, status-verification, and search-provider reliability docs into `docs/architecture/`.
+- Simplified release ignore rules so local interview prep, logs, coverage, generated SBOM/security output, stress artifacts, runtime scripts, TypeScript build info, and Python egg-info are kept out of public commits.
 - Tuned the local demo search configuration to use the healthy SearXNG rescue endpoint on `http://localhost:8889` with the `bing` engine after local smoke testing showed the previous `startpage` pin was CAPTCHA/unresponsive.
 - Reconciled the local pnpm workspace so the running web app resolves Next.js `14.2.25`, matching the security sprint manifest and SBOM remediation evidence.
 
 ### Fixed
 - Isolated the local SearXNG trusted-provider SSRF regression test from workstation `.env` endpoint overrides by explicitly clearing `CRAWLER_SEARCH_SEARXNG_BASE_URLS` in the test fixture.
+- Removed stale public-doc links to deleted local benchmark artifacts and Windows-absolute report paths.
+
+### Removed
+- Removed stale internal markdown worklogs, dated implementation plans, one-off benchmark/stress dumps, local runtime logs, generated coverage/build artifacts, tracked Python egg-info, old accuracy/recovery scripts, and an unsupported campaign-watchdog helper that had no active callers outside historical changelog entries.
 
 ### Validated
 - Validated demo readiness with `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd test:contracts`, `pnpm.cmd test:web`, focused crawler/security tests, integration tests, the full crawler suite with 70.84% coverage, route smoke tests across the operator UI, SearXNG health checks, and a live 30-job field-job worker batch with zero requeues or terminal failures.

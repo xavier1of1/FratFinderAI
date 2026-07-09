@@ -2,7 +2,7 @@
 
 Date: 2026-05-24
 
-Workspace: `D:\VSC Programs\FratFinderAI`
+Workspace: `<repo root>`
 
 ## Executive Result
 
@@ -162,13 +162,13 @@ pnpm.cmd lint
 Result:
 
 ```text
-> frat-finder-ai@3.0.4 lint D:\VSC Programs\FratFinderAI
+> frat-finder-ai@3.0.4 lint <repo root>
 > pnpm --filter @fratfinder/contracts lint && pnpm --filter @fratfinder/web lint
 
-> @fratfinder/contracts@3.0.4 lint D:\VSC Programs\FratFinderAI\packages\contracts
+> @fratfinder/contracts@3.0.4 lint <repo root>\packages\contracts
 > tsc --noEmit
 
-> @fratfinder/web@3.0.4 lint D:\VSC Programs\FratFinderAI\apps\web
+> @fratfinder/web@3.0.4 lint <repo root>\apps\web
 > tsc --noEmit --incremental false -p tsconfig.typecheck.json
 ```
 
@@ -183,13 +183,13 @@ pnpm.cmd typecheck
 Result:
 
 ```text
-> frat-finder-ai@3.0.4 typecheck D:\VSC Programs\FratFinderAI
+> frat-finder-ai@3.0.4 typecheck <repo root>
 > pnpm --filter @fratfinder/contracts typecheck && pnpm --filter @fratfinder/web typecheck
 
-> @fratfinder/contracts@3.0.4 typecheck D:\VSC Programs\FratFinderAI\packages\contracts
+> @fratfinder/contracts@3.0.4 typecheck <repo root>\packages\contracts
 > tsc --noEmit
 
-> @fratfinder/web@3.0.4 typecheck D:\VSC Programs\FratFinderAI\apps\web
+> @fratfinder/web@3.0.4 typecheck <repo root>\apps\web
 > tsc --noEmit --incremental false -p tsconfig.typecheck.json
 ```
 

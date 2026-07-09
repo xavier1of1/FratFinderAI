@@ -360,8 +360,8 @@ For a technical recruiter or engineering interviewer, the strongest framing is:
 | `docs/security/security-sprint-comprehensive-report.md` | Security and DevSecOps evidence |
 | `docs/security/phase-2-ssrf-validation-report.md` | SSRF implementation proof |
 | `docs/security/phase-3-operator-rbac-validation-report.md` | RBAC/audit implementation proof |
-| `docs/SystemReport/POST_VT_IMPLEMENTATION_AND_BENCHMARK_REPORT_2026-04-27.md` | Accuracy recovery and benchmark story |
-| `docs/SystemReport/SEARCH_PROVIDER_RELIABILITY_AUDIT_2026-04-20.md` | Search-provider reliability research |
+| `docs/architecture/status-verification-model.md` | Status verification and accuracy model |
+| `docs/architecture/search-provider-reliability.md` | Search-provider reliability research |
 | `CHANGELOG.md` | Full implementation timeline |
 
 ## 17. One-Sentence Summary

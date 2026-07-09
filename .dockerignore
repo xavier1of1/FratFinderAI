@@ -1,11 +1,17 @@
 .git
 .github
+.env
+.env.*
+.security
 .pytest_cache
 .pytest-basetemp*
 .tmp
 tmp
 sbom
 security
+docs/interview-prep
+docs/reports/live
+docs/reports/stress
 node_modules
 apps/web/node_modules
 packages/contracts/node_modules

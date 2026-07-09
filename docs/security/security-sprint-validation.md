@@ -8,7 +8,7 @@ Validated the three security phases implemented for FratFinderAI:
 - SSRF-safe outbound crawler fetching
 - Operator RBAC and audit logging
 
-Validation was run locally on Windows from `D:\VSC Programs\FratFinderAI` on 2026-05-23.
+Validation was run locally on Windows from `<repo root>` on 2026-05-23.
 
 ## Results
 

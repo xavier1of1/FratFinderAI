@@ -4,7 +4,7 @@ Date: 2026-05-24
 
 Project version: 3.0.4
 
-Workspace: `D:\VSC Programs\FratFinderAI`
+Workspace: `<repo root>`
 
 ## Executive Summary
 

@@ -19,6 +19,7 @@ __pycache__/
 .venv/
 venv/
 tmp/
+*.egg-info/
 
 # IDE / OS
 .vscode/
@@ -28,8 +29,13 @@ Thumbs.db
 
 # Logs
 *.log
+*.out
+*.err
+*.pid
 
 # Local runtime artifacts
+.coverage
+.runtime/
 artifacts/*
 !artifacts/README.md
 /sbom/
@@ -37,3 +43,10 @@ artifacts/*
 /.tmp/
 /.tmp*.log
 /.tmp*.html
+*.tsbuildinfo
+benchmark_results_*.json
+research_nav_*.json
+docs/interview-prep/
+docs/reports/live/
+docs/reports/stress/
+docs/SystemReport/

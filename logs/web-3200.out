@@ -1,8 +1,0 @@
-  ▲ Next.js 14.2.15
-  - Local:        http://localhost:3200
-
- ✓ Starting...
- ✓ Ready in 526ms
-undefined
-D:\VSC Programs\FratFinderAI\apps\web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "next" not found
