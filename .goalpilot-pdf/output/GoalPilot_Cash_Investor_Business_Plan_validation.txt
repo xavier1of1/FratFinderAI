@@ -1,0 +1,132 @@
+Validated PDF: GoalPilot_Cash_Investor_Business_Plan.pdf
+Pages: 10
+Bytes: 44673
+Required text checks: PASS
+
+Extracted text sample:
+GOALPILOT
+GOAL-BASED FINANCIAL AUTOMATION
+INVESTOR BUSINESS PLAN
+GoalPilot Cash
+An automated, interest-earning account for planned
+purchases
+THE INVESTMENT THESIS
+Clear consumer job: turn a desired purchase into a funded plan, without
+ debt.
+Aligned economics: membership, deposit-program revenue, and
+ purchase-completion revenue grow when the user saves successfully.
+Focused launch: one user, one goal, one customer-owned
+ interest-bearing account, and one recurring installment plan.
+August 2026
+CONFIDENTIAL  INVESTOR DISCUSSION DRAFT
+Prepared for investor and strategic-partner discussion
+
+GOALPILOT
+EXECUTIVE SUMMARY
+01
+A purpose-built account for planned purchases
+GoalPilot Cash converts intention into an automated funding plan, then keeps the money productive until the user is ready to buy.
+Consumers can earmark money at a bank, automate transfers in a budgeting
+app, or finance a purchase after the fact. Few products combine the
+purchase target, deadline, recurring installment, interest-bearing
+account, and completion workflow in one experience.
+GoalPilot Cash is designed as a positive alternative to credit-led consumption.
+The user chooses a goal, authorizes recurring ACH installments, and receives
+a customer-owned deposit account through a regulated partner. GoalPilot
+manages the plan and the experience; the partner bank and
+embedded-finance provider manage custody, account issuance, interest,
+statements, and applicable banking operations.
+CORE PROMISE
+Earn interest
+instead of paying
+interest.
+Choose a purchase. Set the amount
+and deadline. Automate the
+installments. Withdraw when the goal
+is funded.
+WHY THIS WEDGE IS CREDIBLE
+ 96%
+ of U.S. households were banked in 20231
+FDIC household survey
+ 48.3%
+ of banked households used mobile
+banking as their primary access method1
+FDIC household survey
+ 63%
+ of adults could cover a $400 emergency
+ with cash or its equivalent in 20252
+Federal Reserve SHED
+The initial beta
+Product boundary
+Beta design
+Why it matters
+Account
+One individually titled partner-bank account
+Clear ownership and simpler reconciliation
+Goal
+One active purchase goal
+Focused user learning and lower operational complexity
+Funding
+One verified external bank; standard ACH
+Controlled transfers and a narrow error surface
+Asset
+Interest-bearing deposit only
+No market loss, trading, or investment-advice boundary
+Users
+Maximum 50 invited U.S. adults
+High-touch support and direct operational observation
+Beta thesis: users will open a dedicated account, sustain recurring installments, value the interest and deadline
+intelligence, and pay for the automation. The 50-user beta is designed to prove or disprove those behaviors before
+GoalPilot expands into securities, lending, cards, or multiple goals.
+CONFIDENTIAL  INVESTOR DISCUSSION DRAFT
+GOALPILOT CASH  02
+
+GOALPILOT
+PRODUCT
+02
+The product is a control loop, not a savings
+bucket
+GoalPilot manages the path to a specific purchase, while the bank partner remains authoritative for the actual deposit account.
+THE SET-AND-FORGET JOURNEY
+1
+Define the goal
+Purchase, target amount, deadline,
+current savings, and flexibility.
+2
+Open the account
+Partner-led onboarding, identity
+verification, disclosures, and consent.
+3
+Authorize installments
+Amount, cadence, first date, limits, pause
+and cancellation terms.
+4
+Automate funding
+Upcoming reminder, ACH submission,
+settlement, returns, and retry controls.
+5
+Track progress
+Available balance, posted interest,
+remaining amount, and projected
+completion.
+6
+Complete the purchase
+Stop installments, withdraw to a verified
+bank, and optionally use a merchant offer.
+A CONSERVATIVE FUNDING EXAMPLE
+Goal
+Used motorcycle
+Target
+$8,000
+Current savings
+$1,000
+Deadline
+18 months
+Required installment at 0%
+$388.89 / month
+Recommended installment
+$390 / month
+GoalPilot should not underfund a goal by assuming today’s
+variable APY will persist. The installment is set from a
+conservative baseline; interest becomes a buffer that may bring
+the completion da
