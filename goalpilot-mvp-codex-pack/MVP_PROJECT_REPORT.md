@@ -1,14 +1,12 @@
 # GoalPilot MVP Project Report
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-08-23  
-**Purpose:** Define the product shape, technical strategy, security posture, cost model, and future scale path for the first buildable GoalPilot release.  
+**Format target:** No more than three pages when rendered at 11-point type with standard report margins.  
 
 ## Executive recommendation
 
-GoalPilot should return to development as a **simulation-first, provider-ready web application** rather than attempting to launch a regulated financial account in its first release.
-
-The long-term promise remains unchanged:
+GoalPilot should resume development as a **simulation-first, provider-ready web application**. The long-term promise remains:
 
 ```text
 Choose something to save for
@@ -19,89 +17,74 @@ Choose something to save for
 → withdraw the money when the goal is reached
 ```
 
-The MVP will reproduce that experience using clearly labeled simulated funds and versioned illustrative rates. Users will create a purchase goal, compare appropriate interest-bearing vehicle models, activate a simulated plan, add or automatically simulate recurring contributions, observe modeled interest, and track progress until the goal becomes purchase-ready.
+The MVP will reproduce the planning and automation experience with simulated funds and versioned illustrative rates. It will not open accounts, connect banks, transfer money, or present live offers. This is the right first release because it validates whether users understand and value the product while avoiding provider contracts, custody risk, fraud exposure, and premature fixed infrastructure costs.
 
-This is not a superficial prototype. It will be a secure, authenticated, deployed full-stack application with deterministic financial calculations, PostgreSQL persistence, scheduled cloud processing, infrastructure as code, automated tests, and a polished React interface. It deliberately excludes real money movement so the team can validate the user experience and engineering architecture before accepting provider cost, legal obligations, fraud exposure, or custody risk.
+The release will still be a substantive full-stack product: a polished React interface, deterministic financial-domain logic, a Fastify API, PostgreSQL persistence, secure authentication, scheduled cloud processing, AWS infrastructure as code, CI/CD, observability, and cybersecurity evidence.
 
-## What the MVP will look like
+## Product experience
 
-### Customer experience
+A user enters:
 
-A user lands on a focused page explaining that GoalPilot helps make an expensive purchase responsibly. The user enters:
-
-- what they want to buy;
-- the target amount;
-- current savings;
+- purchase goal and optional category;
+- target amount and current savings;
 - purchase deadline;
-- recurring contribution;
-- weekly, biweekly, or monthly cadence;
+- recurring contribution and weekly, biweekly, or monthly cadence;
 - liquidity requirement;
 - capital-preservation preference.
 
 GoalPilot first calculates the zero-interest baseline. It then compares four modeled vehicles:
 
 1. plain cash;
-2. a high-yield savings account model;
-3. a certificate-of-deposit ladder model;
-4. a Treasury-bill ladder model.
+2. high-yield savings;
+3. a certificate-of-deposit ladder;
+4. a Treasury-bill ladder.
 
-Every result separates contributed principal from modeled interest. The system shows the required installment, modeled ending balance, projected completion date, liquidity, assumption version, and reason a vehicle is eligible or rejected. It never recommends the highest yield merely because it is highest.
+Every comparison separates contributed principal from modeled interest and shows the required installment, ending balance, projected completion date, access constraints, assumption version, and eligibility decision. A product that conflicts with the user's deadline or liquidity need remains visible but cannot be recommended.
 
-After signing in, the user can save one active goal and activate a simulated plan. The dashboard displays:
+After authentication, the user can save one active goal and activate a simulated plan. The dashboard shows progress, principal, modeled interest, next contribution, projected completion, contribution history, and the assumption snapshot. Users can add simulated contributions manually or enable **Demo Autopilot**. A scheduled AWS process then creates due simulated contributions, posts modeled interest, recalculates progress, and stops once the goal is purchase-ready.
 
-- progress toward the target;
-- principal contributed;
-- modeled interest earned;
-- next scheduled contribution;
-- projected completion date;
-- contribution history;
-- the exact illustrative assumption used.
+Every plan and projection screen will state:
 
-The user can manually add a simulated contribution or enable **Demo Autopilot**. A scheduled AWS process then creates due simulated contributions, posts modeled interest, updates the projection, and stops automatically when the goal is funded. The user can pause, resume, edit, complete, archive, export, or delete the plan.
+> Educational simulation using illustrative assumptions. GoalPilot does not hold, transfer, or invest money in this MVP. Rates and outcomes are not guaranteed.
 
-Every planning screen will state that the MVP is an educational simulation and does not hold, transfer, or invest money.
+## Scope boundary
 
-### Visual design
+| Included in the MVP | Deferred until after validation |
+|---|---|
+| Public goal preview | Plaid or real bank aggregation |
+| Authenticated goal CRUD | KYC and account opening |
+| Deterministic installment engine | ACH, cards, wires, or withdrawals |
+| Cash, HYSA, CD, and T-bill models | Custody or investment execution |
+| Simulated contribution and interest ledger | Personalized advice, loans, crypto, or staking |
+| Scheduled Demo Autopilot | Live or scraped APYs |
+| Dashboard, history, export, and deletion | Merchant checkout and subscriptions |
+| Deployed AWS application and CI/CD | Native mobile applications |
 
-The web application will use a restrained financial-product visual system rather than a generic dashboard template:
+This is not a disposable prototype. The goal, plan, ledger, and provider boundaries are designed so a future regulated partner can replace simulation adapters without rewriting the user experience or financial-domain model.
 
-- British racing green as the primary brand color;
+## Frontend and design
+
+The web application will use React and TypeScript with a GoalPilot-specific visual system:
+
+- British racing green;
 - warm ivory surfaces;
 - muted gold accents;
-- charcoal typography;
-- generous spacing and a clear numerical hierarchy;
-- accessible cards, forms, progress indicators, tables, and charts;
-- subtle motion that respects reduced-motion settings.
+- high-contrast charcoal typography;
+- generous spacing and clear financial-number hierarchy;
+- responsive cards, forms, progress indicators, tables, and charts;
+- restrained motion with reduced-motion support.
 
-The design system will use free, maintainable resources: Tailwind CSS, shadcn/ui source components, Radix primitives, Lucide icons, Recharts, Motion, and selected Figma Community references for inspiration. GoalPilot will own and adapt its component source instead of depending on a paid template or multiple competing UI libraries.
+Free resources will include Tailwind CSS, shadcn/ui source components, Radix primitives, Lucide icons, Recharts, Motion, and Figma Community references for inspiration. GoalPilot will own and adapt its component source rather than depending on a paid template or several competing UI systems.
 
-The critical flows will target WCAG 2.2 AA, keyboard operation, visible focus, mobile support beginning at 360 pixels, text alternatives for charts, and complete loading, empty, error, stale, and success states.
-
-## Product boundary
-
-The MVP proves the planning and automation experience without pretending to be a bank.
-
-| Included now | Deliberately deferred |
-|---|---|
-| Goal creation and authenticated persistence | Real bank linking or Plaid |
-| Deterministic installment calculations | Account opening and KYC |
-| Illustrative interest-bearing vehicle comparison | ACH, cards, wires, or withdrawals |
-| Simulated contribution and interest ledger | Custody of customer funds |
-| Scheduled Demo Autopilot | Brokerage or Treasury execution |
-| Dashboard, history, export, and deletion | Personalized advice, lending, crypto, or staking |
-| Secure AWS deployment and CI/CD | Live or scraped APYs |
-
-This boundary protects users and keeps the product legally honest. It also prevents provider negotiations from blocking software development.
+Critical flows will target WCAG 2.2 AA, keyboard operation, visible focus, mobile support beginning at 360 pixels, text alternatives for charts, and complete loading, empty, error, stale, and success states.
 
 ## Technical architecture
-
-The MVP will be a TypeScript monorepo with clear module boundaries:
 
 ```text
 React + TypeScript browser
         ↓
 Amazon CloudFront
-        ├── private S3 static origin
+        ├── private S3 web origin
         └── API Gateway HTTP API
                 ↓
         AWS Lambda running Fastify
@@ -115,11 +98,11 @@ Simulation Lambda handler
 Append-only simulated ledger
 ```
 
-Amazon Cognito will provide registration, email verification, password reset, and optional TOTP MFA. The application will use authorization code flow with PKCE and a server-side opaque session so OAuth refresh tokens are not exposed to browser JavaScript.
+Amazon Cognito will provide registration, verification, password reset, and optional TOTP MFA. GoalPilot will use authorization code flow with PKCE and a server-side opaque session so refresh tokens do not enter browser-accessible storage.
 
-The financial domain will be a pure TypeScript package. It will not depend on React, Fastify, PostgreSQL, AWS, environment variables, system time, or provider SDKs. Money will be represented as integer cents. Rates will use basis points or exact decimal arithmetic. Every calculation will receive an explicit processing date and assumption version, making output deterministic and testable.
+The financial engine will be a pure TypeScript package with no React, Fastify, database, AWS, provider, environment, or implicit-clock dependency. Money will use integer cents. Rates will use basis points or exact decimal arithmetic. Equal inputs, assumption version, and processing date will produce equal results.
 
-PostgreSQL will store users, goals, assumption versions, immutable plan versions, simulated accounts, append-only ledger entries, scheduled occurrences, idempotency records, audit events, and privacy requests. The schema will remain standard PostgreSQL so the database can move from Neon to RDS or Aurora without changing the product model.
+PostgreSQL will store users, goals, versioned assumptions, immutable plan versions, simulated accounts, append-only ledger entries, scheduled occurrences, idempotency records, audit events, and privacy requests. The schema will remain ordinary PostgreSQL so it can later move from Neon to RDS or Aurora.
 
 Provider-neutral interfaces will exist from the beginning:
 
@@ -129,71 +112,46 @@ GoalAccountProvider
 FundingProvider
 ```
 
-The MVP will supply static and simulation adapters. A future sponsor-bank or embedded-finance adapter can replace them without rewriting the goal, plan, calculation, or user-interface domains.
+The MVP will implement static and simulation adapters. Future embedded-finance adapters can replace them behind the same contracts.
 
 ## Cost and cloud strategy
 
-The original production design demonstrated substantial AWS knowledge but carried fixed costs from ECS Fargate, an Application Load Balancer, private networking, NAT Gateway, WAF, and RDS. Those services are justified after real financial connectivity or sustained traffic, not before product validation.
+The earlier architecture demonstrated mature AWS design but imposed fixed costs through ECS Fargate, an Application Load Balancer, private networking, NAT Gateway, WAF, and RDS. The revised architecture targets approximately **$0 to $6 per month plus an optional domain** at very small usage:
 
-The revised MVP targets approximately **$0 to $6 per month plus an optional domain** at very small usage:
-
-| Component | Cost posture |
+| Component | MVP cost posture |
 |---|---|
 | S3 and CloudFront | Usually negligible at portfolio traffic |
-| API Gateway and Lambda | Scales to zero; usually within small-usage allowances |
-| Cognito | Targeting free small-user usage |
+| API Gateway and Lambda | Scale to zero and remain usage-based |
+| Cognito | Small-test-user target within included usage |
 | EventBridge Scheduler | Negligible for one low-frequency schedule |
 | Neon PostgreSQL | Free-plan target, subject to provider limits |
-| CloudWatch | Controlled through structured low-volume logs and short retention |
-| SSM Parameter Store | Standard parameters, avoiding per-secret fixed cost |
-| GitHub Actions | Targeting included account allowances |
+| CloudWatch and SSM | Controlled logs and standard parameters |
 
-This figure is a design target, not a promise. AWS free-tier eligibility, database-plan limits, logs, traffic, and pricing can change. AWS Budgets and alarms will be configured before deployment.
+This is a target, not a guarantee. Free-tier eligibility, database limits, logs, traffic, and vendor pricing can change. AWS Budgets and alarms will be configured before deployment.
 
-The architecture still demonstrates cloud competency through S3, CloudFront, API Gateway, Lambda, Cognito, EventBridge, CloudWatch, IAM, STS, CDK, CloudFormation, SSM, and GitHub OIDC. It demonstrates judgment by choosing the least expensive services that satisfy the MVP rather than deploying infrastructure for its own sake.
+The project still demonstrates practical cloud competency through S3, CloudFront, API Gateway, Lambda, Cognito, EventBridge, CloudWatch, IAM, STS, CDK, CloudFormation, SSM, and GitHub OIDC. It demonstrates judgment by selecting services appropriate to the workload rather than maximizing service count.
 
-## Security posture
+## Security and evidence
 
-Cybersecurity is part of the product definition, not a final checklist. The MVP will include:
+The MVP will include:
 
-- server-verified Cognito identity;
-- subject-scoped SQL predicates for every protected record;
-- opaque secure browser sessions;
-- CSRF and Origin validation;
-- strict runtime schemas and unknown-field rejection;
-- parameterized database access;
+- server-verified Cognito identity and subject-scoped SQL;
+- opaque secure sessions, CSRF protection, and Origin validation;
+- strict shared schemas and parameterized database access;
 - idempotency for state-changing operations;
-- append-only simulated financial ledger entries;
-- structured logs with tested redaction;
-- least-privilege IAM;
-- GitHub OIDC instead of static AWS deployment keys;
+- append-only ledger records and immutable plan versions;
+- structured logging with tested redaction;
+- least-privilege IAM and GitHub OIDC rather than static AWS keys;
 - branch protection, CodeQL, Dependabot, dependency review, Gitleaks, production audit, and a CycloneDX SBOM;
-- a maintained data inventory and threat model;
-- export and deletion workflows;
-- automated authorization, accessibility, integration, browser, and infrastructure tests.
+- a data inventory, threat model, audit events, export, and deletion;
+- unit, golden, integration, authorization, accessibility, browser, infrastructure, deployed-smoke, rollback, and restore tests.
 
-The MVP collects no bank credentials, routing numbers, account numbers, SSNs, identity documents, or real transaction data. This sharply reduces the initial breach impact while allowing the team to prove the controls required for later provider integrations.
+The MVP collects no bank credentials, routing or account numbers, SSNs, identity documents, or real transaction data. This keeps initial breach impact low while proving the engineering controls needed before provider integration.
 
-## What this MVP proves
+## Outcome and future path
 
-A completed release will demonstrate that the team can:
+A successful MVP proves that users can create a goal, understand principal versus modeled interest, activate a set-and-forget plan, and return to monitor progress. It also demonstrates full-stack engineering, explainable financial calculations, secure tenant isolation, AWS deployment, scheduled automation, CI/CD, and operational evidence.
 
-1. Turn a financial-product concept into a coherent customer journey.
-2. Build a polished React and TypeScript interface.
-3. Design a deterministic, explainable financial-domain engine.
-4. Operate a Fastify API and PostgreSQL data model securely.
-5. Enforce tenant isolation and auditable state changes.
-6. Deploy and monitor a serverless AWS system through CDK and CI/CD.
-7. Use scheduled cloud processing to create a credible set-and-forget experience.
-8. Apply cybersecurity controls and produce evidence rather than relying on a production-ready label.
-9. Keep the architecture inexpensive today while preserving a direct path to real interest-bearing partner accounts.
+After product validation, GoalPilot can replace the static rate source and simulation providers with approved sandbox adapters. Real connectivity will then add verified webhooks, durable provider commands, reconciliation, provider-authoritative balances, WAF, paid recovery guarantees, external security validation, and legal and commercial approval.
 
-## Future path to real funds
-
-After the MVP demonstrates that users create goals, understand principal versus interest, and return to monitor progress, GoalPilot can begin a provider-sandbox phase. The static rate source can be replaced by an approved rate adapter. The simulated account and funding providers can be replaced by embedded-finance adapters. Real integrations will add verified webhooks, durable provider commands, reconciliation, provider-authoritative balances, and stronger operational and compliance controls.
-
-At that point the team can justify paid infrastructure, WAF, independent security validation, legal review, and partner-program expenses with actual product evidence.
-
-## Recommendation
-
-Build the simulation-first MVP exactly to this boundary. It retains the core product insight, produces an impressive and useful full-stack application, costs almost nothing to operate at early usage, and avoids the mistake of making bank-partner negotiations a prerequisite for learning whether people actually want GoalPilot.
+**Recommendation:** build to this simulation-only boundary. It preserves the core product insight, produces a credible and beautiful portfolio application, costs almost nothing at early usage, and prevents bank-partner negotiations from becoming a prerequisite for learning whether users want GoalPilot.
